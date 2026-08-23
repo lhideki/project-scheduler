@@ -34,13 +34,13 @@ npm run build     # project_scheduler.html を生成（リポジトリ直下に�
 
 - `tasks`: フラット配列。`parentId` によりWBS階層（グループ／リーフタスク）を表現。グループ専用のエンティティは存在せず、共通ヘルパー `isGroupId(tasks, id)` で判定する。
 - `resources`: 担当者（週次・月次の稼働上限を持つ）。
-- `sprints`: `{id, name, theme, startDate, endDate, order}`。タスク側は `sprintId` で単一参照（1タスク=1スプリント、グループには持たせない）。
+- `sprints`: `{id, name, theme, startDate, endDate, order}`。タスク側は `sprintIds`（配列）で複数参照できる（1タスク=複数スプリント可、グループには持たせない）。旧形式の単一 `sprintId` で保存されたデータは読み込み時に `migrateSprintIds()` で自動変換する。
 - `versions`: 任意タイミングのスナップショット（`rawTasks`/`rawResources`/`rawSprints` を保持）。
 
 ### スケジューリングロジック（CPM: クリティカルパス法）
 
 - `runCPM(tasks, cal, projectStart, sprints, opts)`: フォワードパス（ES/EF）とバックワードパス（LS/LF）を計算。
-  - フォワードパスのES計算では、依存関係から求めた開始日に加え、タスクが所属するスプリントの `startDate` を**下限（フロア）**として適用する（後ろ倒しのみ・前倒しはしない）。
+  - フォワードパスのES計算では、依存関係から求めた開始日に加え、タスクが所属する（複数可の）スプリントのうち最も早い `startDate` を**下限（フロア）**として適用する（共通ヘルパー `earliestSprintFloor()`、後ろ倒しのみ・前倒しはしない）。
   - 進捗率が入力済み（`progress > 0`、＝着手済み）のタスクは、`opts.respectManualPins` の値に関わらず常に現在の開始日をES算出の起点として固定する（自動スケジューリングの対象外）。
   - 表示スケジュール（`schedStart`/`schedFinish`）は、**固定マイルストーン自身（fixedDateに固定表示する必要があるタスク）だけ**バックワードパス（LS/LF）を使う。それ以外のタスク（固定マイルストーンに辿り着く依存チェーン上のタスクを含む）は、モード・`opts.respectManualPins`・進捗率に関わらず常にフォワードパス（ES/EF）を使う。
   - この設計により、マイルストーンを柔軟⇔固定に切り替えただけ（＝「自動スケジューリング実行」を押す前）では、固定マイルストーン自身の日付が表示されるだけで、それ以外のタスクの表示日程は一切変化しない。以前は依存チェーン上のタスクもバックワードパスを使っており、マイルストーンを固定にした瞬間に手前のタスクの表示日程が後ろ倒しに「引っ張られる」問題があったため、この形に変更した（意図的な設計変更。元に戻さないこと）。
@@ -49,7 +49,7 @@ npm run build     # project_scheduler.html を生成（リポジトリ直下に�
 - `levelResources(tasks, cpmResult, resources, cal, sprints)`: Serial SGS方式のリソース平準化。`minStart` にCPMと同じスプリントフロアを適用している。進捗率が入力済みのタスクは平準化の対象外とし、現在の開始日に固定する（依存関係・スプリント・リソース競合による調整を行わない）。
 - `float = workdaysBetween(ES, LS)`、`critical = float <= 0`。
   - 注意: スプリント開始日を実際の計算済み開始日に近づけて設定すると、そのタスクのESが押し上げられてfloatが縮小し、`critical` 判定が変わることがある（表示上のschedStart/schedFinish自体は変わらない）。これは仕様上の既知の挙動であり、バグではない。
-- スプリント矛盾検出（`sprintConflicts` useMemo）: 最終的な表示スケジュールがタスクの所属スプリント期間からはみ出していないかを判定し、はみ出していればヘッダーのアラートアイコン（`AlertTriangle`）経由でダイアログに一覧表示する。既存のリソース平準化警告（`levelWarnings`、固定マイルストーンの期日超過専用）とは別建てのUI。
+- スプリント矛盾検出（`sprintConflicts` useMemo）: 最終的な表示スケジュールがタスクの所属スプリント期間からはみ出していないかを判定し、はみ出していればヘッダーのアラートアイコン（`AlertTriangle`）経由でダイアログに一覧表示する。複数スプリントが紐付く場合は、それらの期間の和集合（最も早い開始日〜最も遅い終了日）を基準に判定する。既存のリソース平準化警告（`levelWarnings`、固定マイルストーンの期日超過専用）とは別建てのUI。
 
 ### UIレイアウト（WBS/ガント画面）
 
@@ -66,6 +66,11 @@ npm run build     # project_scheduler.html を生成（リポジトリ直下に�
 - ドラッグ操作は `startPointerDrag`、グループ判定・ロールアップ・日付スケール・SVG座標変換・依存関係ラベルは `isGroupId`/`rollupSummaries`/`makeDateScale`/`svgPointFromRef`/`formatDepLabel` の各共通ヘルパーを再利用し、ローカルに再定義しないこと。
 - JSON エクスポート/インポート、バージョンスナップショットは `tasks`/`resources`/`sprints` すべてを含める。新しいトップレベルstateを追加した場合は、両方の入出力パスと `seedData()` を更新すること（インポート側は後方互換のため、キーが無ければ空配列にフォールバックする）。
 - 依存パッケージのバージョンは `package.json` を正とする。
+
+## コミットメッセージ
+
+- セマンティックコミット形式（`feat:`/`fix:`/`refactor:`/`docs:`/`chore:` 等のprefixを付ける）で書くこと。
+- タイトル・本文とも日本語の「ですます調・過去形」（例:「〜しました」「〜変更しました」）で書くこと。「〜する」「〜変更する」のような常体・現在形は使わないこと。
 
 ## 動作確認方法
 

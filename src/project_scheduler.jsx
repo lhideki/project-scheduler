@@ -37,7 +37,7 @@ import {
  * @property {string} [startDate] - 開始日（YYYY-MM-DD）。手入力またはCPM/平準化による書き戻し
  * @property {number} [duration] - 工数（人日、小数可）。マイルストーンは常に0
  * @property {string|null} [assigneeId] - 担当リソースのID
- * @property {string|null} [sprintId] - 紐付けるスプリントのID（グループには設定しない）
+ * @property {string[]} [sprintIds] - 紐付けるスプリントのID一覧（複数可、グループには設定しない）
  * @property {number} [progress] - 進捗率（0〜100）。>0 は着手済み扱いで自動スケジューリング対象外
  * @property {Dependency[]} [predecessors] - 先行タスク一覧（グループに設定すると配下リーフに伝播する）
  * @property {boolean} [milestone] - マイルストーンかどうか
@@ -311,6 +311,21 @@ function formatDeps(deps, idToNo) {
 let uidCounter = 1;
 function uid(prefix) { return `${prefix}_${(uidCounter++).toString(36)}_${Math.random().toString(36).slice(2, 7)}`; }
 
+/**
+ * 旧形式（単一スプリントの `sprintId`）で保存されたタスク配列を、現行の `sprintIds`（配列）形式に変換する。
+ * `sprintIds` が既に存在するタスクはそのまま通す。localStorageからの読み込み・バージョン復元・JSONインポートの
+ * 3箇所すべてで通す必要がある（後方互換のため。新形式のみを正とする設計に統一はしない）。
+ * @param {Task[]} tasks
+ * @returns {Task[]}
+ */
+function migrateSprintIds(tasks) {
+  return (tasks || []).map(t => {
+    if (Array.isArray(t.sprintIds)) return t;
+    if (t.sprintId) { const { sprintId, ...rest } = t; return { ...rest, sprintIds: [sprintId] }; }
+    return t;
+  });
+}
+
 /** id が「グループ（配下に子タスクを持つ親タスク）」かどうかを判定する。
  *  グループ専用のエンティティは存在せず、他のタスクから parentId で参照されているかだけで判定する。
  * @param {Task[]} tasks
@@ -477,6 +492,25 @@ function effectivePredecessors(byId, leaf) {
 }
 
 /**
+ * タスクに紐付く複数スプリントのうち、最も早い開始日（稼働日補正済み）を「希望開始日の下限」として返す。
+ * 紐付くスプリントが無い／いずれも開始日未設定の場合は null。runCPM・levelResources で共通利用する。
+ * @param {string[]|undefined} sprintIds
+ * @param {Record<string, Sprint>} sprintById
+ * @param {Calendar} cal
+ * @returns {string|null}
+ */
+function earliestSprintFloor(sprintIds, sprintById, cal) {
+  let floor = null;
+  (sprintIds || []).forEach(id => {
+    const sp = sprintById[id];
+    if (!sp || !sp.startDate) return;
+    const f = cal.snapForward(sp.startDate);
+    if (floor === null || f < floor) floor = f;
+  });
+  return floor;
+}
+
+/**
  * tasks: フラット配列（親子とも含む）。leafのみが依存関係・工数を持つ。
  * グループ（親タスク）を先行タスクとして参照した場合は、そのグループのロールアップ区間
  * （配下タスクの最早/最遅）を使って解決する。ロールアップは配下タスクの日程が決まらないと
@@ -583,11 +617,10 @@ function runCPM(tasks, cal, projectStart, sprints, opts = {}) {
       // スプリントは依存関係・固定マイルストーンより優先度が低い「希望開始日の下限」として扱う。
       // 依存関係から求めた開始日（best）がスプリント開始日より前の場合のみ、スプリント開始日まで後ろ倒しする
       // （後ろ倒しのみ・前倒しはしない）。バックワードパス（LS/LF、固定マイルストーンの逆算）には一切関与しない。
-      const sp = t.sprintId ? sprintById[t.sprintId] : null;
-      if (sp && sp.startDate) {
-        const sprintFloor = cal.snapForward(sp.startDate);
-        if (sprintFloor > start) start = sprintFloor;
-      }
+      // 複数スプリントが紐付いている場合は、そのうち最も早い開始日を下限として使う
+      // （タスクは最も早く割り当てられたスプリントの開始と同時に着手できる、という扱い）。
+      const sprintFloor = earliestSprintFloor(t.sprintIds, sprintById, cal);
+      if (sprintFloor && sprintFloor > start) start = sprintFloor;
       ES[id] = start;
       EF[id] = t.duration <= 0 ? start : cal.endFromStart(start, t.duration);
     });
@@ -841,11 +874,9 @@ function levelResources(tasks, cpmResult, resources, cal, sprints) {
       minStart = task.startDate ? cal.snapForward(task.startDate) : (cpmResult.get(id)?.ES || cal.snapForward(toISO(new Date())));
     }
     // CPMと同様、スプリント開始日は依存関係より優先度の低い下限として扱う（後ろ倒しのみ）。
-    const sp = task.sprintId ? sprintById[task.sprintId] : null;
-    if (sp && sp.startDate) {
-      const sprintFloor = cal.snapForward(sp.startDate);
-      if (sprintFloor > minStart) minStart = sprintFloor;
-    }
+    // 複数スプリントが紐付いている場合は、そのうち最も早い開始日を下限として使う。
+    const sprintFloor = earliestSprintFloor(task.sprintIds, sprintById, cal);
+    if (sprintFloor && sprintFloor > minStart) minStart = sprintFloor;
 
     let start = cal.snapForward(minStart);
     if (task.assigneeId && task.duration > 0 && resById[task.assigneeId]) {
@@ -1010,18 +1041,18 @@ function seedData() {
 
   const tasks = [
     { id: g1, name: "要件定義", parentId: null, order: 0 },
-    { id: t1, name: "業務要件ヒアリング", parentId: g1, order: 0, startDate: base, duration: 5, assigneeId: r1, sprintId: sp1, predecessors: [] },
-    { id: t2, name: "要件定義書作成", parentId: g1, order: 1, startDate: base, duration: 3, assigneeId: r2, sprintId: sp1, predecessors: [{ id: t1, type: "FS", lag: 0 }] },
-    { id: t3, name: "要件レビュー", parentId: g1, order: 2, startDate: base, duration: 2, assigneeId: r3, sprintId: sp2, predecessors: [{ id: t2, type: "FS", lag: 1 }] },
+    { id: t1, name: "業務要件ヒアリング", parentId: g1, order: 0, startDate: base, duration: 5, assigneeId: r1, sprintIds: [sp1], predecessors: [] },
+    { id: t2, name: "要件定義書作成", parentId: g1, order: 1, startDate: base, duration: 3, assigneeId: r2, sprintIds: [sp1], predecessors: [{ id: t1, type: "FS", lag: 0 }] },
+    { id: t3, name: "要件レビュー", parentId: g1, order: 2, startDate: base, duration: 2, assigneeId: r3, sprintIds: [sp2], predecessors: [{ id: t2, type: "FS", lag: 1 }] },
 
     { id: g2, name: "設計", parentId: null, order: 1 },
-    { id: t4, name: "基本設計", parentId: g2, order: 0, startDate: base, duration: 6, assigneeId: r2, sprintId: sp2, predecessors: [{ id: t3, type: "FS", lag: 0 }] },
-    { id: t5, name: "詳細設計", parentId: g2, order: 1, startDate: base, duration: 5, assigneeId: r3, sprintId: sp2, predecessors: [{ id: t4, type: "SS", lag: 2 }] },
-    { id: m1, name: "設計完了", parentId: g2, order: 2, startDate: base, duration: 0, milestone: true, milestoneMode: "flexible", sprintId: sp3, predecessors: [{ id: t4, type: "FS", lag: 0 }, { id: t5, type: "FS", lag: 0 }] },
+    { id: t4, name: "基本設計", parentId: g2, order: 0, startDate: base, duration: 6, assigneeId: r2, sprintIds: [sp2], predecessors: [{ id: t3, type: "FS", lag: 0 }] },
+    { id: t5, name: "詳細設計", parentId: g2, order: 1, startDate: base, duration: 5, assigneeId: r3, sprintIds: [sp2, sp3], predecessors: [{ id: t4, type: "SS", lag: 2 }] },
+    { id: m1, name: "設計完了", parentId: g2, order: 2, startDate: base, duration: 0, milestone: true, milestoneMode: "flexible", sprintIds: [sp3], predecessors: [{ id: t4, type: "FS", lag: 0 }, { id: t5, type: "FS", lag: 0 }] },
 
     { id: g3, name: "開発・テスト", parentId: null, order: 2 },
-    { id: t6, name: "実装", parentId: g3, order: 0, startDate: base, duration: 10, assigneeId: r1, sprintId: sp3, predecessors: [{ id: m1, type: "FS", lag: 0 }] },
-    { id: t7, name: "結合テスト", parentId: g3, order: 1, startDate: base, duration: 4, assigneeId: r3, sprintId: sp3, predecessors: [{ id: t6, type: "FS", lag: -2 }] },
+    { id: t6, name: "実装", parentId: g3, order: 0, startDate: base, duration: 10, assigneeId: r1, sprintIds: [sp3], predecessors: [{ id: m1, type: "FS", lag: 0 }] },
+    { id: t7, name: "結合テスト", parentId: g3, order: 1, startDate: base, duration: 4, assigneeId: r3, sprintIds: [sp3], predecessors: [{ id: t6, type: "FS", lag: -2 }] },
     { id: m2, name: "リリース", parentId: g3, order: 2, startDate: base, duration: 0, milestone: true, milestoneMode: "fixed", fixedDate: cal_addDaysISO(base, 55), predecessors: [{ id: t7, type: "FS", lag: 0 }] },
   ];
   const resources = [
@@ -1829,13 +1860,9 @@ function WBSGanttView({
                 </div>
                 <div style={{ width: colWidths.sprint }} className="px-1">
                   {!isSummary && !t.hasChildren && (
-                    <select value={t.sprintId || ""} onChange={e => updateTask(t.id, { sprintId: e.target.value || null })}
-                      title="紐付けるスプリント"
-                      ref={cellRefCallback(sprintInputRefs, t.id)} onKeyDown={cellArrowKeyDown(sprintInputRefs, t.id)}
-                      className="bg-transparent outline-none w-full text-[11px]">
-                      <option value="">—</option>
-                      {sprints.map(sp => <option key={sp.id} value={sp.id}>{sp.name}</option>)}
-                    </select>
+                    <SprintMultiSelect sprintIds={t.sprintIds} sprints={sprints}
+                      onChange={next => updateTask(t.id, { sprintIds: next })}
+                      inputRef={cellRefCallback(sprintInputRefs, t.id)} onKeyDown={cellArrowKeyDown(sprintInputRefs, t.id)} />
                   )}
                 </div>
                 <div style={{ width: colWidths.progress }} className="px-1">
@@ -2219,16 +2246,31 @@ function TaskDetailModal({ task, schedule, tasks, resources, sprints, idToNo, no
 
           {!isSummary && (
             <div>
-              <label className="block text-[11px] text-slate-500 mb-1">スプリント</label>
-              <select value={task.sprintId || ""} onChange={e => onUpdate({ sprintId: e.target.value || null })}
-                className="w-full border border-slate-200 rounded-md px-2.5 py-1.5 text-sm outline-none focus:border-indigo-400">
-                <option value="">未割当</option>
-                {sprints.map(sp => (
-                  <option key={sp.id} value={sp.id}>
-                    {sp.name}{sp.startDate && sp.endDate ? `（${fmtMD(sp.startDate)}〜${fmtMD(sp.endDate)}）` : ""}
-                  </option>
-                ))}
-              </select>
+              <label className="block text-[11px] text-slate-500 mb-1">スプリント（複数選択可）</label>
+              {sprints.length === 0 ? (
+                <div className="text-xs text-slate-400">スプリントが登録されていません</div>
+              ) : (
+                <div className="border border-slate-200 rounded-md divide-y divide-slate-100 max-h-40 overflow-y-auto">
+                  {sprints.map(sp => {
+                    const checked = (task.sprintIds || []).includes(sp.id);
+                    return (
+                      <label key={sp.id} className="flex items-center gap-2 px-2.5 py-1.5 text-sm cursor-pointer hover:bg-slate-50">
+                        <input type="checkbox" checked={checked} onChange={e => {
+                          const cur = task.sprintIds || [];
+                          const next = e.target.checked ? [...cur, sp.id] : cur.filter(id => id !== sp.id);
+                          onUpdate({ sprintIds: next });
+                        }} />
+                        <span>
+                          {sp.name}
+                          {sp.startDate && sp.endDate && (
+                            <span className="text-slate-400">（{fmtMD(sp.startDate)}〜{fmtMD(sp.endDate)}）</span>
+                          )}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 
@@ -2332,6 +2374,47 @@ function DepInput({ deps, idToNo, noToId, onChange, inputRef, onKeyDown }) {
       onKeyDown={onKeyDown}
       className="bg-transparent outline-none w-full font-mono text-[11px] border-b border-transparent focus:border-indigo-300"
     />
+  );
+}
+
+/** WBS表のスプリント欄用のコンパクトな複数選択ドロップダウン（ボタン＋チェックボックス一覧）。 */
+function SprintMultiSelect({ sprintIds, sprints, onChange, inputRef, onKeyDown }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    function onDocPointerDown(e) { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); }
+    document.addEventListener("mousedown", onDocPointerDown);
+    return () => document.removeEventListener("mousedown", onDocPointerDown);
+  }, [open]);
+  const ids = sprintIds || [];
+  const selected = sprints.filter(sp => ids.includes(sp.id));
+  const label = selected.length === 0 ? "—" : selected.map(sp => sp.name).join(", ");
+  function toggle(id) {
+    onChange(ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id]);
+  }
+  return (
+    <div ref={wrapRef} className="relative">
+      <button type="button" ref={inputRef}
+        onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen(o => !o); } onKeyDown && onKeyDown(e); }}
+        onClick={() => setOpen(o => !o)}
+        title={selected.length ? selected.map(sp => sp.name).join("\n") : "紐付けるスプリント"}
+        className="w-full text-left bg-transparent outline-none text-[11px] truncate hover:bg-slate-100 rounded px-0.5 text-slate-700">
+        {label}
+      </button>
+      {open && (
+        <div className="absolute z-30 top-full left-0 mt-1 w-44 max-h-56 overflow-y-auto bg-white border border-slate-200 rounded-md shadow-lg py-1"
+          onClick={e => e.stopPropagation()}>
+          {sprints.length === 0 && <div className="px-2.5 py-1.5 text-[11px] text-slate-400">スプリントがありません</div>}
+          {sprints.map(sp => (
+            <label key={sp.id} className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] hover:bg-slate-50 cursor-pointer">
+              <input type="checkbox" checked={ids.includes(sp.id)} onChange={() => toggle(sp.id)} />
+              <span className="truncate">{sp.name}</span>
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -2800,7 +2883,7 @@ function SprintsView({ sprints, setSprints, tasks, requestConfirm }) {
 
   const taskCountOf = useMemo(() => {
     const m = new Map();
-    tasks.forEach(t => { if (t.sprintId) m.set(t.sprintId, (m.get(t.sprintId) || 0) + 1); });
+    tasks.forEach(t => (t.sprintIds || []).forEach(id => m.set(id, (m.get(id) || 0) + 1)));
     return m;
   }, [tasks]);
 
@@ -3108,7 +3191,7 @@ export default function App() {
     (async () => {
       const proj = await storageGet("pm_project");
       if (proj && proj.tasks && proj.tasks.length) {
-        setTasks(proj.tasks);
+        setTasks(migrateSprintIds(proj.tasks));
         setResources(proj.resources || seed.resources);
         // 旧バージョンのデータ（sprints未対応）を開いた場合は空配列にフォールバックする。
         setSprints(Array.isArray(proj.sprints) ? proj.sprints : []);
@@ -3212,7 +3295,7 @@ export default function App() {
     requestConfirm(
       `現在の内容を破棄し、バージョン「${v.name}」（${new Date(v.createdAt).toLocaleString("ja-JP")}）の状態に戻します。よろしいですか？`,
       () => {
-        setTasks(JSON.parse(JSON.stringify(v.rawTasks)));
+        setTasks(migrateSprintIds(JSON.parse(JSON.stringify(v.rawTasks))));
         setResources(JSON.parse(JSON.stringify(v.rawResources)));
         setSprints(Array.isArray(v.rawSprints) ? JSON.parse(JSON.stringify(v.rawSprints)) : []);
         setSelectedId(null);
@@ -3255,7 +3338,7 @@ export default function App() {
       return;
     }
     requestConfirm("現在のタスク・担当者を、読み込んだ内容で置き換えます。よろしいですか？", async () => {
-      setTasks(data.tasks);
+      setTasks(migrateSprintIds(data.tasks));
       setResources(data.resources);
       setSprints(Array.isArray(data.sprints) ? data.sprints : []);
       setSelectedId(null);
@@ -3284,24 +3367,30 @@ export default function App() {
     const wbsNoById = {}; buildFlatList(tasks, new Set()).forEach(t => (wbsNoById[t.id] = t.wbsNo));
     const out = [];
     tasks.forEach(t => {
-      if (!t.sprintId) return;
+      const ids = t.sprintIds || [];
+      if (!ids.length) return;
       if (isGroupId(tasks, t.id)) return; // グループにはスプリントを紐付けない
-      const sp = sprintById[t.sprintId];
-      if (!sp || !sp.startDate || !sp.endDate) return; // 削除済み・未設定のスプリント参照は対象外
+      // 複数スプリントが紐付いている場合は、それらの期間の和集合（最も早い開始日〜最も遅い終了日）に
+      // 収まっているかを判定する（タスクが複数スプリントにまたがること自体は許容するため）。
+      const sps = ids.map(id => sprintById[id]).filter(sp => sp && sp.startDate && sp.endDate);
+      if (!sps.length) return; // 削除済み・未設定のスプリント参照のみの場合は対象外
+      const rangeStart = sps.reduce((mn, sp) => (sp.startDate < mn ? sp.startDate : mn), sps[0].startDate);
+      const rangeEnd = sps.reduce((mx, sp) => (sp.endDate > mx ? sp.endDate : mx), sps[0].endDate);
       const s = schedule.get(t.id);
       if (!s || !s.schedStart || !s.schedFinish) return;
       const reasons = [];
-      if (s.schedStart < sp.startDate) {
-        reasons.push(`開始日（${fmtJP(s.schedStart)}）がスプリント開始日（${fmtJP(sp.startDate)}）より前になっています`);
+      if (s.schedStart < rangeStart) {
+        reasons.push(`開始日（${fmtJP(s.schedStart)}）がスプリント開始日（${fmtJP(rangeStart)}）より前になっています`);
       }
-      if (s.schedFinish > sp.endDate) {
-        reasons.push(`終了日（${fmtJP(s.schedFinish)}）がスプリント終了日（${fmtJP(sp.endDate)}）を超えています`);
+      if (s.schedFinish > rangeEnd) {
+        reasons.push(`終了日（${fmtJP(s.schedFinish)}）がスプリント終了日（${fmtJP(rangeEnd)}）を超えています`);
       }
       if (!reasons.length) return;
       if (s.governed) {
         reasons.push("固定マイルストーンの期日が優先されているため、スプリント期間内に収まりません");
       }
-      out.push({ taskId: t.id, name: t.name, wbsNo: wbsNoById[t.id] || "", sprintName: sp.name || sp.theme || "（無題のスプリント）", reasons });
+      const sprintName = sps.map(sp => sp.name || sp.theme || "（無題のスプリント）").join("、");
+      out.push({ taskId: t.id, name: t.name, wbsNo: wbsNoById[t.id] || "", sprintName, reasons });
     });
     out.sort((a, b) => (a.wbsNo || "").localeCompare(b.wbsNo || "", undefined, { numeric: true }));
     return out;
