@@ -4,9 +4,7 @@
 
 ## プロジェクト概要
 
-依存関係・マイルストーン・スプリントを考慮した自動スケジューリング機能を持つ、単一HTMLで動くWBS/ガントチャート型のプロジェクト管理ツール。React 19 + Tailwind CSS + lucide-react + recharts で書かれた単一ファイルのReactアプリを、ビルドして1つの `project_scheduler.html` に埋め込み、サーバーなし・ローカルブラウザで完結する形で配布する。
-
-- 編集対象のソースは `src/project_scheduler.jsx`（App本体、全コンポーネント、CPMロジック、状態管理を含む）。
+依存関係・マイルストーン・スプリントを考慮した自動スケジューリング機能を持つ、単一HTMLで動くWBS/ガントチャート型のプロジェクト管理ツール。React 19 + Tailwind CSS + lucide-react + recharts で書かれたReactアプリを、ビルドして1つの `project_scheduler.html` に埋め込み、サーバーなし・ローカルブラウザで完結する形で配布する（配布形態が単一HTMLというだけで、編集対象のソース自体は複数ファイルに分割されている。詳細は「ソース構成」参照）。
 - サーバー・アカウント登録なし。データは `window.storage`（localStorageベース）でブラウザにローカル保存する。
 
 ## ビルドコマンド
@@ -26,7 +24,35 @@ npm run build     # project_scheduler.html を生成（リポジトリ直下に�
 
 `npm run dev:js` で `dist/bundle.dev.js` を watch モードでビルドできる（非minify、デバッグ用）。ただし現状 `template.html` は本番ビルドのプレースホルダー差し込み専用なので、開発中の動作確認は `dist/bundle.dev.js` を手元のHTMLから読み込むか、`npm run build` を都度実行して `project_scheduler.html` をブラウザで開いて確認する。
 
-**重要**: ソース（`src/project_scheduler.jsx`）を編集したら、必ず `npm run build` を実行してから `project_scheduler.html` の差分も一緒にコミットすること。`project_scheduler.html` を手で直接編集しない（ビルド成果物のため、次回ビルドで上書きされる）。
+**重要**: `src/` 配下のソースを編集したら、必ず `npm run build` を実行してから `project_scheduler.html` の差分も一緒にコミットすること。`project_scheduler.html` を手で直接編集しない（ビルド成果物のため、次回ビルドで上書きされる）。
+
+## ソース構成
+
+`src/` はReact非依存の純粋ロジック（`lib/`）とReactコンポーネント（`components/`・`App.jsx`）を分けて配置している。これは「動作を変えないための機械的な分割」であり、単一ファイル時代からロジックの中身は変わっていない。
+
+```
+src/
+  App.jsx              # 状態管理・配線の中心（旧project_scheduler.jsxのApp本体）
+  entry.jsx            # createRoot によるマウントのみ
+  constants.js          # WBS/ガントのレイアウト定数（ROW_H・DEFAULT_WBS_COLS等）
+  storage.js             # window.storage ラッパー（localStorageポリフィル）
+  lib/                    # React/DOM非依存の純粋ロジック（ユニットテスト対象）
+    calendar.js             # 祝日計算・稼働日カレンダー
+    deps.js                  # 依存関係の文字列パーサ（3FS+2 等）
+    taskTree.js               # WBSツリー・ヘルパー（isGroupId/buildFlatList等）
+    scheduling.js              # CPMエンジン（runCPM）・リソース平準化（levelResources）
+    sprints.js                  # スプリント配色・期間重複検出
+    exportUtils.js               # JSON/Mermaidエクスポート
+    seedData.js                   # サンプルデータ
+    *.test.js                     # 上記各モジュールに対応するVitestユニットテスト
+  dom/
+    pointerDrag.js         # ポインタドラッグ・SVG座標変換・日付スケール（DOM API依存のため lib/ とは別）
+  components/
+    WBSGanttView.jsx、TaskDetailModal.jsx、NetworkView.jsx、ResourceView.jsx、
+    SprintsView.jsx、VersionsView.jsx、IconBtn.jsx、Tab.jsx 他             # Reactコンポーネント
+```
+
+新しい純粋ロジック（日付計算・依存関係解決・スケジューリング・データ変換など、Reactやブラウザ固有APIに依存しない処理）を追加する場合は `src/lib/` に置き、対応する `*.test.js` を書くこと。DOM/ブラウザAPI（`window`・`document`・ポインタイベント等）に依存するが React 非依存のヘルパーは `src/dom/` に置く。Reactコンポーネントは `src/components/` に1コンポーネント1ファイルで置く。
 
 ## アーキテクチャ
 
@@ -58,14 +84,26 @@ npm run build     # project_scheduler.html を生成（リポジトリ直下に�
 
 ### 永続化・window.storage
 
-`window.storage` は本来ホスト環境（Claudeのアーティファクト実行環境など）が提供するAPI。このリポジトリでは未定義の場合のみ localStorage ベースのポリフィルを用意している（実装・優先順位ロジックは `src/project_scheduler.jsx` の「window.storageラッパー」セクション参照）。ホスト側の `window.storage` を上書きしてしまわないよう、この優先順位は変更しないこと。
+`window.storage` は本来ホスト環境（Claudeのアーティファクト実行環境など）が提供するAPI。このリポジトリでは未定義の場合のみ localStorage ベースのポリフィルを用意している（実装・優先順位ロジックは `src/storage.js` 参照）。ホスト側の `window.storage` を上書きしてしまわないよう、この優先順位は変更しないこと。
 
 ## コーディング上の注意
 
-- `src/project_scheduler.jsx` は単一ファイル構成を維持する（別ファイルへの分割は現状想定していない）。
-- ドラッグ操作は `startPointerDrag`、グループ判定・ロールアップ・日付スケール・SVG座標変換・依存関係ラベルは `isGroupId`/`rollupSummaries`/`makeDateScale`/`svgPointFromRef`/`formatDepLabel` の各共通ヘルパーを再利用し、ローカルに再定義しないこと。
-- JSON エクスポート/インポート、バージョンスナップショットは `tasks`/`resources`/`sprints` すべてを含める。新しいトップレベルstateを追加した場合は、両方の入出力パスと `seedData()` を更新すること（インポート側は後方互換のため、キーが無ければ空配列にフォールバックする）。
+- ロジック（`src/lib/`・`src/dom/`）とUIコンポーネント（`src/components/`・`src/App.jsx`）の分離を維持する。CPMロジックやWBSツリー処理などをReactコンポーネントの中に書き戻さないこと。
+- ドラッグ操作は `startPointerDrag`（`src/dom/pointerDrag.js`）、グループ判定・ロールアップは `isGroupId`/`rollupSummaries`（`src/lib/taskTree.js`・`src/lib/scheduling.js`）、日付スケール・SVG座標変換は `makeDateScale`/`svgPointFromRef`（`src/dom/pointerDrag.js`）、依存関係ラベルは `formatDepLabel`（`src/lib/deps.js`）の各共通ヘルパーを再利用し、コンポーネント内にローカルに再定義しないこと。
+- JSON エクスポート/インポート、バージョンスナップショットは `tasks`/`resources`/`sprints` すべてを含める。新しいトップレベルstateを追加した場合は、両方の入出力パスと `seedData()`（`src/lib/seedData.js`）を更新すること（インポート側は後方互換のため、キーが無ければ空配列にフォールバックする）。
 - 依存パッケージのバージョンは `package.json` を正とする。
+
+## ユニットテスト
+
+`src/lib/` 配下の純粋ロジック（CPMエンジン・カレンダー計算・依存関係パーサ・WBSツリー処理・エクスポート処理等）はVitestでユニットテストされている（各モジュールと同じディレクトリの `*.test.js`）。
+
+```bash
+npm run test        # 一括実行（CI・コミット前用）
+npm run test:watch  # watchモード（開発中）
+```
+
+- `src/lib/` に新しい純粋ロジックを追加・変更した場合は、対応する `*.test.js` を必ず追加・更新すること。特に `runCPM`/`levelResources`（`scheduling.js`）はCLAUDE.mdに明文化された仕様（固定マイルストーンのみLS/LFを使う、進捗済みタスクはピン留めする等）の回帰を防ぐ最重要テスト対象なので、挙動を変える変更をした場合は既存テストが仕様変更を正しく反映しているか必ず確認する。
+- `src/components/`・`src/App.jsx`（Reactコンポーネント）はユニットテストの対象外。次節の手動確認で担保する。
 
 ## コミットメッセージ
 
@@ -74,7 +112,7 @@ npm run build     # project_scheduler.html を生成（リポジトリ直下に�
 
 ## 動作確認方法
 
-自動テストは未整備。変更後は `npm run build` した `project_scheduler.html` をブラウザ（またはPlaywright）で直接開き、以下を目視・手動確認する。
+変更後は `npm run test` を実行してユニットテストが全件パスすることを確認したうえで、`npm run build` した `project_scheduler.html` をブラウザ（またはPlaywright）で直接開き、以下を目視・手動確認する。
 
 - コンソールエラーが出ていないこと
 - サンプルデータ（`seedData()`）を開いた状態でスプリント矛盾アラート・スプリント期間重複警告が出ないこと
