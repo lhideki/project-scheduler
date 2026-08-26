@@ -4,7 +4,7 @@ import {
   PROJECT_SCHEMA_VERSION,
   buildProjectExport,
   normalizeImportedProject,
-  normalizeVersionSnapshots,
+  normalizeProjectVersions,
   escapeMermaidText,
   toMermaidId,
   generateMermaidGantt,
@@ -31,7 +31,7 @@ describe("buildProjectExport", () => {
     const tasks = [{ id: "t1", name: "Task", parentId: null, order: 0, sprintIds: ["sp1"] }];
     const resources = [{ id: "r1", name: "担当者", weeklyCapacity: 5, monthlyCapacity: 20 }];
     const sprints = [{ id: "sp1", name: "Sprint 1", startDate: "2024-01-01", endDate: "2024-01-12", order: 0 }];
-    const versions = [{ id: "v1", name: "v1", createdAt: 1, tasks: [], hasWbsInfo: true }];
+    const versions = [{ id: "v1", name: "v1", createdAt: 1, tasks: [], hasWbsInfo: true, rawTasks: [], rawResources: [], rawSprints: [], hasFullSnapshot: true }];
     const out = buildProjectExport(tasks, resources, sprints, versions);
 
     expect(out.schemaVersion).toBe(PROJECT_SCHEMA_VERSION);
@@ -39,52 +39,58 @@ describe("buildProjectExport", () => {
     expect(out.tasks).toEqual(tasks);
     expect(out.resources).toEqual(resources);
     expect(out.sprints).toEqual(sprints);
-    expect(out.versions).toEqual([{ ...versions[0], tasks: [], hasFullSnapshot: false }]);
+    expect(out.versions).toEqual(versions);
 
     tasks[0].name = "changed";
     expect(out.tasks[0].name).toBe("Task");
   });
 });
 
-describe("normalizeVersionSnapshots", () => {
-  it("旧形式バージョンでは hasFullSnapshot を false に揃える", () => {
-    expect(normalizeVersionSnapshots([{ id: "v1", name: "old", createdAt: 1, tasks: [{}], hasWbsInfo: true }])).toEqual([
-      { id: "v1", name: "old", createdAt: 1, tasks: [{}], hasWbsInfo: true, hasFullSnapshot: false },
-    ]);
-  });
-
-  it("rawTasks 内の旧 sprintId を sprintIds へ移行する", () => {
-    const out = normalizeVersionSnapshots([{
+describe("normalizeProjectVersions", () => {
+  it("full snapshot の有無から hasFullSnapshot を再計算する", () => {
+    const out = normalizeProjectVersions([{
       id: "v1",
       name: "full",
       createdAt: 1,
       tasks: [],
       hasWbsInfo: true,
-      rawTasks: [{ id: "t1", name: "Task", parentId: null, order: 0, sprintId: "sp1" }],
+      rawTasks: [{ id: "t1", name: "Task", parentId: null, order: 0, sprintIds: ["sp1"] }],
       rawResources: [],
       rawSprints: [],
     }]);
     expect(out[0].hasFullSnapshot).toBe(true);
     expect(out[0].rawTasks).toEqual([{ id: "t1", name: "Task", parentId: null, order: 0, sprintIds: ["sp1"] }]);
   });
+
+  it("オブジェクトでない version 要素は拒否する", () => {
+    expect(() => normalizeProjectVersions([null])).toThrow("invalid_project_json");
+  });
 });
 
 describe("normalizeImportedProject", () => {
-  it("旧形式のJSONでは sprints/versions を空配列へフォールバックする", () => {
+  it("現行形式のJSONをそのまま受け付ける", () => {
     const out = normalizeImportedProject({
-      tasks: [{ id: "t1", name: "Task", parentId: null, order: 0, sprintId: "sp1" }],
+      schemaVersion: PROJECT_SCHEMA_VERSION,
+      exportedAt: "2026-08-26T00:00:00.000Z",
+      tasks: [{ id: "t1", name: "Task", parentId: null, order: 0, sprintIds: ["sp1"] }],
       resources: [{ id: "r1", name: "担当者", weeklyCapacity: 5, monthlyCapacity: 20 }],
+      sprints: [],
+      versions: [],
     });
 
     expect(out.tasks).toEqual([{ id: "t1", name: "Task", parentId: null, order: 0, sprintIds: ["sp1"] }]);
     expect(out.sprints).toEqual([]);
     expect(out.versions).toEqual([]);
-    expect(out.schemaVersion).toBeNull();
-    expect(out.exportedAt).toBeNull();
+    expect(out.schemaVersion).toBe(PROJECT_SCHEMA_VERSION);
+    expect(out.exportedAt).toBe("2026-08-26T00:00:00.000Z");
   });
 
-  it("tasks/resources が無いデータは拒否する", () => {
+  it("旧形式や必須項目不足のJSONは拒否する", () => {
     expect(() => normalizeImportedProject({ tasks: [] })).toThrow("invalid_project_json");
+    expect(() => normalizeImportedProject({
+      tasks: [{ id: "t1", name: "Task", parentId: null, order: 0, sprintId: "sp1" }],
+      resources: [{ id: "r1", name: "担当者", weeklyCapacity: 5, monthlyCapacity: 20 }],
+    })).toThrow("invalid_project_json");
     expect(() => normalizeImportedProject(null)).toThrow("invalid_project_json");
   });
 });

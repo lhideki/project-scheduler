@@ -9,7 +9,7 @@ import { uid, migrateSprintIds, isGroupId, buildFlatList } from "./lib/taskTree.
 import { runCPM, rollupSummaries, levelResources } from "./lib/scheduling.js";
 import {
   downloadJSON, copyTextToClipboard, generateMermaidGantt,
-  buildProjectExport, normalizeImportedProject, normalizeVersionSnapshots,
+  buildProjectExport, normalizeImportedProject, normalizeProjectVersions,
 } from "./lib/exportUtils.js";
 import { seedData } from "./lib/seedData.js";
 import { createTaskHistory, taskHistoryReducer } from "./lib/history.js";
@@ -106,7 +106,7 @@ export default function App() {
         setSprints(Array.isArray(proj.sprints) ? proj.sprints : []);
       }
       const vs = await storageGet("pm_versions");
-      if (vs) setVersions(normalizeVersionSnapshots(vs));
+      if (vs) setVersions(normalizeProjectVersions(vs));
       setLoaded(true);
     })();
     // eslint-disable-next-line
@@ -253,7 +253,7 @@ export default function App() {
         const merged = (() => {
           const map = new Map(versions.map(v => [v.id, v]));
           data.versions.forEach(v => map.set(v.id, v));
-          return normalizeVersionSnapshots(Array.from(map.values())).sort((a, b) => b.createdAt - a.createdAt);
+          return normalizeProjectVersions(Array.from(map.values())).sort((a, b) => b.createdAt - a.createdAt);
         })();
         setVersions(merged);
         await storageSet("pm_versions", merged);

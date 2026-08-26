@@ -36,30 +36,7 @@
 
 ### JSON書き出し形式
 
-書き出しJSONの正規形は、`/home/runner/work/project-scheduler/project-scheduler/src/lib/exportUtils.js` の `PROJECT_JSON_SCHEMA` で定義しています。トップレベルは次の構造です。
-
-```json
-{
-  "schemaVersion": 1,
-  "exportedAt": "2026-08-26T00:00:00.000Z",
-  "tasks": [],
-  "resources": [],
-  "sprints": [],
-  "versions": []
-}
-```
-
-- `tasks`: 必須。各要素の必須項目は `id` / `name` / `parentId` / `order` です。`sprintIds`・`predecessors`・`milestone`・`notes` などは任意です。
-- `resources`: 必須。各要素の必須項目は `id` / `name` / `weeklyCapacity` / `monthlyCapacity` です。
-- `sprints`: 必須。各要素の必須項目は `id` / `name` / `startDate` / `endDate` / `order` です。`theme` は任意です。
-- `versions`: 必須。各要素の必須項目は `id` / `name` / `createdAt` / `tasks` / `hasWbsInfo` / `hasFullSnapshot` です。`rawTasks` / `rawResources` / `rawSprints` は「復元可能な完全スナップショット」の場合のみ付きます。
-
-### 旧形式JSONの読み込み方針
-
-- 旧形式で `sprints` が無いJSONは、空配列として読み込みます。
-- 旧形式で `versions` が無いJSONは、空配列として読み込みます。
-- 旧形式タスクの単一 `sprintId` は、現行の `sprintIds` 配列へ自動変換して読み込みます。
-- 旧形式バージョンで `rawTasks` / `rawResources` / `rawSprints` が揃っていないものは、比較用履歴としては保持しますが `hasFullSnapshot: false` として扱い、「元に戻す」は無効のまま維持します。
+JSON形式の詳細は `docs/json-format.md` にまとめています。インポートは現行の `schemaVersion: 1` 形式のみ受け付け、旧形式JSONへの後方互換はありません。
 
 ## 開発・再ビルド方法
 

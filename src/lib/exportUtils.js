@@ -1,4 +1,4 @@
-import { buildFlatList, migrateSprintIds } from "./taskTree.js";
+import { buildFlatList } from "./taskTree.js";
 
 export const PROJECT_SCHEMA_VERSION = 1;
 
@@ -122,27 +122,14 @@ function isObject(value) {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
-/**
- * 読み込んだ versions 配列を現行形式として扱いやすい形へ正規化する。
- * - 古い形式（フル復元用 raw* を持たないもの）は hasFullSnapshot: false に揃える
- * - rawTasks 内の旧 sprintId は現行の sprintIds 配列へ移行する
- */
-export function normalizeVersionSnapshots(versions) {
-  return (Array.isArray(versions) ? versions : [])
-    .filter(isObject)
-    .map(version => {
-      const cloned = cloneJSON(version);
-      const hasFullSnapshot = Array.isArray(cloned.rawTasks) && Array.isArray(cloned.rawResources) && Array.isArray(cloned.rawSprints);
-      return {
-        ...cloned,
-        hasWbsInfo: typeof cloned.hasWbsInfo === "boolean" ? cloned.hasWbsInfo : false,
-        tasks: Array.isArray(cloned.tasks) ? cloned.tasks : [],
-        ...(Array.isArray(cloned.rawTasks) ? { rawTasks: migrateSprintIds(cloned.rawTasks) } : {}),
-        ...(Array.isArray(cloned.rawResources) ? { rawResources: cloned.rawResources } : {}),
-        ...(Array.isArray(cloned.rawSprints) ? { rawSprints: cloned.rawSprints } : {}),
-        hasFullSnapshot,
-      };
-    });
+export function normalizeProjectVersions(versions) {
+  if (!Array.isArray(versions) || versions.some(v => !isObject(v))) {
+    throw new Error("invalid_project_json");
+  }
+  return cloneJSON(versions).map(version => ({
+    ...version,
+    hasFullSnapshot: Array.isArray(version.rawTasks) && Array.isArray(version.rawResources) && Array.isArray(version.rawSprints),
+  }));
 }
 
 /** 現行の正規化済みJSONエクスポートデータを組み立てる。 */
@@ -153,25 +140,33 @@ export function buildProjectExport(tasks, resources, sprints = [], versions = []
     tasks: cloneJSON(Array.isArray(tasks) ? tasks : []),
     resources: cloneJSON(Array.isArray(resources) ? resources : []),
     sprints: cloneJSON(Array.isArray(sprints) ? sprints : []),
-    versions: normalizeVersionSnapshots(versions),
+    versions: normalizeProjectVersions(versions),
   };
 }
 
 /**
  * JSONインポートで受け取ったデータを検証・正規化する。
- * tasks/resources は必須。旧形式では省略され得る sprints/versions は空配列へフォールバックする。
+ * 現行スキーマのみ受け付け、旧形式へのフォールバックは行わない。
  */
 export function normalizeImportedProject(data) {
-  if (!isObject(data) || !Array.isArray(data.tasks) || !Array.isArray(data.resources)) {
+  if (
+    !isObject(data)
+    || data.schemaVersion !== PROJECT_SCHEMA_VERSION
+    || typeof data.exportedAt !== "string"
+    || !Array.isArray(data.tasks)
+    || !Array.isArray(data.resources)
+    || !Array.isArray(data.sprints)
+    || !Array.isArray(data.versions)
+  ) {
     throw new Error("invalid_project_json");
   }
   return {
-    schemaVersion: typeof data.schemaVersion === "number" ? data.schemaVersion : null,
-    exportedAt: typeof data.exportedAt === "string" ? data.exportedAt : null,
-    tasks: migrateSprintIds(cloneJSON(data.tasks)),
+    schemaVersion: data.schemaVersion,
+    exportedAt: data.exportedAt,
+    tasks: cloneJSON(data.tasks),
     resources: cloneJSON(data.resources),
-    sprints: Array.isArray(data.sprints) ? cloneJSON(data.sprints) : [],
-    versions: normalizeVersionSnapshots(data.versions),
+    sprints: cloneJSON(data.sprints),
+    versions: normalizeProjectVersions(data.versions),
   };
 }
 
