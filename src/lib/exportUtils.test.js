@@ -1,5 +1,93 @@
 import { describe, it, expect } from "vitest";
-import { escapeMermaidText, toMermaidId, generateMermaidGantt } from "./exportUtils.js";
+import {
+  PROJECT_JSON_SCHEMA,
+  PROJECT_SCHEMA_VERSION,
+  buildProjectExport,
+  normalizeImportedProject,
+  normalizeVersionSnapshots,
+  escapeMermaidText,
+  toMermaidId,
+  generateMermaidGantt,
+} from "./exportUtils.js";
+
+describe("PROJECT_JSON_SCHEMA", () => {
+  it("現行エクスポートの必須トップレベル項目を定義している", () => {
+    expect(PROJECT_JSON_SCHEMA.required).toEqual([
+      "schemaVersion",
+      "exportedAt",
+      "tasks",
+      "resources",
+      "sprints",
+      "versions",
+    ]);
+    expect(PROJECT_JSON_SCHEMA.$defs.task.required).toEqual(["id", "name", "parentId", "order"]);
+    expect(PROJECT_JSON_SCHEMA.$defs.resource.required).toEqual(["id", "name", "weeklyCapacity", "monthlyCapacity"]);
+    expect(PROJECT_JSON_SCHEMA.$defs.sprint.required).toEqual(["id", "name", "startDate", "endDate", "order"]);
+  });
+});
+
+describe("buildProjectExport", () => {
+  it("現行スキーマの形でエクスポートデータを組み立てる", () => {
+    const tasks = [{ id: "t1", name: "Task", parentId: null, order: 0, sprintIds: ["sp1"] }];
+    const resources = [{ id: "r1", name: "担当者", weeklyCapacity: 5, monthlyCapacity: 20 }];
+    const sprints = [{ id: "sp1", name: "Sprint 1", startDate: "2024-01-01", endDate: "2024-01-12", order: 0 }];
+    const versions = [{ id: "v1", name: "v1", createdAt: 1, tasks: [], hasWbsInfo: true }];
+    const out = buildProjectExport(tasks, resources, sprints, versions);
+
+    expect(out.schemaVersion).toBe(PROJECT_SCHEMA_VERSION);
+    expect(out.exportedAt).toMatch(/T/);
+    expect(out.tasks).toEqual(tasks);
+    expect(out.resources).toEqual(resources);
+    expect(out.sprints).toEqual(sprints);
+    expect(out.versions).toEqual([{ ...versions[0], tasks: [], hasFullSnapshot: false }]);
+
+    tasks[0].name = "changed";
+    expect(out.tasks[0].name).toBe("Task");
+  });
+});
+
+describe("normalizeVersionSnapshots", () => {
+  it("旧形式バージョンでは hasFullSnapshot を false に揃える", () => {
+    expect(normalizeVersionSnapshots([{ id: "v1", name: "old", createdAt: 1, tasks: [{}], hasWbsInfo: true }])).toEqual([
+      { id: "v1", name: "old", createdAt: 1, tasks: [{}], hasWbsInfo: true, hasFullSnapshot: false },
+    ]);
+  });
+
+  it("rawTasks 内の旧 sprintId を sprintIds へ移行する", () => {
+    const out = normalizeVersionSnapshots([{
+      id: "v1",
+      name: "full",
+      createdAt: 1,
+      tasks: [],
+      hasWbsInfo: true,
+      rawTasks: [{ id: "t1", name: "Task", parentId: null, order: 0, sprintId: "sp1" }],
+      rawResources: [],
+      rawSprints: [],
+    }]);
+    expect(out[0].hasFullSnapshot).toBe(true);
+    expect(out[0].rawTasks).toEqual([{ id: "t1", name: "Task", parentId: null, order: 0, sprintIds: ["sp1"] }]);
+  });
+});
+
+describe("normalizeImportedProject", () => {
+  it("旧形式のJSONでは sprints/versions を空配列へフォールバックする", () => {
+    const out = normalizeImportedProject({
+      tasks: [{ id: "t1", name: "Task", parentId: null, order: 0, sprintId: "sp1" }],
+      resources: [{ id: "r1", name: "担当者", weeklyCapacity: 5, monthlyCapacity: 20 }],
+    });
+
+    expect(out.tasks).toEqual([{ id: "t1", name: "Task", parentId: null, order: 0, sprintIds: ["sp1"] }]);
+    expect(out.sprints).toEqual([]);
+    expect(out.versions).toEqual([]);
+    expect(out.schemaVersion).toBeNull();
+    expect(out.exportedAt).toBeNull();
+  });
+
+  it("tasks/resources が無いデータは拒否する", () => {
+    expect(() => normalizeImportedProject({ tasks: [] })).toThrow("invalid_project_json");
+    expect(() => normalizeImportedProject(null)).toThrow("invalid_project_json");
+  });
+});
 
 describe("escapeMermaidText", () => {
   it("コロン・カンマ・改行をスペースに置換する", () => {

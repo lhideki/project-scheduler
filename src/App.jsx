@@ -7,7 +7,10 @@ import {
 import { toISO, parseISO, buildHolidayMap, makeCalendar, fmtJP } from "./lib/calendar.js";
 import { uid, migrateSprintIds, isGroupId, buildFlatList } from "./lib/taskTree.js";
 import { runCPM, rollupSummaries, levelResources } from "./lib/scheduling.js";
-import { downloadJSON, copyTextToClipboard, generateMermaidGantt } from "./lib/exportUtils.js";
+import {
+  downloadJSON, copyTextToClipboard, generateMermaidGantt,
+  buildProjectExport, normalizeImportedProject, normalizeVersionSnapshots,
+} from "./lib/exportUtils.js";
 import { seedData } from "./lib/seedData.js";
 import { createTaskHistory, taskHistoryReducer } from "./lib/history.js";
 import { storageGet, storageSet } from "./storage.js";
@@ -103,7 +106,7 @@ export default function App() {
         setSprints(Array.isArray(proj.sprints) ? proj.sprints : []);
       }
       const vs = await storageGet("pm_versions");
-      if (vs) setVersions(vs);
+      if (vs) setVersions(normalizeVersionSnapshots(vs));
       setLoaded(true);
     })();
     // eslint-disable-next-line
@@ -213,7 +216,7 @@ export default function App() {
   }
 
   function exportProject() {
-    const data = { schemaVersion: 1, exportedAt: new Date().toISOString(), tasks, resources, sprints, versions };
+    const data = buildProjectExport(tasks, resources, sprints, versions);
     downloadJSON(`project-scheduler_${toISO(new Date())}.json`, data);
     showToast("プロジェクトをJSONファイルに書き出しました");
   }
@@ -234,25 +237,23 @@ export default function App() {
     let data;
     try {
       const text = await file.text();
-      data = JSON.parse(text);
+      data = normalizeImportedProject(JSON.parse(text));
     } catch (err) {
-      showToast("読み込みに失敗しました（JSONを解析できません）");
-      return;
-    }
-    if (!data || !Array.isArray(data.tasks) || !Array.isArray(data.resources)) {
-      showToast("読み込みに失敗しました（ファイル形式が正しくありません）");
+      showToast(err?.message === "invalid_project_json"
+        ? "読み込みに失敗しました（ファイル形式が正しくありません）"
+        : "読み込みに失敗しました（JSONを解析できません）");
       return;
     }
     requestConfirm("現在のタスク・担当者を、読み込んだ内容で置き換えます。よろしいですか？", async () => {
-      setTasks(migrateSprintIds(data.tasks));
+      setTasks(data.tasks);
       setResources(data.resources);
-      setSprints(Array.isArray(data.sprints) ? data.sprints : []);
+      setSprints(data.sprints);
       setSelectedId(null);
       if (Array.isArray(data.versions) && data.versions.length) {
         const merged = (() => {
           const map = new Map(versions.map(v => [v.id, v]));
           data.versions.forEach(v => map.set(v.id, v));
-          return Array.from(map.values()).sort((a, b) => b.createdAt - a.createdAt);
+          return normalizeVersionSnapshots(Array.from(map.values())).sort((a, b) => b.createdAt - a.createdAt);
         })();
         setVersions(merged);
         await storageSet("pm_versions", merged);

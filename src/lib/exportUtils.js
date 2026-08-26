@@ -1,4 +1,179 @@
-import { buildFlatList } from "./taskTree.js";
+import { buildFlatList, migrateSprintIds } from "./taskTree.js";
+
+export const PROJECT_SCHEMA_VERSION = 1;
+
+export const PROJECT_JSON_SCHEMA = Object.freeze({
+  $schema: "https://json-schema.org/draft/2020-12/schema",
+  $id: "https://lhideki.github.io/project-scheduler/schema/project-export-v1.json",
+  title: "Project Scheduler export",
+  type: "object",
+  additionalProperties: false,
+  required: ["schemaVersion", "exportedAt", "tasks", "resources", "sprints", "versions"],
+  properties: {
+    schemaVersion: { type: "integer", const: PROJECT_SCHEMA_VERSION, description: "保存フォーマットのスキーマバージョン" },
+    exportedAt: { type: "string", format: "date-time", description: "エクスポート日時（ISO 8601）" },
+    tasks: { type: "array", items: { $ref: "#/$defs/task" } },
+    resources: { type: "array", items: { $ref: "#/$defs/resource" } },
+    sprints: { type: "array", items: { $ref: "#/$defs/sprint" } },
+    versions: { type: "array", items: { $ref: "#/$defs/version" } },
+  },
+  $defs: {
+    dependency: {
+      type: "object",
+      additionalProperties: false,
+      required: ["id", "type", "lag"],
+      properties: {
+        id: { type: "string" },
+        type: { type: "string", enum: ["FS", "SS", "FF", "SF"] },
+        lag: { type: "number" },
+      },
+    },
+    task: {
+      type: "object",
+      additionalProperties: true,
+      required: ["id", "name", "parentId", "order"],
+      properties: {
+        id: { type: "string" },
+        name: { type: "string" },
+        parentId: { type: ["string", "null"] },
+        order: { type: "number" },
+        startDate: { type: "string", format: "date" },
+        duration: { type: "number" },
+        assigneeId: { type: ["string", "null"] },
+        sprintIds: { type: "array", items: { type: "string" } },
+        predecessors: { type: "array", items: { $ref: "#/$defs/dependency" } },
+        progress: { type: "number" },
+        milestone: { type: "boolean" },
+        milestoneMode: { type: "string", enum: ["flexible", "fixed"] },
+        fixedDate: { type: "string", format: "date" },
+        savedDuration: { type: "number" },
+        notes: { type: "string" },
+        diagX: { type: "number" },
+        diagY: { type: "number" },
+      },
+    },
+    resource: {
+      type: "object",
+      additionalProperties: false,
+      required: ["id", "name", "weeklyCapacity", "monthlyCapacity"],
+      properties: {
+        id: { type: "string" },
+        name: { type: "string" },
+        weeklyCapacity: { type: "number" },
+        monthlyCapacity: { type: "number" },
+      },
+    },
+    sprint: {
+      type: "object",
+      additionalProperties: false,
+      required: ["id", "name", "startDate", "endDate", "order"],
+      properties: {
+        id: { type: "string" },
+        name: { type: "string" },
+        theme: { type: "string" },
+        startDate: { type: "string", format: "date" },
+        endDate: { type: "string", format: "date" },
+        order: { type: "number" },
+      },
+    },
+    versionTask: {
+      type: "object",
+      additionalProperties: true,
+      required: ["id", "name", "level", "wbsNo", "hasChildren", "critical", "milestone", "assigneeId", "progress"],
+      properties: {
+        id: { type: "string" },
+        name: { type: "string" },
+        level: { type: "number" },
+        wbsNo: { type: "string" },
+        hasChildren: { type: "boolean" },
+        schedStart: { type: "string", format: "date" },
+        schedFinish: { type: "string", format: "date" },
+        critical: { type: "boolean" },
+        milestone: { type: "boolean" },
+        duration: { type: ["number", "null"] },
+        assigneeId: { type: ["string", "null"] },
+        progress: { type: "number" },
+      },
+    },
+    version: {
+      type: "object",
+      additionalProperties: true,
+      required: ["id", "name", "createdAt", "tasks", "hasWbsInfo", "hasFullSnapshot"],
+      properties: {
+        id: { type: "string" },
+        name: { type: "string" },
+        createdAt: { type: "number" },
+        tasks: { type: "array", items: { $ref: "#/$defs/versionTask" } },
+        hasWbsInfo: { type: "boolean" },
+        rawTasks: { type: "array", items: { $ref: "#/$defs/task" } },
+        rawResources: { type: "array", items: { $ref: "#/$defs/resource" } },
+        rawSprints: { type: "array", items: { $ref: "#/$defs/sprint" } },
+        hasFullSnapshot: { type: "boolean" },
+      },
+    },
+  },
+});
+
+function cloneJSON(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function isObject(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * 読み込んだ versions 配列を現行形式として扱いやすい形へ正規化する。
+ * - 古い形式（フル復元用 raw* を持たないもの）は hasFullSnapshot: false に揃える
+ * - rawTasks 内の旧 sprintId は現行の sprintIds 配列へ移行する
+ */
+export function normalizeVersionSnapshots(versions) {
+  return (Array.isArray(versions) ? versions : [])
+    .filter(isObject)
+    .map(version => {
+      const cloned = cloneJSON(version);
+      const hasFullSnapshot = Array.isArray(cloned.rawTasks) && Array.isArray(cloned.rawResources) && Array.isArray(cloned.rawSprints);
+      return {
+        ...cloned,
+        hasWbsInfo: typeof cloned.hasWbsInfo === "boolean" ? cloned.hasWbsInfo : false,
+        tasks: Array.isArray(cloned.tasks) ? cloned.tasks : [],
+        ...(Array.isArray(cloned.rawTasks) ? { rawTasks: migrateSprintIds(cloned.rawTasks) } : {}),
+        ...(Array.isArray(cloned.rawResources) ? { rawResources: cloned.rawResources } : {}),
+        ...(Array.isArray(cloned.rawSprints) ? { rawSprints: cloned.rawSprints } : {}),
+        hasFullSnapshot,
+      };
+    });
+}
+
+/** 現行の正規化済みJSONエクスポートデータを組み立てる。 */
+export function buildProjectExport(tasks, resources, sprints = [], versions = []) {
+  return {
+    schemaVersion: PROJECT_SCHEMA_VERSION,
+    exportedAt: new Date().toISOString(),
+    tasks: cloneJSON(Array.isArray(tasks) ? tasks : []),
+    resources: cloneJSON(Array.isArray(resources) ? resources : []),
+    sprints: cloneJSON(Array.isArray(sprints) ? sprints : []),
+    versions: normalizeVersionSnapshots(versions),
+  };
+}
+
+/**
+ * JSONインポートで受け取ったデータを検証・正規化する。
+ * tasks/resources は必須。旧形式では省略され得る sprints/versions は空配列へフォールバックする。
+ */
+export function normalizeImportedProject(data) {
+  if (!isObject(data) || !Array.isArray(data.tasks) || !Array.isArray(data.resources)) {
+    throw new Error("invalid_project_json");
+  }
+  return {
+    schemaVersion: typeof data.schemaVersion === "number" ? data.schemaVersion : null,
+    exportedAt: typeof data.exportedAt === "string" ? data.exportedAt : null,
+    tasks: migrateSprintIds(cloneJSON(data.tasks)),
+    resources: cloneJSON(data.resources),
+    sprints: Array.isArray(data.sprints) ? cloneJSON(data.sprints) : [],
+    versions: normalizeVersionSnapshots(data.versions),
+  };
+}
 
 /** JSON を生成しブラウザのダウンロードとしてトリガーする（プロジェクトのエクスポート用） */
 export function downloadJSON(filename, dataObj) {
