@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 
 /** WBS表のスプリント欄用のコンパクトな複数選択ドロップダウン（ボタン＋チェックボックス一覧）。 */
-export function SprintMultiSelect({ sprintIds, sprints, onChange, inputRef, onKeyDown }) {
+export function SprintMultiSelect({ sprintIds, sprints, onChange, inputRef, inputProps, onKeyDown }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
   useEffect(() => {
@@ -18,11 +18,11 @@ export function SprintMultiSelect({ sprintIds, sprints, onChange, inputRef, onKe
   }
   return (
     <div ref={wrapRef} className="relative">
-      <button type="button" ref={inputRef}
+      <button type="button" ref={inputRef} {...inputProps}
         onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen(o => !o); } onKeyDown && onKeyDown(e); }}
         onClick={() => setOpen(o => !o)}
         title={selected.length ? selected.map(sp => sp.name).join("\n") : "紐付けるスプリント"}
-        className="w-full text-left bg-transparent outline-none text-[11px] truncate hover:bg-slate-100 rounded px-0.5 text-slate-700">
+        className="w-full text-left bg-transparent outline-none text-[11px] truncate hover:bg-slate-100 rounded px-0.5 text-slate-700 focus:bg-indigo-100 focus:ring-1 focus:ring-indigo-300">
         {label}
       </button>
       {open && (
