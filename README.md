@@ -36,7 +36,7 @@
 
 ### JSON書き出し形式
 
-JSON形式の詳細は `docs/json-format.md` にまとめています。インポートは現行の `schemaVersion: 1` 形式のみ受け付け、旧形式JSONへの後方互換はありません。
+JSON形式の詳細は `docs/json-format.md` にまとめています。これは JSON Schema から自動生成される Markdown です。インポートは現行の `schemaVersion: 1` 形式のみ受け付け、旧形式JSONへの後方互換はありません。
 
 ## 開発・再ビルド方法
 
@@ -60,6 +60,7 @@ npm run build
 | `npm run build:js` | `src/entry.jsx` を esbuild でバンドル・minify し `dist/bundle.js` を生成 |
 | `npm run build:css` | `src/input.css`(Tailwindディレクティブ)から `dist/output.css` を生成 |
 | `npm run build:html` | `template.html` の中に `dist/bundle.js` と `dist/output.css` を差し込み `project_scheduler.html` を生成 |
+| `npm run build:docs` | `src/lib/exportUtils.js` の JSON Schema から `docs/json-format.md` を自動生成 |
 
 ### ディレクトリ構成
 
