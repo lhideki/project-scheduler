@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef, useReducer, useCallback } from "react";
 import {
   Play, X, AlertTriangle, Check, Clock, GitBranch, Users, Table2,
   History, Download, Upload, CalendarRange, Copy,
@@ -9,6 +9,7 @@ import { uid, migrateSprintIds, isGroupId, buildFlatList } from "./lib/taskTree.
 import { runCPM, rollupSummaries, levelResources } from "./lib/scheduling.js";
 import { downloadJSON, copyTextToClipboard, generateMermaidGantt } from "./lib/exportUtils.js";
 import { seedData } from "./lib/seedData.js";
+import { createTaskHistory, taskHistoryReducer } from "./lib/history.js";
 import { storageGet, storageSet } from "./storage.js";
 import { DEFAULT_WBS_COLS } from "./constants.js";
 import { IconBtn } from "./components/IconBtn.jsx";
@@ -24,7 +25,14 @@ import { VersionsView } from "./components/VersionsView.jsx";
    ========================================================================================= */
 export default function App() {
   const seed = useMemo(() => seedData(), []);
-  const [tasks, setTasks] = useState(seed.tasks);
+  const [taskHistory, dispatchTasks] = useReducer(taskHistoryReducer, seed.tasks, createTaskHistory);
+  const tasks = taskHistory.present;
+  // 子コンポーネントには従来のReact setterと同じインターフェースを渡し、すべてのタスク更新を
+  // 1つの履歴に集約する。初回ロードだけはUndo対象にせず、resetで履歴を空にする。
+  const setTasks = useCallback(value => dispatchTasks({ type: "set", value }), []);
+  const resetTasks = useCallback(value => dispatchTasks({ type: "reset", value }), []);
+  const undoTasks = useCallback(() => dispatchTasks({ type: "undo" }), []);
+  const redoTasks = useCallback(() => dispatchTasks({ type: "redo" }), []);
   const [resources, setResources] = useState(seed.resources);
   const [sprints, setSprints] = useState(seed.sprints);
   const [versions, setVersions] = useState([]);
@@ -89,7 +97,7 @@ export default function App() {
     (async () => {
       const proj = await storageGet("pm_project");
       if (proj && proj.tasks && proj.tasks.length) {
-        setTasks(migrateSprintIds(proj.tasks));
+        resetTasks(migrateSprintIds(proj.tasks));
         setResources(proj.resources || seed.resources);
         // 旧バージョンのデータ（sprints未対応）を開いた場合は空配列にフォールバックする。
         setSprints(Array.isArray(proj.sprints) ? proj.sprints : []);
@@ -99,7 +107,7 @@ export default function App() {
       setLoaded(true);
     })();
     // eslint-disable-next-line
-  }, []);
+  }, [resetTasks, seed.resources]);
 
   // 自動スケジューリング実行によるボールド表示は、次に何らかの編集操作が行われたら解除する。
   // runScheduling 自身が行う書き戻し（setTasks）による変化はここでスキップする。
@@ -358,6 +366,11 @@ export default function App() {
             requestConfirm={requestConfirm}
             autoScheduleHighlightIds={autoScheduleHighlightIds}
             onSaveVersion={saveVersion}
+            canUndo={taskHistory.past.length > 0}
+            canRedo={taskHistory.future.length > 0}
+            onUndo={undoTasks}
+            onRedo={redoTasks}
+            onNotify={showToast}
           />
         )}
         {tab === "network" && (

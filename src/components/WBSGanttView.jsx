@@ -2,10 +2,15 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   Plus, Trash2, ChevronRight, ChevronDown, Save, ZoomIn, ZoomOut,
   AlertTriangle, ArrowLeftRight, Info, Diamond, GripVertical, Zap, Flame,
+  Undo2, Redo2, Copy, ClipboardPaste,
 } from "lucide-react";
 import { toISO, parseISO, WEEKDAY_JA, fmtJP, cal_addDaysISO } from "../lib/calendar.js";
 import { uid, buildFlatList, allDescendantIds } from "../lib/taskTree.js";
 import { sprintColorForId } from "../lib/sprints.js";
+import { copyTextToClipboard } from "../lib/exportUtils.js";
+import {
+  WBS_EDITABLE_COLUMNS, taskCellText, taskCellPatch, taskRowText, taskRowPatch, copiedTaskRowPatch,
+} from "../lib/wbsEditing.js";
 import { startPointerDrag, svgPointFromRef, makeDateScale } from "../dom/pointerDrag.js";
 import {
   ROW_H, ROW_H_BASE, GANTT_HEADER_H, DEFAULT_WBS_COLS, MIN_WBS_COL_WIDTHS,
@@ -29,6 +34,11 @@ export function WBSGanttView({
   versions, baselineVersionId, setBaselineVersionId,
   autoScheduleHighlightIds,
   onSaveVersion,
+  canUndo,
+  canRedo,
+  onUndo,
+  onRedo,
+  onNotify,
 }) {
   const flat = useMemo(() => buildFlatList(tasks, collapsed), [tasks, collapsed]);
   // WBS表の列幅合計（左ペインの実表示幅）。列幅を変更するとここも連動して再計算される。
@@ -103,41 +113,87 @@ export function WBSGanttView({
   const rightRef = useRef(null);
   const syncing = useRef(false);
   const rowInputRefs = useRef(new Map());
+  const cellRefs = useRef(new Map());
+  const activeSelectionRef = useRef(null); // { kind: "cell", taskId, column } | { kind: "row", taskId }
+  const clipboardRef = useRef(null); // アプリ内コピー時は型付きデータも保持する
+  const [hasClipboard, setHasClipboard] = useState(false);
   const barsSvgRef = useRef(null);
   const pendingFocusIdRef = useRef(null);
-  // 列ごとの入力欄をタスクIDで参照するためのref群（↑↓キーで同じ列の前後行へ移動するために使う）。
-  const dateInputRefs = useRef(new Map());
-  const durationInputRefs = useRef(new Map());
-  const assigneeInputRefs = useRef(new Map());
-  const sprintInputRefs = useRef(new Map());
-  const progressInputRefs = useRef(new Map());
-  const depsInputRefs = useRef(new Map());
-  function cellRefCallback(refsMap, id) {
-    return el => { if (el) refsMap.current.set(id, el); else refsMap.current.delete(id); };
+  function isComposingEvent(e) {
+    return e.nativeEvent?.isComposing || e.isComposing || e.keyCode === 229;
   }
-  // ↑↓キーで同じ列の前後行（その列に入力欄がある行のみ）へフォーカスを移す。
-  function moveCellFocus(refsMap, fromId, dir) {
-    const idx = flat.findIndex(t => t.id === fromId);
-    if (idx === -1) return;
-    let i = idx;
-    while (true) {
-      i += dir === "up" ? -1 : 1;
-      if (i < 0 || i >= flat.length) return;
-      const target = flat[i];
-      const el = refsMap.current.get(target.id);
-      if (el) {
-        setSelectedId(target.id);
-        el.focus();
-        el.scrollIntoView && el.scrollIntoView({ block: "nearest" });
-        return;
+  function cellKey(taskId, column) { return `${taskId}:${column}`; }
+  function cellRefCallback(taskId, column, secondaryMap) {
+    return el => {
+      const key = cellKey(taskId, column);
+      if (el) cellRefs.current.set(key, el); else cellRefs.current.delete(key);
+      if (secondaryMap) {
+        if (el) secondaryMap.current.set(taskId, el); else secondaryMap.current.delete(taskId);
       }
-    }
-  }
-  function cellArrowKeyDown(refsMap, taskId) {
-    return e => {
-      if (e.key === "ArrowUp") { e.preventDefault(); moveCellFocus(refsMap, taskId, "up"); }
-      else if (e.key === "ArrowDown") { e.preventDefault(); moveCellFocus(refsMap, taskId, "down"); }
     };
+  }
+  function activateCell(taskId, column) {
+    activeSelectionRef.current = { kind: "cell", taskId, column };
+    setSelectedId(taskId);
+  }
+  function cellInputProps(taskId, column) {
+    return {
+      "data-wbs-cell": cellKey(taskId, column),
+      "data-wbs-task-id": taskId,
+      "data-wbs-column": column,
+      onFocus: () => activateCell(taskId, column),
+    };
+  }
+  function focusGridCell(taskId, column) {
+    const el = cellRefs.current.get(cellKey(taskId, column));
+    if (!el) return false;
+    activateCell(taskId, column);
+    el.focus();
+    try {
+      if (typeof el.select === "function" && el.tagName === "INPUT" && !["date", "checkbox"].includes(el.type)) el.select();
+    } catch (err) { /* 選択範囲を持たないinputでは何もしない */ }
+    el.scrollIntoView && el.scrollIntoView({ block: "nearest", inline: "nearest" });
+    return true;
+  }
+  function moveGridFocus(taskId, column, direction) {
+    const rowIndex = flat.findIndex(t => t.id === taskId);
+    if (rowIndex === -1) return false;
+    if (direction === "up" || direction === "down") {
+      const step = direction === "up" ? -1 : 1;
+      for (let i = rowIndex + step; i >= 0 && i < flat.length; i += step) {
+        if (focusGridCell(flat[i].id, column)) return true;
+      }
+      if (direction === "down" && column === "name" && newTaskInputRef.current) {
+        newTaskInputRef.current.focus();
+        return true;
+      }
+      return false;
+    }
+    const columnIndex = WBS_EDITABLE_COLUMNS.indexOf(column);
+    const step = direction === "left" ? -1 : 1;
+    for (let i = columnIndex + step; i >= 0 && i < WBS_EDITABLE_COLUMNS.length; i += step) {
+      if (focusGridCell(taskId, WBS_EDITABLE_COLUMNS[i])) return true;
+    }
+    return false;
+  }
+  function textCaretAllowsMove(e, direction) {
+    const el = e.currentTarget;
+    if (el.tagName !== "INPUT" || !["text", "search", "url", "tel", "email", "password"].includes(el.type)) return true;
+    if (typeof el.selectionStart !== "number" || typeof el.selectionEnd !== "number") return true;
+    if (el.selectionStart !== el.selectionEnd) return false;
+    return direction === "left" ? el.selectionStart === 0 : el.selectionEnd === el.value.length;
+  }
+  // ↑↓は同じ列、←→は同じ行の隣接する編集可能セルへ移動する。
+  // テキスト欄の←→は入力中のキャレット移動を優先し、先頭・末尾でのみセルをまたぐ。
+  function handleGridCellKeyDown(e, taskId, column) {
+    if (isComposingEvent(e)) return false;
+    const directions = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" };
+    const direction = directions[e.key];
+    if (!direction) return false;
+    if ((direction === "left" || direction === "right") && !textCaretAllowsMove(e, direction)) return false;
+    if (!moveGridFocus(taskId, column, direction)) return false;
+    e.preventDefault();
+    return true;
   }
   // Enterキーで新規タスクを作成した直後、その行の名前欄にフォーカスを移す
   // （addTask後の再レンダリングでrowInputRefsにDOMが登録されるのを待つ必要があるため、tasks変更後にeffectで処理する）。
@@ -152,6 +208,12 @@ export function WBSGanttView({
       pendingFocusIdRef.current = null;
     }
   }, [tasks]);
+  useEffect(() => {
+    if (selectedId && !tasks.some(task => task.id === selectedId)) {
+      activeSelectionRef.current = null;
+      setSelectedId(null);
+    }
+  }, [tasks, selectedId, setSelectedId]);
   const onScrollLeft = () => { if (syncing.current) return; syncing.current = true; rightRef.current.scrollTop = leftRef.current.scrollTop; syncing.current = false; };
   const onScrollRight = () => { if (syncing.current) return; syncing.current = true; leftRef.current.scrollTop = rightRef.current.scrollTop; syncing.current = false; };
 
@@ -208,6 +270,132 @@ export function WBSGanttView({
   }
 
   function updateTask(id, patch) { setTasks(prev => prev.map(t => (t.id === id ? { ...t, ...patch } : t))); }
+
+  const WBS_CLIPBOARD_TYPE = "application/x-project-scheduler-wbs";
+  function clipboardContextFor(taskId) {
+    return {
+      resources, sprints, idToNo, noToId, schedule,
+      hasChildren: !!flat.find(t => t.id === taskId)?.hasChildren,
+    };
+  }
+  function currentClipboardSelection() {
+    const active = activeSelectionRef.current;
+    if (active && active.taskId === selectedId) return active;
+    return selectedId ? { kind: "row", taskId: selectedId } : null;
+  }
+  function makeClipboardPayload(selection) {
+    if (!selection) return null;
+    const task = tasks.find(t => t.id === selection.taskId);
+    if (!task) return null;
+    const context = clipboardContextFor(task.id);
+    if (selection.kind === "cell") {
+      const text = taskCellText(task, selection.column, context);
+      return { kind: "cell", column: selection.column, text };
+    }
+    const snapshot = JSON.parse(JSON.stringify(task));
+    snapshot.startDate = taskCellText(task, "startDate", context);
+    return {
+      kind: "row",
+      text: taskRowText(task, context),
+      task: snapshot,
+      hasChildren: context.hasChildren,
+    };
+  }
+  function hasSelectedInputText(target) {
+    return target?.tagName === "INPUT" && typeof target.selectionStart === "number" &&
+      target.selectionStart !== target.selectionEnd;
+  }
+  function handleClipboardCopy(e) {
+    // 入力欄内で文字列を部分選択している場合は、ブラウザ標準のテキストコピーを優先する。
+    if (hasSelectedInputText(e.target)) return;
+    const payload = makeClipboardPayload(currentClipboardSelection());
+    if (!payload || !e.clipboardData) return;
+    e.preventDefault();
+    clipboardRef.current = payload;
+    setHasClipboard(true);
+    e.clipboardData.setData("text/plain", payload.text);
+    try { e.clipboardData.setData(WBS_CLIPBOARD_TYPE, JSON.stringify(payload)); } catch (err) { /* text/plainのみで継続 */ }
+    onNotify?.(payload.kind === "row" ? "行をクリップボードにコピーしました" : "セルをクリップボードにコピーしました");
+  }
+  function payloadFromPasteEvent(e) {
+    const custom = e.clipboardData?.getData(WBS_CLIPBOARD_TYPE);
+    if (custom) {
+      try { return JSON.parse(custom); } catch (err) { /* text/plainへフォールバック */ }
+    }
+    const text = e.clipboardData?.getData("text/plain") ?? "";
+    if (clipboardRef.current?.text === text) return clipboardRef.current;
+    return { kind: "text", text };
+  }
+  function applyClipboardPayload(payload, selection) {
+    if (!payload || !selection) return false;
+    const target = tasks.find(t => t.id === selection.taskId);
+    if (!target) return false;
+    const context = clipboardContextFor(target.id);
+    let patch = {};
+    let errors = [];
+
+    if (payload.kind === "row" && payload.task) {
+      patch = copiedTaskRowPatch(payload.task, target, context.hasChildren, payload.hasChildren);
+    } else if (payload.kind === "cell" && selection.kind === "row") {
+      const parsed = taskCellPatch(target, payload.column, payload.text, context);
+      if (!parsed.ok) errors.push(payload.column);
+      patch = parsed.patch;
+    } else if (selection.kind === "row" || String(payload.text).includes("\t")) {
+      const parsed = taskRowPatch(target, payload.text, context);
+      patch = parsed.patch;
+      errors = parsed.errors;
+    } else {
+      const column = selection.kind === "cell" ? selection.column : payload.column;
+      const parsed = taskCellPatch(target, column, payload.text, context);
+      if (!parsed.ok) errors.push(column);
+      patch = parsed.patch;
+    }
+    if (!Object.keys(patch).length) {
+      onNotify?.("貼り付けできる値がありません");
+      return false;
+    }
+    updateTask(target.id, patch);
+    if (errors.length) onNotify?.("互換性のないセルを除いて貼り付けました");
+    else onNotify?.(payload.kind === "row" || selection.kind === "row" ? "行を貼り付けました" : "セルを貼り付けました");
+    return true;
+  }
+  function handleClipboardPaste(e) {
+    const selection = currentClipboardSelection();
+    if (!selection) return;
+    if (applyClipboardPayload(payloadFromPasteEvent(e), selection)) e.preventDefault();
+  }
+  async function copySelection() {
+    const payload = makeClipboardPayload(currentClipboardSelection());
+    if (!payload) return;
+    clipboardRef.current = payload;
+    setHasClipboard(true);
+    try {
+      await copyTextToClipboard(payload.text);
+      onNotify?.(payload.kind === "row" ? "行をクリップボードにコピーしました" : "セルをクリップボードにコピーしました");
+    } catch (err) {
+      onNotify?.("クリップボードへのコピーに失敗しました");
+    }
+  }
+  function pasteSelection() {
+    if (!clipboardRef.current) return;
+    applyClipboardPayload(clipboardRef.current, currentClipboardSelection());
+  }
+  function handleViewKeyDown(e) {
+    if (isComposingEvent(e)) return;
+    const modifier = e.metaKey || e.ctrlKey;
+    if (!modifier || e.altKey) return;
+    const key = e.key.toLowerCase();
+    if (key === "z" && e.shiftKey && canRedo) {
+      e.preventDefault();
+      onRedo?.();
+    } else if (key === "z" && canUndo) {
+      e.preventDefault();
+      onUndo?.();
+    } else if (key === "y" && canRedo) {
+      e.preventDefault();
+      onRedo?.();
+    }
+  }
 
   // ドラッグ&ドロップによる行の入れ替え。order/parentId のみを変更し、predecessors（依存関係）は
   // タスクIDで参照されているため一切変更しない＝どの位置に移動しても依存関係は自動的に維持される。
@@ -446,7 +634,7 @@ export function WBSGanttView({
   const todayISO = toISO(new Date());
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full" onKeyDown={handleViewKeyDown}>
       <div className="flex items-center gap-2 px-3 py-2 border-b border-slate-200 bg-white flex-wrap">
         <IconBtn icon={Plus} label="タスク" onClick={() => addTask(false)} small />
         <IconBtn icon={Diamond} label="マイルストーン" onClick={() => addTask(true)} small />
@@ -457,6 +645,12 @@ export function WBSGanttView({
         <IconBtn icon={Trash2} label="削除" onClick={() => deleteTask()} small danger disabled={!selectedId} />
         <div className="w-px h-5 bg-slate-200 mx-1" />
         <IconBtn icon={Info} label="詳細" onClick={() => selectedId && setDetailId(selectedId)} small disabled={!selectedId} />
+        <div className="w-px h-5 bg-slate-200 mx-1" />
+        <IconBtn icon={Copy} label="コピー" onClick={copySelection} small disabled={!selectedId} />
+        <IconBtn icon={ClipboardPaste} label="貼り付け" onClick={pasteSelection} small disabled={!selectedId || !hasClipboard} />
+        <div className="w-px h-5 bg-slate-200 mx-1" />
+        <IconBtn icon={Undo2} label="元に戻す" onClick={onUndo} small disabled={!canUndo} />
+        <IconBtn icon={Redo2} label="やり直す" onClick={onRedo} small disabled={!canRedo} />
         <div className="flex-1" />
         <div className="flex items-center gap-1">
           <ArrowLeftRight size={13} className="text-slate-400 flex-shrink-0" />
@@ -490,6 +684,8 @@ export function WBSGanttView({
         <div
           ref={leftRef}
           onScroll={onScrollLeft}
+          onCopy={handleClipboardCopy}
+          onPaste={handleClipboardPaste}
           className="overflow-y-auto overflow-x-auto bg-white relative"
           style={{ width: effectiveLeftWidth, flexShrink: 0 }}
         >
@@ -498,7 +694,7 @@ export function WBSGanttView({
           <div style={{ width: wbsTotalWidth, minWidth: "100%" }}>
           <div className="sticky top-0 z-10 bg-slate-50 border-b border-slate-200 flex text-[11px] font-medium text-slate-500" style={{ height: GANTT_HEADER_H }}>
             <div style={{ width: colWidths.grip }} className="relative flex items-end justify-center"><ColResizeHandle onResizeStart={e => startColResize(e, "grip")} onReset={e => { e.stopPropagation(); resetColWidth("grip"); }} /></div>
-            <div style={{ width: colWidths.wbs }} className="relative px-2 py-2 flex items-end font-mono">WBS<ColResizeHandle onResizeStart={e => startColResize(e, "wbs")} onReset={e => { e.stopPropagation(); resetColWidth("wbs"); }} /></div>
+            <div style={{ width: colWidths.wbs }} className="relative px-2 py-2 flex items-end font-mono" title="WBS番号をクリックして行を選び、コピー／貼り付けできます">WBS<ColResizeHandle onResizeStart={e => startColResize(e, "wbs")} onReset={e => { e.stopPropagation(); resetColWidth("wbs"); }} /></div>
             <div style={{ width: colWidths.name }} className="relative px-2 py-2 flex items-end">タスク名<ColResizeHandle onResizeStart={e => startColResize(e, "name")} onReset={e => { e.stopPropagation(); resetColWidth("name"); }} /></div>
             <div style={{ width: colWidths.start }} className="relative px-1 py-2 flex items-end">開始日<ColResizeHandle onResizeStart={e => startColResize(e, "start")} onReset={e => { e.stopPropagation(); resetColWidth("start"); }} /></div>
             <div style={{ width: colWidths.duration }} className="relative px-1 py-2 flex items-end" title="工数（人日）。小数可（例: 0.5, 2.5）">工数<ColResizeHandle onResizeStart={e => startColResize(e, "duration")} onReset={e => { e.stopPropagation(); resetColWidth("duration"); }} /></div>
@@ -532,7 +728,10 @@ export function WBSGanttView({
             return (
               <React.Fragment key={t.id}>
               <div
-                onClick={() => setSelectedId(t.id)}
+                onClick={e => {
+                  setSelectedId(t.id);
+                  if (!e.target.closest?.("[data-wbs-cell]")) activeSelectionRef.current = { kind: "row", taskId: t.id };
+                }}
                 style={{ height: ROW_H, opacity: isDragging ? 0.35 : 1 }}
                 className={
                   "flex items-center text-xs border-b border-slate-100 cursor-pointer " +
@@ -550,7 +749,17 @@ export function WBSGanttView({
                     <GripVertical size={13} />
                   </span>
                 </div>
-                <div style={{ width: colWidths.wbs }} className="px-2 font-mono text-slate-400 truncate">{t.wbsNo}</div>
+                <div style={{ width: colWidths.wbs }} className="px-1 font-mono text-slate-400 truncate">
+                  <button
+                    type="button"
+                    data-wbs-row-id={t.id}
+                    onFocus={() => { activeSelectionRef.current = { kind: "row", taskId: t.id }; setSelectedId(t.id); }}
+                    title="行を選択（コピー／貼り付け対象）"
+                    className="w-full text-left rounded px-1 outline-none focus:bg-indigo-100 focus:ring-1 focus:ring-indigo-300"
+                  >
+                    {t.wbsNo}
+                  </button>
+                </div>
                 <div style={{ width: colWidths.name }} className="px-1 flex items-center gap-1" >
                   <span style={{ marginLeft: t.level * 12 }} className="flex items-center gap-1 truncate flex-1 min-w-0">
                     {t.hasChildren ? (
@@ -571,21 +780,19 @@ export function WBSGanttView({
                       </button>
                     )}
                     <input
-                      ref={el => { if (el) rowInputRefs.current.set(t.id, el); else rowInputRefs.current.delete(t.id); }}
+                      ref={cellRefCallback(t.id, "name", rowInputRefs)}
+                      {...cellInputProps(t.id, "name")}
                       value={t.name}
                       onChange={e => updateTask(t.id, { name: e.target.value })}
-                      onFocus={() => setSelectedId(t.id)}
                       onKeyDown={e => {
+                        if (isComposingEvent(e)) return;
                         if (e.key === "Tab") {
-                          if (e.nativeEvent.isComposing || e.keyCode === 229) return; // IME入力中のTabではインデントしない
                           e.preventDefault();
                           if (e.shiftKey) outdentTask(t.id); else indentTask(t.id);
                           return;
                         }
-                        if (e.key === "ArrowUp") { e.preventDefault(); moveSelection(t.id, "up"); return; }
-                        if (e.key === "ArrowDown") { e.preventDefault(); moveSelection(t.id, "down"); return; }
+                        if (handleGridCellKeyDown(e, t.id, "name")) return;
                         if (e.key === "Enter") {
-                          if (e.nativeEvent.isComposing || e.keyCode === 229) return; // IME確定のEnterでは行移動しない
                           e.preventDefault();
                           const idx = flat.findIndex(x => x.id === t.id);
                           if (idx !== -1 && idx < flat.length - 1) {
@@ -596,7 +803,7 @@ export function WBSGanttView({
                           return;
                         }
                       }}
-                      className={"bg-transparent outline-none truncate w-full " + (isSummary ? "font-semibold" : "")}
+                      className={"bg-transparent outline-none truncate w-full rounded focus:bg-indigo-100 focus:ring-1 focus:ring-indigo-300 " + (isSummary ? "font-semibold" : "")}
                     />
                   </span>
                   {compareOn && !baselineRow && (
@@ -615,12 +822,14 @@ export function WBSGanttView({
                     t.milestone ? (
                       <input type="date" value={t.milestoneMode === "fixed" ? (t.fixedDate || "") : (sched?.schedStart || "")}
                         onChange={e => updateTask(t.id, { fixedDate: e.target.value, startDate: e.target.value })}
-                        ref={cellRefCallback(dateInputRefs, t.id)} onKeyDown={cellArrowKeyDown(dateInputRefs, t.id)}
-                        className={"bg-transparent outline-none w-full font-mono text-[11px] " + (autoScheduleHighlightIds.has(t.id) ? "font-bold" : "")} />
+                        ref={cellRefCallback(t.id, "startDate")} {...cellInputProps(t.id, "startDate")}
+                        onKeyDown={e => handleGridCellKeyDown(e, t.id, "startDate")}
+                        className={"bg-transparent outline-none w-full rounded font-mono text-[11px] focus:bg-indigo-100 focus:ring-1 focus:ring-indigo-300 " + (autoScheduleHighlightIds.has(t.id) ? "font-bold" : "")} />
                     ) : (
                       <input type="date" value={t.startDate || ""} onChange={e => updateTask(t.id, { startDate: e.target.value })}
-                        ref={cellRefCallback(dateInputRefs, t.id)} onKeyDown={cellArrowKeyDown(dateInputRefs, t.id)}
-                        className={"bg-transparent outline-none w-full font-mono text-[11px] " + (autoScheduleHighlightIds.has(t.id) ? "font-bold" : "")} />
+                        ref={cellRefCallback(t.id, "startDate")} {...cellInputProps(t.id, "startDate")}
+                        onKeyDown={e => handleGridCellKeyDown(e, t.id, "startDate")}
+                        className={"bg-transparent outline-none w-full rounded font-mono text-[11px] focus:bg-indigo-100 focus:ring-1 focus:ring-indigo-300 " + (autoScheduleHighlightIds.has(t.id) ? "font-bold" : "")} />
                     )
                   )}
                   {isSummary && <span className="font-mono text-[11px] text-slate-400">{fmtJP(sched?.schedStart)}</span>}
@@ -629,8 +838,9 @@ export function WBSGanttView({
                   {!isSummary && !t.hasChildren && !t.milestone && (
                     <input type="number" min={0} step={0.5} value={t.duration} title="人日（小数可）"
                       onChange={e => updateTask(t.id, { duration: Math.max(0, Math.round(parseFloat(e.target.value || "0") * 100) / 100) })}
-                      ref={cellRefCallback(durationInputRefs, t.id)} onKeyDown={cellArrowKeyDown(durationInputRefs, t.id)}
-                      className="bg-transparent outline-none w-full font-mono text-[11px]" />
+                      ref={cellRefCallback(t.id, "duration")} {...cellInputProps(t.id, "duration")}
+                      onKeyDown={e => handleGridCellKeyDown(e, t.id, "duration")}
+                      className="bg-transparent outline-none w-full rounded font-mono text-[11px] focus:bg-indigo-100 focus:ring-1 focus:ring-indigo-300" />
                   )}
                 </div>
                 <div style={{ width: colWidths.finish }} className="px-1 font-mono text-[11px] text-slate-500">{fmtJP(sched?.schedFinish)}</div>
@@ -639,15 +849,17 @@ export function WBSGanttView({
                     t.milestone ? (
                       <select value={t.milestoneMode || "flexible"} onChange={e => updateTask(t.id, { milestoneMode: e.target.value })}
                         title="固定：期日から逆算してスケジュール / 柔軟：依存関係から順算"
-                        ref={cellRefCallback(assigneeInputRefs, t.id)} onKeyDown={cellArrowKeyDown(assigneeInputRefs, t.id)}
-                        className="bg-transparent outline-none w-full text-[11px]">
+                        ref={cellRefCallback(t.id, "assignee")} {...cellInputProps(t.id, "assignee")}
+                        onKeyDown={e => handleGridCellKeyDown(e, t.id, "assignee")}
+                        className="bg-transparent outline-none w-full rounded text-[11px] focus:bg-indigo-100 focus:ring-1 focus:ring-indigo-300">
                         <option value="flexible">柔軟</option>
                         <option value="fixed">固定</option>
                       </select>
                     ) : (
                       <select value={t.assigneeId || ""} onChange={e => updateTask(t.id, { assigneeId: e.target.value || null })}
-                        ref={cellRefCallback(assigneeInputRefs, t.id)} onKeyDown={cellArrowKeyDown(assigneeInputRefs, t.id)}
-                        className="bg-transparent outline-none w-full text-[11px]">
+                        ref={cellRefCallback(t.id, "assignee")} {...cellInputProps(t.id, "assignee")}
+                        onKeyDown={e => handleGridCellKeyDown(e, t.id, "assignee")}
+                        className="bg-transparent outline-none w-full rounded text-[11px] focus:bg-indigo-100 focus:ring-1 focus:ring-indigo-300">
                         <option value="">—</option>
                         {resources.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
                       </select>
@@ -658,7 +870,8 @@ export function WBSGanttView({
                   {!isSummary && !t.hasChildren && (
                     <SprintMultiSelect sprintIds={t.sprintIds} sprints={sprints}
                       onChange={next => updateTask(t.id, { sprintIds: next })}
-                      inputRef={cellRefCallback(sprintInputRefs, t.id)} onKeyDown={cellArrowKeyDown(sprintInputRefs, t.id)} />
+                      inputRef={cellRefCallback(t.id, "sprint")} inputProps={cellInputProps(t.id, "sprint")}
+                      onKeyDown={e => handleGridCellKeyDown(e, t.id, "sprint")} />
                   )}
                 </div>
                 <div style={{ width: colWidths.progress }} className="px-1">
@@ -667,14 +880,17 @@ export function WBSGanttView({
                       <input type="checkbox" checked={(t.progress || 0) >= 100}
                         title="完了チェック（未チェック：0% / チェック済み：100%）"
                         onChange={e => updateTask(t.id, { progress: e.target.checked ? 100 : 0 })}
-                        ref={cellRefCallback(progressInputRefs, t.id)} onKeyDown={cellArrowKeyDown(progressInputRefs, t.id)} />
+                        ref={cellRefCallback(t.id, "progress")} {...cellInputProps(t.id, "progress")}
+                        onKeyDown={e => handleGridCellKeyDown(e, t.id, "progress")}
+                        className="rounded focus:ring-2 focus:ring-indigo-300" />
                     ) : (
                       <div className="flex items-center gap-0.5">
                         <input type="number" min={0} max={100} step={5} value={t.progress || 0}
                           title="進捗率（%）"
                           onChange={e => updateTask(t.id, { progress: Math.max(0, Math.min(100, Math.round(parseFloat(e.target.value || "0")))) })}
-                          ref={cellRefCallback(progressInputRefs, t.id)} onKeyDown={cellArrowKeyDown(progressInputRefs, t.id)}
-                          className="bg-transparent outline-none w-full font-mono text-[11px]" />
+                          ref={cellRefCallback(t.id, "progress")} {...cellInputProps(t.id, "progress")}
+                          onKeyDown={e => handleGridCellKeyDown(e, t.id, "progress")}
+                          className="bg-transparent outline-none w-full rounded font-mono text-[11px] focus:bg-indigo-100 focus:ring-1 focus:ring-indigo-300" />
                         <span className="text-[10px] text-slate-400 flex-shrink-0">%</span>
                       </div>
                     )
@@ -684,7 +900,8 @@ export function WBSGanttView({
                 </div>
                 <div style={{ width: colWidths.deps }} className="px-1">
                   <DepInput deps={t.predecessors} idToNo={idToNo} noToId={noToId} onChange={d => updateTask(t.id, { predecessors: d })}
-                    inputRef={cellRefCallback(depsInputRefs, t.id)} onKeyDown={cellArrowKeyDown(depsInputRefs, t.id)} />
+                    inputRef={cellRefCallback(t.id, "predecessors")} inputProps={cellInputProps(t.id, "predecessors")}
+                    onKeyDown={e => handleGridCellKeyDown(e, t.id, "predecessors")} />
                 </div>
                 <div style={{ width: colWidths.actions }} className="px-1 flex items-center justify-center">
                   <button
