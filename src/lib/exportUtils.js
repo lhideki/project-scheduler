@@ -1,5 +1,182 @@
 import { buildFlatList } from "./taskTree.js";
 
+export const PROJECT_SCHEMA_VERSION = 1;
+
+export const PROJECT_JSON_SCHEMA = Object.freeze({
+  $schema: "https://json-schema.org/draft/2020-12/schema",
+  $id: "https://lhideki.github.io/project-scheduler/schema/project-export-v1.json",
+  title: "Project Scheduler export",
+  description: "Project Scheduler の「書き出し」「読み込み」で使うJSON形式です。",
+  type: "object",
+  additionalProperties: false,
+  required: ["schemaVersion", "exportedAt", "tasks", "resources", "sprints", "versions"],
+  properties: {
+    schemaVersion: { type: "integer", const: PROJECT_SCHEMA_VERSION, description: "保存フォーマットのスキーマバージョン" },
+    exportedAt: { type: "string", format: "date-time", description: "エクスポート日時（ISO 8601）" },
+    tasks: { type: "array", description: "タスク一覧", items: { $ref: "#/$defs/task" } },
+    resources: { type: "array", description: "担当者一覧", items: { $ref: "#/$defs/resource" } },
+    sprints: { type: "array", description: "スプリント一覧", items: { $ref: "#/$defs/sprint" } },
+    versions: { type: "array", description: "保存済みバージョン一覧", items: { $ref: "#/$defs/version" } },
+  },
+  $defs: {
+    dependency: {
+      type: "object",
+      description: "先行タスクを表すオブジェクトです。",
+      additionalProperties: false,
+      required: ["id", "type", "lag"],
+      properties: {
+        id: { type: "string", description: "先行タスクID" },
+        type: { type: "string", enum: ["FS", "SS", "FF", "SF"], description: "依存関係の種類" },
+        lag: { type: "number", description: "リード/ラグ日数" },
+      },
+    },
+    task: {
+      type: "object",
+      description: "WBS上のタスクです。階層は parentId で表現します。",
+      additionalProperties: true,
+      required: ["id", "name", "parentId", "order"],
+      properties: {
+        id: { type: "string", description: "タスクID" },
+        name: { type: "string", description: "タスク名" },
+        parentId: { type: ["string", "null"], description: "親タスクID。ルート直下は null" },
+        order: { type: "number", description: "同じ親配下での表示順" },
+        startDate: { type: "string", format: "date", description: "開始日（YYYY-MM-DD）" },
+        duration: { type: "number", description: "工数。マイルストーンは通常 0" },
+        assigneeId: { type: ["string", "null"], description: "担当者ID" },
+        sprintIds: { type: "array", description: "紐付けるスプリントID一覧", items: { type: "string" } },
+        predecessors: { type: "array", description: "先行タスク一覧", items: { $ref: "#/$defs/dependency" } },
+        progress: { type: "number", description: "進捗率（0〜100）" },
+        milestone: { type: "boolean", description: "マイルストーンかどうか" },
+        milestoneMode: { type: "string", enum: ["flexible", "fixed"], description: "柔軟/固定モード" },
+        fixedDate: { type: "string", format: "date", description: "固定マイルストーンの日付（YYYY-MM-DD）" },
+        savedDuration: { type: "number", description: "マイルストーン化前の工数退避値" },
+        notes: { type: "string", description: "詳細メモ" },
+        diagX: { type: "number", description: "ネットワーク図の手動X座標" },
+        diagY: { type: "number", description: "ネットワーク図の手動Y座標" },
+      },
+    },
+    resource: {
+      type: "object",
+      description: "担当者リソースです。",
+      additionalProperties: false,
+      required: ["id", "name", "weeklyCapacity", "monthlyCapacity"],
+      properties: {
+        id: { type: "string", description: "担当者ID" },
+        name: { type: "string", description: "表示名" },
+        weeklyCapacity: { type: "number", description: "週次稼働上限" },
+        monthlyCapacity: { type: "number", description: "月次稼働上限" },
+      },
+    },
+    sprint: {
+      type: "object",
+      description: "スプリント定義です。",
+      additionalProperties: false,
+      required: ["id", "name", "startDate", "endDate", "order"],
+      properties: {
+        id: { type: "string", description: "スプリントID" },
+        name: { type: "string", description: "スプリント名" },
+        theme: { type: "string", description: "テーマ" },
+        startDate: { type: "string", format: "date", description: "開始日（YYYY-MM-DD）" },
+        endDate: { type: "string", format: "date", description: "終了日（YYYY-MM-DD）" },
+        order: { type: "number", description: "表示順" },
+      },
+    },
+    versionTask: {
+      type: "object",
+      description: "バージョン比較表示用のタスクスナップショットです。",
+      additionalProperties: true,
+      required: ["id", "name", "level", "wbsNo", "hasChildren", "critical", "milestone", "assigneeId", "progress"],
+      properties: {
+        id: { type: "string", description: "タスクID" },
+        name: { type: "string", description: "タスク名" },
+        level: { type: "number", description: "WBS階層レベル" },
+        wbsNo: { type: "string", description: "WBS番号" },
+        hasChildren: { type: "boolean", description: "子タスクの有無" },
+        schedStart: { type: "string", format: "date", description: "計算後開始日（YYYY-MM-DD）" },
+        schedFinish: { type: "string", format: "date", description: "計算後終了日（YYYY-MM-DD）" },
+        critical: { type: "boolean", description: "クリティカルかどうか" },
+        milestone: { type: "boolean", description: "マイルストーンかどうか" },
+        duration: { type: ["number", "null"], description: "保存時点の工数" },
+        assigneeId: { type: ["string", "null"], description: "担当者ID" },
+        progress: { type: "number", description: "進捗率" },
+      },
+    },
+    version: {
+      type: "object",
+      description: "比較表示用スナップショットと復元用完全スナップショットを持つ保存済みバージョンです。",
+      additionalProperties: true,
+      required: ["id", "name", "createdAt", "tasks", "hasWbsInfo", "hasFullSnapshot"],
+      properties: {
+        id: { type: "string", description: "バージョンID" },
+        name: { type: "string", description: "バージョン名" },
+        createdAt: { type: "number", description: "保存時刻（Unixミリ秒）" },
+        tasks: { type: "array", description: "比較表示用のタスク配列", items: { $ref: "#/$defs/versionTask" } },
+        hasWbsInfo: { type: "boolean", description: "WBS比較用情報を含むか" },
+        rawTasks: { type: "array", description: "復元用の完全な tasks", items: { $ref: "#/$defs/task" } },
+        rawResources: { type: "array", description: "復元用の完全な resources", items: { $ref: "#/$defs/resource" } },
+        rawSprints: { type: "array", description: "復元用の完全な sprints", items: { $ref: "#/$defs/sprint" } },
+        hasFullSnapshot: { type: "boolean", description: "復元に必要な raw* が揃っているか" },
+      },
+    },
+  },
+});
+
+function cloneJSON(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function isObject(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+export function normalizeProjectVersions(versions) {
+  if (!Array.isArray(versions) || versions.some(v => !isObject(v))) {
+    throw new Error("invalid_project_json");
+  }
+  return cloneJSON(versions).map(version => ({
+    ...version,
+    hasFullSnapshot: Array.isArray(version.rawTasks) && Array.isArray(version.rawResources) && Array.isArray(version.rawSprints),
+  }));
+}
+
+/** 現行の正規化済みJSONエクスポートデータを組み立てる。 */
+export function buildProjectExport(tasks, resources, sprints = [], versions = []) {
+  return {
+    schemaVersion: PROJECT_SCHEMA_VERSION,
+    exportedAt: new Date().toISOString(),
+    tasks: cloneJSON(Array.isArray(tasks) ? tasks : []),
+    resources: cloneJSON(Array.isArray(resources) ? resources : []),
+    sprints: cloneJSON(Array.isArray(sprints) ? sprints : []),
+    versions: normalizeProjectVersions(versions),
+  };
+}
+
+/**
+ * JSONインポートで受け取ったデータを検証・正規化する。
+ * 現行スキーマのみ受け付け、旧形式へのフォールバックは行わない。
+ */
+export function normalizeImportedProject(data) {
+  if (
+    !isObject(data)
+    || data.schemaVersion !== PROJECT_SCHEMA_VERSION
+    || typeof data.exportedAt !== "string"
+    || !Array.isArray(data.tasks)
+    || !Array.isArray(data.resources)
+    || !Array.isArray(data.sprints)
+    || !Array.isArray(data.versions)
+  ) {
+    throw new Error("invalid_project_json");
+  }
+  return {
+    schemaVersion: data.schemaVersion,
+    exportedAt: data.exportedAt,
+    tasks: cloneJSON(data.tasks),
+    resources: cloneJSON(data.resources),
+    sprints: cloneJSON(data.sprints),
+    versions: normalizeProjectVersions(data.versions),
+  };
+}
+
 /** JSON を生成しブラウザのダウンロードとしてトリガーする（プロジェクトのエクスポート用） */
 export function downloadJSON(filename, dataObj) {
   const blob = new Blob([JSON.stringify(dataObj, null, 2)], { type: "application/json" });
