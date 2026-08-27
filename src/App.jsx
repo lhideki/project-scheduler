@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, useReducer, useCallback } from "react";
 import {
   Play, X, AlertTriangle, Check, Clock, GitBranch, Users, Table2,
-  History, Download, Upload, CalendarRange, Copy,
+  History, Download, Upload, CalendarRange, Copy, RefreshCw, Link,
 } from "lucide-react";
 
 import { toISO, parseISO, buildHolidayMap, makeCalendar, fmtJP } from "./lib/calendar.js";
@@ -14,6 +14,12 @@ import {
 import { seedData } from "./lib/seedData.js";
 import { createTaskHistory, taskHistoryReducer } from "./lib/history.js";
 import { storageGet, storageSet } from "./storage.js";
+import { getLinkedProjectKey } from "./lib/linkedProject.js";
+import {
+  getLinkedFileHandle, pickLinkedProjectFile, queryLinkedFilePermission,
+  readLinkedProjectFile, requestLinkedFilePermission, saveLinkedFileHandle,
+  supportsPersistentFileHandle,
+} from "./dom/linkedProjectFile.js";
 import { DEFAULT_WBS_COLS } from "./constants.js";
 import { IconBtn } from "./components/IconBtn.jsx";
 import { Tab } from "./components/Tab.jsx";
@@ -28,7 +34,15 @@ import { VersionsView } from "./components/VersionsView.jsx";
    ========================================================================================= */
 export default function App() {
   const seed = useMemo(() => seedData(), []);
-  const [taskHistory, dispatchTasks] = useReducer(taskHistoryReducer, seed.tasks, createTaskHistory);
+  const linkedProjectKey = useMemo(
+    () => (typeof window === "undefined" ? null : getLinkedProjectKey(window.location.search)),
+    []
+  );
+  const [taskHistory, dispatchTasks] = useReducer(
+    taskHistoryReducer,
+    linkedProjectKey ? [] : seed.tasks,
+    createTaskHistory
+  );
   const tasks = taskHistory.present;
   // 子コンポーネントには従来のReact setterと同じインターフェースを渡し、すべてのタスク更新を
   // 1つの履歴に集約する。初回ロードだけはUndo対象にせず、resetで履歴を空にする。
@@ -36,8 +50,8 @@ export default function App() {
   const resetTasks = useCallback(value => dispatchTasks({ type: "reset", value }), []);
   const undoTasks = useCallback(() => dispatchTasks({ type: "undo" }), []);
   const redoTasks = useCallback(() => dispatchTasks({ type: "redo" }), []);
-  const [resources, setResources] = useState(seed.resources);
-  const [sprints, setSprints] = useState(seed.sprints);
+  const [resources, setResources] = useState(linkedProjectKey ? [] : seed.resources);
+  const [sprints, setSprints] = useState(linkedProjectKey ? [] : seed.sprints);
   const [versions, setVersions] = useState([]);
   const [tab, setTab] = useState("gantt");
   const [selectedId, setSelectedId] = useState(null);
@@ -55,6 +69,13 @@ export default function App() {
   const [loaded, setLoaded] = useState(false);
   const [toast, setToast] = useState(null);
   const fileInputRef = useRef(null);
+  const linkedFileInputRef = useRef(null);
+  const linkedFileHandleRef = useRef(null);
+  const [linkedProjectState, setLinkedProjectState] = useState(() => (
+    linkedProjectKey
+      ? { status: "loading", fileName: null, lastModified: null, persistent: false, message: null }
+      : null
+  ));
   const [confirmState, setConfirmState] = useState(null); // { message, confirmLabel, danger, onConfirm }
   const [sprintConflictOpen, setSprintConflictOpen] = useState(false);
   // window.confirm はアーティファクトのサンドボックス化された iframe 内では許可されず
@@ -95,22 +116,92 @@ export default function App() {
     return mx;
   }, [schedule, cpm]);
 
-  // 初回ロード
+  function applyLinkedProject(data, fileInfo, persistent) {
+    resetTasks(data.tasks);
+    setResources(data.resources);
+    setSprints(data.sprints);
+    setVersions(data.versions);
+    setSelectedId(null);
+    setLinkedProjectState({
+      status: "loaded",
+      fileName: fileInfo.name,
+      lastModified: fileInfo.lastModified,
+      persistent,
+      message: null,
+    });
+  }
+
+  async function parseLinkedProjectFile(fileInfo, persistent) {
+    try {
+      const data = normalizeImportedProject(JSON.parse(fileInfo.text));
+      applyLinkedProject(data, fileInfo, persistent);
+      return true;
+    } catch (err) {
+      setLinkedProjectState(prev => ({
+        ...(prev || {}),
+        status: "error",
+        persistent,
+        message: err?.message === "invalid_project_json"
+          ? "ファイル形式が正しくありません"
+          : "JSONを解析できません",
+      }));
+      return false;
+    }
+  }
+
+  async function loadLinkedProjectHandle(handle, { requestPermission = false } = {}) {
+    let permission = await queryLinkedFilePermission(handle);
+    if (permission !== "granted" && requestPermission) {
+      permission = await requestLinkedFilePermission(handle);
+    }
+    if (permission !== "granted") {
+      setLinkedProjectState(prev => ({
+        ...(prev || {}), status: "permission-required", persistent: true, message: null,
+      }));
+      return false;
+    }
+    try {
+      const fileInfo = await readLinkedProjectFile(handle);
+      const loadedFromFile = await parseLinkedProjectFile(fileInfo, true);
+      if (loadedFromFile) linkedFileHandleRef.current = handle;
+      return loadedFromFile;
+    } catch (e) {
+      setLinkedProjectState(prev => ({
+        ...(prev || {}), status: "error", persistent: true, message: "関連付けたファイルを読み込めません",
+      }));
+      return false;
+    }
+  }
+
+  // 初回ロード。schedule queryがある場合はローカル保存より関連付け済みJSONを優先する。
   useEffect(() => {
     (async () => {
-      const proj = await storageGet("pm_project");
-      if (proj && proj.tasks && proj.tasks.length) {
-        resetTasks(migrateSprintIds(proj.tasks));
-        setResources(proj.resources || seed.resources);
-        // 旧バージョンのデータ（sprints未対応）を開いた場合は空配列にフォールバックする。
-        setSprints(Array.isArray(proj.sprints) ? proj.sprints : []);
+      if (linkedProjectKey) {
+        const handle = await getLinkedFileHandle(linkedProjectKey);
+        if (handle) {
+          linkedFileHandleRef.current = handle;
+          await loadLinkedProjectHandle(handle);
+        } else {
+          setLinkedProjectState({
+            status: "selection-required", fileName: null, lastModified: null,
+            persistent: false, message: null,
+          });
+        }
+      } else {
+        const proj = await storageGet("pm_project");
+        if (proj && proj.tasks && proj.tasks.length) {
+          resetTasks(migrateSprintIds(proj.tasks));
+          setResources(proj.resources || seed.resources);
+          // 旧バージョンのデータ（sprints未対応）を開いた場合は空配列にフォールバックする。
+          setSprints(Array.isArray(proj.sprints) ? proj.sprints : []);
+        }
+        const vs = await storageGet("pm_versions");
+        if (vs) setVersions(normalizeProjectVersions(vs));
       }
-      const vs = await storageGet("pm_versions");
-      if (vs) setVersions(normalizeProjectVersions(vs));
       setLoaded(true);
     })();
     // eslint-disable-next-line
-  }, [resetTasks, seed.resources]);
+  }, [linkedProjectKey, resetTasks, seed.resources]);
 
   // 自動スケジューリング実行によるボールド表示は、次に何らかの編集操作が行われたら解除する。
   // runScheduling 自身が行う書き戻し（setTasks）による変化はここでスキップする。
@@ -124,24 +215,78 @@ export default function App() {
 
   // 自動保存
   useEffect(() => {
-    if (!loaded) return;
+    if (!loaded || linkedProjectKey) return;
     const t = setTimeout(() => { storageSet("pm_project", { tasks, resources, sprints }); }, 800);
     return () => clearTimeout(t);
-  }, [tasks, resources, sprints, loaded]);
+  }, [tasks, resources, sprints, loaded, linkedProjectKey]);
 
   // バージョン名の変更などによる versions の更新も自動保存する
   // （新規保存・削除は即時persistしているため、これは主に名称変更のためのデバウンス保存）。
   useEffect(() => {
-    if (!loaded) return;
+    if (!loaded || linkedProjectKey) return;
     const t = setTimeout(() => { storageSet("pm_versions", versions); }, 800);
     return () => clearTimeout(t);
-  }, [versions, loaded]);
+  }, [versions, loaded, linkedProjectKey]);
 
   function renameVersion(id, newName) {
     setVersions(prev => prev.map(v => (v.id === id ? { ...v, name: newName } : v)));
   }
 
   function showToast(msg) { setToast(msg); setTimeout(() => setToast(null), 2600); }
+
+  function triggerLinkedFileInput() {
+    if (linkedFileInputRef.current) linkedFileInputRef.current.click();
+  }
+
+  async function selectLinkedProjectFile() {
+    if (!linkedProjectKey) return;
+    if (!supportsPersistentFileHandle()) {
+      triggerLinkedFileInput();
+      return;
+    }
+    try {
+      const handle = await pickLinkedProjectFile();
+      if (!handle) return;
+      setLinkedProjectState(prev => ({ ...(prev || {}), status: "loading", message: null }));
+      const loadedFromFile = await loadLinkedProjectHandle(handle);
+      if (!loadedFromFile) return;
+      try {
+        await saveLinkedFileHandle(linkedProjectKey, handle);
+      } catch (e) {
+        setLinkedProjectState(prev => ({ ...(prev || {}), persistent: false }));
+        showToast("JSONは読み込みましたが、関連付けをブラウザに保存できませんでした");
+      }
+    } catch (e) {
+      if (e?.name === "AbortError") return;
+      setLinkedProjectState(prev => ({
+        ...(prev || {}), status: "error", message: "ファイル選択を開始できません",
+      }));
+    }
+  }
+
+  async function reloadLinkedProject() {
+    const handle = linkedFileHandleRef.current || await getLinkedFileHandle(linkedProjectKey);
+    if (!handle) {
+      await selectLinkedProjectFile();
+      return;
+    }
+    setLinkedProjectState(prev => ({ ...(prev || {}), status: "loading", message: null }));
+    const loadedFromFile = await loadLinkedProjectHandle(handle, { requestPermission: true });
+    if (loadedFromFile) showToast("連携JSONを再読み込みしました");
+  }
+
+  async function handleLinkedFileInput(e) {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    setLinkedProjectState(prev => ({ ...(prev || {}), status: "loading", message: null }));
+    linkedFileHandleRef.current = null;
+    await parseLinkedProjectFile({
+      name: file.name,
+      lastModified: file.lastModified,
+      text: await file.text(),
+    }, false);
+  }
 
   // 通常表示時（cpm useMemo）は手入力済みの開始日を固定の起点として扱い、依存関係による
   // 自動的な後ろ倒しをしない。このボタンを押したときだけ、開始日の入力有無に関わらず
@@ -185,13 +330,13 @@ export default function App() {
     };
     const next = [v, ...versions];
     setVersions(next);
-    await storageSet("pm_versions", next);
+    if (!linkedProjectKey) await storageSet("pm_versions", next);
     showToast(`バージョン「${name}」を保存しました`);
   }
   async function deleteVersion(id) {
     const next = versions.filter(v => v.id !== id);
     setVersions(next);
-    await storageSet("pm_versions", next);
+    if (!linkedProjectKey) await storageSet("pm_versions", next);
     setBaselineVersionId(prev => (prev === id ? null : prev));
   }
   function restoreVersion(id) {
@@ -256,7 +401,7 @@ export default function App() {
           return normalizeProjectVersions(Array.from(map.values())).sort((a, b) => b.createdAt - a.createdAt);
         })();
         setVersions(merged);
-        await storageSet("pm_versions", merged);
+        if (!linkedProjectKey) await storageSet("pm_versions", merged);
       }
       showToast("JSONファイルからプロジェクトを読み込みました");
     }, "読み込む", false);
@@ -313,6 +458,16 @@ export default function App() {
         </div>
         <div className="flex-1" />
         <input ref={fileInputRef} type="file" accept="application/json,.json" onChange={handleImportFile} style={{ display: "none" }} />
+        {linkedProjectKey && (
+          <input
+            ref={linkedFileInputRef}
+            type="file"
+            accept="application/json,.json"
+            aria-label="連携JSONファイル"
+            onChange={handleLinkedFileInput}
+            className="sr-only"
+          />
+        )}
         <IconBtn icon={Upload} label="読み込み" onClick={triggerImport} small />
         <IconBtn icon={Download} label="書き出し" onClick={exportProject} small />
         <IconBtn icon={Copy} label="Mermaidコピー" onClick={copyMermaidGantt} small />
@@ -338,6 +493,67 @@ export default function App() {
           <AlertTriangle size={13} /> クリティカル {criticalCount}
         </div>
       </div>
+
+      {linkedProjectKey && linkedProjectState && (
+        <div className="bg-indigo-50 border-b border-indigo-200 text-xs px-4 py-2 flex items-center gap-3">
+          <Link size={14} className="text-indigo-600 flex-shrink-0" />
+          <div className="min-w-0 flex-1">
+            <div className="text-indigo-900 flex items-center gap-2 flex-wrap">
+              {linkedProjectState.status === "loading" && (
+                <><RefreshCw size={12} className="animate-spin" /> 連携JSONを確認しています...</>
+              )}
+              {linkedProjectState.status === "selection-required" && (
+                <span>queryで指定されたJSONを初回だけ選択してください。</span>
+              )}
+              {linkedProjectState.status === "permission-required" && (
+                <span>関連付け済みJSONへのアクセスを再許可してください。</span>
+              )}
+              {linkedProjectState.status === "error" && (
+                <span className="text-red-700">連携JSONを読み込めませんでした: {linkedProjectState.message}</span>
+              )}
+              {linkedProjectState.status === "loaded" && (
+                <span>
+                  <span className="font-medium">{linkedProjectState.fileName}</span>
+                  {linkedProjectState.lastModified ? `（最終更新 ${new Date(linkedProjectState.lastModified).toLocaleString("ja-JP")}）` : ""}
+                  を表示しています。この画面での変更は自動保存されません。
+                </span>
+              )}
+            </div>
+            <div className="text-[11px] text-indigo-600 truncate mt-0.5" title={linkedProjectKey}>
+              関連付けキー: <code>{linkedProjectKey}</code>
+              {linkedProjectState.status === "loaded" && !linkedProjectState.persistent
+                ? "（このブラウザでは次回もファイル選択が必要です）"
+                : ""}
+            </div>
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {linkedProjectState.status === "loaded" && linkedProjectState.persistent && (
+              <button
+                type="button"
+                onClick={reloadLinkedProject}
+                className="px-2.5 py-1 rounded-md border border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-100 flex items-center gap-1"
+              >
+                <RefreshCw size={12} /> 最新版を再読込
+              </button>
+            )}
+            {linkedProjectState.status !== "loading" && (
+              <button
+                type="button"
+                onClick={linkedProjectState.status === "permission-required" ? reloadLinkedProject : selectLinkedProjectFile}
+                className="px-2.5 py-1 rounded-md bg-indigo-600 text-white hover:bg-indigo-700"
+              >
+                {linkedProjectState.status === "loaded"
+                  ? "別のJSONを選択"
+                  : linkedProjectState.status === "permission-required"
+                    ? "アクセスを許可"
+                    : linkedProjectState.status === "error"
+                      ? "JSONを選び直す"
+                      : "JSONを選択"}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {levelWarnings.length > 0 && (
         <div className="bg-amber-50 border-b border-amber-200 text-amber-800 text-xs px-4 py-1.5 flex items-center gap-2">

@@ -65,6 +65,21 @@ Project Schedulerは、JiraやBacklogなどの共同管理ツールを置き換�
 
 ブラウザのプライベートモードやサイトデータの削除によって消える場合があるため、重要なデータは「書き出し」から定期的にJSONファイルへバックアップしてください。
 
+## 同期フォルダ内のJSONを表示する
+
+Dropbox、Google Drive、OneDriveなどのクライアントで同期されたJSONは、`schedule` queryを付けたURLから関連付けて表示できます。queryの値はローカルファイルを直接開くパスではなく、ユーザーが選択したファイルをブラウザ内で識別するキーとして使います。
+
+```text
+project_scheduler.html?schedule=%2FUsers%2Ftaro%2FDropbox%2Fschedules%2Fproject-a.json
+```
+
+1. 利用者ごとのローカルパスをURLエンコードし、`schedule` queryへ指定します。
+2. 初回表示時に「JSONを選択」を押し、queryに対応するローカルJSONを選択します。
+3. File System Access APIに対応したブラウザでは、ファイルへの関連付けをIndexedDBへ保存します。次回以降は権限が維持されていれば同じURLから自動で読み込みます。
+4. 同期後の内容を開き直す場合は「最新版を再読込」を押します。
+
+連携JSONの表示中は、画面上での変更を`localStorage`へ自動保存しません。File System Access APIに対応していないブラウザや権限が失効した場合は、JSONの再選択が必要です。HTTP(S)で配信されたURLに実際のローカルパスを含めるとアクセスログ等へ残る可能性があるため、パスを秘匿したい場合はプロジェクト名などの論理キーを指定してください。
+
 ## JSON書き出し形式
 
 JSON形式のフィールド、型、必須項目は[JSON形式ドキュメント](docs/json-format.md)にまとめています。この文書はコード内のJSON Schemaから自動生成されます。
