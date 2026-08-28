@@ -195,7 +195,7 @@ export default function App() {
           setResources(proj.resources || seed.resources);
           // 旧バージョンのデータ（sprints未対応）を開いた場合は空配列にフォールバックする。
           setSprints(Array.isArray(proj.sprints) ? proj.sprints : []);
-          if (typeof proj.levelingOn === "boolean") setLevelingOn(proj.levelingOn);
+          setLevelingOn(typeof proj.levelingOn === "boolean" ? proj.levelingOn : false);
         }
         const vs = await storageGet("pm_versions");
         if (vs) setVersions(normalizeProjectVersions(vs));
