@@ -642,15 +642,15 @@ export function WBSGanttView({
         <IconBtn icon={ChevronRight} label="インデント" onClick={() => indentTask()} small disabled={!selectedId} />
         <IconBtn icon={ChevronDown} label="アウトデント" onClick={() => outdentTask()} small disabled={!selectedId} />
         <div className="w-px h-5 bg-slate-200 mx-1" />
-        <IconBtn icon={Trash2} label="削除" onClick={() => deleteTask()} small danger disabled={!selectedId} />
+        <IconBtn icon={Trash2} label="削除" onClick={() => deleteTask()} small danger disabled={!selectedId} iconOnly />
         <div className="w-px h-5 bg-slate-200 mx-1" />
-        <IconBtn icon={Info} label="詳細" onClick={() => selectedId && setDetailId(selectedId)} small disabled={!selectedId} />
+        <IconBtn icon={Info} label="詳細" onClick={() => selectedId && setDetailId(selectedId)} small disabled={!selectedId} iconOnly />
         <div className="w-px h-5 bg-slate-200 mx-1" />
-        <IconBtn icon={Copy} label="コピー" onClick={copySelection} small disabled={!selectedId} />
-        <IconBtn icon={ClipboardPaste} label="貼り付け" onClick={pasteSelection} small disabled={!selectedId || !hasClipboard} />
+        <IconBtn icon={Copy} label="コピー" onClick={copySelection} small disabled={!selectedId} iconOnly />
+        <IconBtn icon={ClipboardPaste} label="貼り付け" onClick={pasteSelection} small disabled={!selectedId || !hasClipboard} iconOnly />
         <div className="w-px h-5 bg-slate-200 mx-1" />
-        <IconBtn icon={Undo2} label="元に戻す" onClick={onUndo} small disabled={!canUndo} />
-        <IconBtn icon={Redo2} label="やり直す" onClick={onRedo} small disabled={!canRedo} />
+        <IconBtn icon={Undo2} label="元に戻す" onClick={onUndo} small disabled={!canUndo} iconOnly />
+        <IconBtn icon={Redo2} label="やり直す" onClick={onRedo} small disabled={!canRedo} iconOnly />
         <div className="flex-1" />
         <div className="flex items-center gap-1">
           <ArrowLeftRight size={13} className="text-slate-400 flex-shrink-0" />
