@@ -32,7 +32,7 @@ describe("buildProjectExport", () => {
     const resources = [{ id: "r1", name: "担当者", weeklyCapacity: 5, monthlyCapacity: 20 }];
     const sprints = [{ id: "sp1", name: "Sprint 1", startDate: "2024-01-01", endDate: "2024-01-12", order: 0 }];
     const versions = [{ id: "v1", name: "v1", createdAt: 1, tasks: [], hasWbsInfo: true, rawTasks: [], rawResources: [], rawSprints: [], hasFullSnapshot: true }];
-    const out = buildProjectExport(tasks, resources, sprints, versions);
+    const out = buildProjectExport(tasks, resources, sprints, versions, true);
 
     expect(out.schemaVersion).toBe(PROJECT_SCHEMA_VERSION);
     expect(out.exportedAt).toMatch(/T/);
@@ -40,9 +40,15 @@ describe("buildProjectExport", () => {
     expect(out.resources).toEqual(resources);
     expect(out.sprints).toEqual(sprints);
     expect(out.versions).toEqual(versions);
+    expect(out.levelingOn).toBe(true);
 
     tasks[0].name = "changed";
     expect(out.tasks[0].name).toBe("Task");
+  });
+
+  it("levelingOn を省略すると false になる", () => {
+    const out = buildProjectExport([], [], [], []);
+    expect(out.levelingOn).toBe(false);
   });
 });
 
@@ -76,6 +82,7 @@ describe("normalizeImportedProject", () => {
       resources: [{ id: "r1", name: "担当者", weeklyCapacity: 5, monthlyCapacity: 20 }],
       sprints: [],
       versions: [],
+      levelingOn: true,
     });
 
     expect(out.tasks).toEqual([{ id: "t1", name: "Task", parentId: null, order: 0, sprintIds: ["sp1"] }]);
@@ -83,6 +90,19 @@ describe("normalizeImportedProject", () => {
     expect(out.versions).toEqual([]);
     expect(out.schemaVersion).toBe(PROJECT_SCHEMA_VERSION);
     expect(out.exportedAt).toBe("2026-08-26T00:00:00.000Z");
+    expect(out.levelingOn).toBe(true);
+  });
+
+  it("levelingOn が無い旧形式のJSONは false にフォールバックする", () => {
+    const out = normalizeImportedProject({
+      schemaVersion: PROJECT_SCHEMA_VERSION,
+      exportedAt: "2026-08-26T00:00:00.000Z",
+      tasks: [],
+      resources: [],
+      sprints: [],
+      versions: [],
+    });
+    expect(out.levelingOn).toBe(false);
   });
 
   it("旧形式や必須項目不足のJSONは拒否する", () => {

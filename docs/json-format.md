@@ -20,6 +20,7 @@ Project Scheduler の「書き出し」「読み込み」で使うJSON形式で�
 | `resources` | `resource[]` | 必須 | 担当者一覧 |
 | `sprints` | `sprint[]` | 必須 | スプリント一覧 |
 | `versions` | `version[]` | 必須 | 保存済みバージョン一覧 |
+| `levelingOn` | `boolean` | 任意 | リソース平準化の有効/無効（旧形式のJSONには存在せず、その場合は false 扱い） |
 
 ```json
 {

@@ -62,6 +62,7 @@ src/
 - `resources`: 担当者（週次・月次の稼働上限を持つ）。
 - `sprints`: `{id, name, theme, startDate, endDate, order}`。タスク側は `sprintIds`（配列）で複数参照できる（1タスク=複数スプリント可、グループには持たせない）。旧形式の単一 `sprintId` で保存されたデータは読み込み時に `migrateSprintIds()` で自動変換する。
 - `versions`: 任意タイミングのスナップショット（`rawTasks`/`rawResources`/`rawSprints` を保持）。
+- `levelingOn`: リソース平準化トグルのON/OFF（`boolean`、デフォルト`false`）。`window.storage`（`pm_project`）およびJSONエクスポート/インポートの対象。旧形式JSON（`levelingOn`キーなし）は読み込み時に`false`へフォールバックする。
 
 ### スケジューリングロジック（CPM: クリティカルパス法）
 
