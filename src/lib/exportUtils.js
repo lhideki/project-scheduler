@@ -17,6 +17,7 @@ export const PROJECT_JSON_SCHEMA = Object.freeze({
     resources: { type: "array", description: "担当者一覧", items: { $ref: "#/$defs/resource" } },
     sprints: { type: "array", description: "スプリント一覧", items: { $ref: "#/$defs/sprint" } },
     versions: { type: "array", description: "保存済みバージョン一覧", items: { $ref: "#/$defs/version" } },
+    levelingOn: { type: "boolean", default: false, description: "リソース平準化の有効/無効（旧形式のJSONには存在せず、その場合は false 扱い）" },
   },
   $defs: {
     dependency: {
@@ -140,7 +141,7 @@ export function normalizeProjectVersions(versions) {
 }
 
 /** 現行の正規化済みJSONエクスポートデータを組み立てる。 */
-export function buildProjectExport(tasks, resources, sprints = [], versions = []) {
+export function buildProjectExport(tasks, resources, sprints = [], versions = [], levelingOn = false) {
   return {
     schemaVersion: PROJECT_SCHEMA_VERSION,
     exportedAt: new Date().toISOString(),
@@ -148,6 +149,7 @@ export function buildProjectExport(tasks, resources, sprints = [], versions = []
     resources: cloneJSON(Array.isArray(resources) ? resources : []),
     sprints: cloneJSON(Array.isArray(sprints) ? sprints : []),
     versions: normalizeProjectVersions(versions),
+    levelingOn: !!levelingOn,
   };
 }
 
@@ -174,6 +176,8 @@ export function normalizeImportedProject(data) {
     resources: cloneJSON(data.resources),
     sprints: cloneJSON(data.sprints),
     versions: normalizeProjectVersions(data.versions),
+    // 旧形式のJSON（levelingOn未対応）を読み込んだ場合は false にフォールバックする。
+    levelingOn: typeof data.levelingOn === "boolean" ? data.levelingOn : false,
   };
 }
 

@@ -121,6 +121,7 @@ export default function App() {
     setResources(data.resources);
     setSprints(data.sprints);
     setVersions(data.versions);
+    setLevelingOn(typeof data.levelingOn === "boolean" ? data.levelingOn : false);
     setSelectedId(null);
     setLinkedProjectState({
       status: "loaded",
@@ -194,6 +195,7 @@ export default function App() {
           setResources(proj.resources || seed.resources);
           // 旧バージョンのデータ（sprints未対応）を開いた場合は空配列にフォールバックする。
           setSprints(Array.isArray(proj.sprints) ? proj.sprints : []);
+          if (typeof proj.levelingOn === "boolean") setLevelingOn(proj.levelingOn);
         }
         const vs = await storageGet("pm_versions");
         if (vs) setVersions(normalizeProjectVersions(vs));
@@ -216,9 +218,9 @@ export default function App() {
   // 自動保存
   useEffect(() => {
     if (!loaded || linkedProjectKey) return;
-    const t = setTimeout(() => { storageSet("pm_project", { tasks, resources, sprints }); }, 800);
+    const t = setTimeout(() => { storageSet("pm_project", { tasks, resources, sprints, levelingOn }); }, 800);
     return () => clearTimeout(t);
-  }, [tasks, resources, sprints, loaded, linkedProjectKey]);
+  }, [tasks, resources, sprints, levelingOn, loaded, linkedProjectKey]);
 
   // バージョン名の変更などによる versions の更新も自動保存する
   // （新規保存・削除は即時persistしているため、これは主に名称変更のためのデバウンス保存）。
@@ -361,7 +363,7 @@ export default function App() {
   }
 
   function exportProject() {
-    const data = buildProjectExport(tasks, resources, sprints, versions);
+    const data = buildProjectExport(tasks, resources, sprints, versions, levelingOn);
     downloadJSON(`project-scheduler_${toISO(new Date())}.json`, data);
     showToast("プロジェクトをJSONファイルに書き出しました");
   }
@@ -393,6 +395,7 @@ export default function App() {
       setTasks(data.tasks);
       setResources(data.resources);
       setSprints(data.sprints);
+      setLevelingOn(typeof data.levelingOn === "boolean" ? data.levelingOn : false);
       setSelectedId(null);
       if (Array.isArray(data.versions) && data.versions.length) {
         const merged = (() => {
