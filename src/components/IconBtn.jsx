@@ -9,6 +9,8 @@ export function IconBtn({ icon: Icon, label, onClick, active, danger, disabled, 
       onClick={onClick}
       disabled={disabled}
       title={label}
+      aria-label={label}
+      aria-pressed={active !== undefined ? !!active : undefined}
       className={
         "inline-flex items-center gap-1.5 rounded-md border transition-colors " +
         (small ? (iconOnly ? "p-1 text-xs " : "px-2 py-1 text-xs ") : "px-3 py-1.5 text-sm ") +
