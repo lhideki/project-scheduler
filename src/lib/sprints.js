@@ -1,6 +1,9 @@
 /* =========================================================================================
-   スプリント関連ヘルパー（配色・期間重複検出）
+   スプリント関連ヘルパー（配色・期間重複検出・スケジュール矛盾検出）
    ========================================================================================= */
+
+import { fmtJP } from "./calendar.js";
+import { buildFlatList } from "./taskTree.js";
 
 /**
  * @typedef {Object} Sprint
@@ -29,6 +32,55 @@ export function sprintColorForId(id) {
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
   return SPRINT_PALETTE[Math.abs(h) % SPRINT_PALETTE.length];
 }
+/**
+ * 最終的な表示スケジュール（schedule）が、各タスクの所属スプリント期間からはみ出していないかを判定する。
+ * 複数スプリントが紐付く場合は、それらの期間の和集合（最も早い開始日〜最も遅い終了日）を基準にする
+ * （タスクが複数スプリントにまたがること自体は許容するため）。App のヘッダーのアラートアイコン／
+ * ダイアログ一覧、および CLI のレポートで共有する。
+ * @param {import("./taskTree.js").Task[]} tasks
+ * @param {Sprint[]} sprints
+ * @param {Map<string, import("./scheduling.js").ScheduleEntry>} schedule
+ * @returns {{taskId: string, name: string, wbsNo: string, sprintName: string, reasons: string[]}[]}
+ */
+export function detectSprintConflicts(tasks, sprints, schedule) {
+  if (!sprints || !sprints.length) return [];
+  const sprintById = {};
+  sprints.forEach(s => (sprintById[s.id] = s));
+  const wbsNoById = {};
+  buildFlatList(tasks, new Set()).forEach(t => (wbsNoById[t.id] = t.wbsNo));
+  // 他タスクから parentId 参照されているタスク＝グループ。タスクごとに isGroupId（内部で
+  // tasks.some）を呼ぶと O(n^2) になるため、親ID集合を1回だけ作って線形で判定する。
+  const groupIds = new Set();
+  tasks.forEach(t => { if (t.parentId != null) groupIds.add(t.parentId); });
+  const out = [];
+  tasks.forEach(t => {
+    const ids = t.sprintIds || [];
+    if (!ids.length) return;
+    if (groupIds.has(t.id)) return; // グループにはスプリントを紐付けない
+    const sps = ids.map(id => sprintById[id]).filter(sp => sp && sp.startDate && sp.endDate);
+    if (!sps.length) return; // 削除済み・未設定のスプリント参照のみの場合は対象外
+    const rangeStart = sps.reduce((mn, sp) => (sp.startDate < mn ? sp.startDate : mn), sps[0].startDate);
+    const rangeEnd = sps.reduce((mx, sp) => (sp.endDate > mx ? sp.endDate : mx), sps[0].endDate);
+    const s = schedule.get(t.id);
+    if (!s || !s.schedStart || !s.schedFinish) return;
+    const reasons = [];
+    if (s.schedStart < rangeStart) {
+      reasons.push(`開始日（${fmtJP(s.schedStart)}）がスプリント開始日（${fmtJP(rangeStart)}）より前になっています`);
+    }
+    if (s.schedFinish > rangeEnd) {
+      reasons.push(`終了日（${fmtJP(s.schedFinish)}）がスプリント終了日（${fmtJP(rangeEnd)}）を超えています`);
+    }
+    if (!reasons.length) return;
+    if (s.governed) {
+      reasons.push("固定マイルストーンの期日が優先されているため、スプリント期間内に収まりません");
+    }
+    const sprintName = sps.map(sp => sp.name || sp.theme || "（無題のスプリント）").join("、");
+    out.push({ taskId: t.id, name: t.name, wbsNo: wbsNoById[t.id] || "", sprintName, reasons });
+  });
+  out.sort((a, b) => (a.wbsNo || "").localeCompare(b.wbsNo || "", undefined, { numeric: true }));
+  return out;
+}
+
 /** 開始日・終了日が重なっているスプリントのIDを集める（保存はできるが警告表示に使う）。 */
 export function computeOverlappingSprintIds(sprints) {
   const ids = new Set();

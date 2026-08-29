@@ -1,0 +1,15 @@
+{
+  "name": "schedule-adjust",
+  "displayName": "Project Scheduler スケジュール調整",
+  "version": "0.1.0",
+  "description": "Project Scheduler の保存JSON（schemaVersion:1）を読み書きして、CPM再計算・リソース平準化・整合性チェック・変更影響レポートを行う AIエージェント用 Skill。",
+  "author": {
+    "name": "lhideki",
+    "url": "https://github.com/lhideki"
+  },
+  "homepage": "https://github.com/lhideki/project-scheduler",
+  "repository": "https://github.com/lhideki/project-scheduler",
+  "license": "MIT",
+  "keywords": ["project-management", "gantt", "wbs", "cpm", "scheduling", "resource-leveling"],
+  "skills": "./.claude/skills/"
+}

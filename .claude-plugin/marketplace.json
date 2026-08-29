@@ -1,0 +1,14 @@
+{
+  "name": "project-scheduler",
+  "owner": {
+    "name": "lhideki",
+    "url": "https://github.com/lhideki"
+  },
+  "plugins": [
+    {
+      "name": "schedule-adjust",
+      "source": "./",
+      "description": "Project Scheduler の保存JSONを読み書きして、依存関係・進捗率・スプリント・リソースを踏まえたスケジュール調整を行う Skill（CPM再計算・リソース平準化・整合性チェック・変更影響レポート）。"
+    }
+  ]
+}

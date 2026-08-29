@@ -9,7 +9,8 @@
     "build:css": "tailwindcss -i ./src/input.css -o ./dist/output.css --minify",
     "build:html": "node scripts/build-html.mjs",
     "build:docs": "node scripts/build-json-doc.mjs",
-    "build": "npm run build:js && npm run build:css && npm run build:html && npm run build:docs",
+    "build:agent": "node scripts/build-agent.mjs",
+    "build": "npm run build:js && npm run build:css && npm run build:html && npm run build:docs && npm run build:agent",
     "dev:js": "esbuild src/entry.jsx --bundle --loader:.jsx=jsx --outfile=dist/bundle.dev.js --watch",
     "test": "vitest run",
     "test:watch": "vitest"

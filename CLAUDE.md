@@ -21,10 +21,12 @@ npm run build     # project_scheduler.html を生成（リポジトリ直下に�
 | `npm run build:js` | `src/entry.jsx` を esbuild でバンドル・minify し `dist/bundle.js` を生成 |
 | `npm run build:css` | `src/input.css`（Tailwindディレクティブ）から `dist/output.css` を生成 |
 | `npm run build:html` | `template.html` に `dist/bundle.js` と `dist/output.css` を差し込み `project_scheduler.html` を生成 |
+| `npm run build:docs` | `PROJECT_JSON_SCHEMA` から `docs/json-format.md` を生成 |
+| `npm run build:agent` | `src/agent/cli.js`（と `src/lib/`）を esbuild でバンドルし `.claude/skills/schedule-adjust/cli.mjs` を生成（AIエージェント用Skillのランタイム。非minify） |
 
 `npm run dev:js` で `dist/bundle.dev.js` を watch モードでビルドできる（非minify、デバッグ用）。ただし現状 `template.html` は本番ビルドのプレースホルダー差し込み専用なので、開発中の動作確認は `dist/bundle.dev.js` を手元のHTMLから読み込むか、`npm run build` を都度実行して `project_scheduler.html` をブラウザで開いて確認する。
 
-**重要**: `src/` 配下のソースを編集したら、必ず `npm run build` を実行してから `project_scheduler.html` の差分も一緒にコミットすること。`project_scheduler.html` を手で直接編集しない（ビルド成果物のため、次回ビルドで上書きされる）。
+**重要**: `src/` 配下のソースを編集したら、必ず `npm run build` を実行してからビルド成果物（`project_scheduler.html`・`docs/json-format.md`・`.claude/skills/schedule-adjust/cli.mjs`）の差分も一緒にコミットすること。これらの成果物を手で直接編集しない（次回ビルドで上書きされる）。
 
 ## ソース構成
 
@@ -47,12 +49,20 @@ src/
     *.test.js                     # 上記各モジュールに対応するVitestユニットテスト
   dom/
     pointerDrag.js         # ポインタドラッグ・SVG座標変換・日付スケール（DOM API依存のため lib/ とは別）
+  agent/                   # AIエージェント用SkillのCLI（Node実行。src/lib/ を再利用する薄い層）
+    engine.js                # src/lib/ から必要な関数を再エクスポートするだけの集約点
+    cli.js                    # 引数パース・ファイル読み込み・レポート整形（計算ロジックは持たない）
+    cli.test.js               # computeSchedule 等が src/lib/ と一致することを担保するVitestテスト
   components/
     WBSGanttView.jsx、TaskDetailModal.jsx、NetworkView.jsx、ResourceView.jsx、
     SprintsView.jsx、VersionsView.jsx、IconBtn.jsx、Tab.jsx 他             # Reactコンポーネント
 ```
 
 新しい純粋ロジック（日付計算・依存関係解決・スケジューリング・データ変換など、Reactやブラウザ固有APIに依存しない処理）を追加する場合は `src/lib/` に置き、対応する `*.test.js` を書くこと。DOM/ブラウザAPI（`window`・`document`・ポインタイベント等）に依存するが React 非依存のヘルパーは `src/dom/` に置く。Reactコンポーネントは `src/components/` に1コンポーネント1ファイルで置く。
+
+### AIエージェント用Skill（`.claude/skills/schedule-adjust/`）
+
+保存JSONを読み書きしてスケジュール調整を行うためのSkill。`SKILL.md` はエージェント向け手順書、`cli.mjs` は `npm run build:agent` の生成物。CLI（`validate`/`recalc`/`plan`/`explain`）はスケジュール計算に `src/lib/` を**そのまま**使う（App.jsx の `cpm`/`schedule` useMemo と同じ手順を `src/agent/cli.js` の `computeSchedule` が再現）。CLIの計算結果がアプリとずれないよう、`src/lib/` のスケジューリング仕様を変えたら `src/agent/cli.test.js` が通ることを必ず確認する。**`src/agent/cli.js` にCPM等の計算ロジックを書かない**（`src/lib/` を呼ぶだけ）。CLIは設計上JSONファイルを書き換えない（保存はエージェントが手順に従って行う）。
 
 ## アーキテクチャ
 
@@ -104,6 +114,7 @@ npm run test:watch  # watchモード（開発中）
 ```
 
 - `src/lib/` に新しい純粋ロジックを追加・変更した場合は、対応する `*.test.js` を必ず追加・更新すること。特に `runCPM`/`levelResources`（`scheduling.js`）はCLAUDE.mdに明文化された仕様（固定マイルストーンのみLS/LFを使う、進捗済みタスクはピン留めする等）の回帰を防ぐ最重要テスト対象なので、挙動を変える変更をした場合は既存テストが仕様変更を正しく反映しているか必ず確認する。
+- `src/agent/cli.test.js` は、CLIのスケジュール計算（`computeSchedule`）が `src/lib/` の `runCPM` と一致すること・整合性チェック・バージョンスナップショット構造を担保する。`scheduling.js` の仕様を変えたらここも確認する。
 - `src/components/`・`src/App.jsx`（Reactコンポーネント）はユニットテストの対象外。次節の手動確認で担保する。
 
 ## コミットメッセージ

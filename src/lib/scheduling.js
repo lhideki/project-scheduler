@@ -113,6 +113,20 @@ export function topoOrder(ids, edgesByTo) {
 }
 
 /**
+ * プロジェクト全体の開始日を、開始日が入力されている全タスクのうち最も早い日付として求める。
+ * 開始日を持つタスクが1つも無い場合は fallback（未指定なら実行時の当日）を返す。
+ * runCPM / levelResources に projectStart を渡す前段の共通ロジック（App と CLI で共有する）。
+ * @param {import("./taskTree.js").Task[]} tasks
+ * @param {string} [fallback] - 開始日を持つタスクが無い場合に返す日付（YYYY-MM-DD）
+ * @returns {string} YYYY-MM-DD
+ */
+export function deriveProjectStart(tasks, fallback) {
+  const dates = (tasks || []).filter(t => t && t.startDate).map(t => t.startDate);
+  if (dates.length) return dates.reduce((a, b) => (a < b ? a : b));
+  return fallback || toISO(new Date());
+}
+
+/**
  * タスクに紐付く複数スプリントのうち、最も早い開始日（稼働日補正済み）を「希望開始日の下限」として返す。
  * 紐付くスプリントが無い／いずれも開始日未設定の場合は null。runCPM・levelResources で共通利用する。
  * @param {string[]|undefined} sprintIds

@@ -41,6 +41,7 @@ Project Schedulerは、JiraやBacklogなどの共同管理ツールを置き換�
 - タスクの依存関係をネットワーク図(PERT図)で確認し、Mermaid形式でもコピーできます。
 - 任意のタイミングでスナップショットを保存し、複数バージョンの比較や過去の状態への復元ができます。
 - プロジェクト全体(タスク・担当者・スプリント・バージョン履歴)をJSONファイルとして書き出し・読み込みできます。
+- Claude Code 向けの Skill を同梱し、AIエージェントに保存JSONを直接調整させられます([詳細](#aiエージェントでスケジュールを調整する))。
 
 <details>
 <summary>その他の画面を見る</summary>
@@ -80,6 +81,33 @@ project_scheduler.html?schedule=%2FUsers%2Ftaro%2FDropbox%2Fschedules%2Fproject-
 
 連携JSONの表示中は、画面上での変更を`localStorage`へ自動保存しません。File System Access APIに対応していないブラウザや権限が失効した場合は、JSONの再選択が必要です。HTTP(S)で配信されたURLに実際のローカルパスを含めるとアクセスログ等へ残る可能性があるため、パスを秘匿したい場合はプロジェクト名などの論理キーを指定してください。
 
+## AIエージェントでスケジュールを調整する
+
+Claude Code 向けの Skill「schedule-adjust」を同梱しています。保存JSON（`schemaVersion: 1`）を
+読み書きして、「このタスクを2週間後ろ倒しして依存タスクを自動調整」「担当者がかぶらないように平準化」
+「着手済みの遅延を踏まえて引き直す」といった依頼を、画面操作なしで処理できます。
+
+CPM再計算・リソース平準化・整合性チェック・変更影響レポートは同梱のCLI（`.claude/skills/schedule-adjust/cli.mjs`、
+Node 18以上・追加インストール不要）が担当します。**CLIはJSONファイルを書き換えません。** Skillは
+「変更内容のレポートを提示 → 保存してよいか確認 → 承認後に書き込み」の順で進めます。変更前の状態は
+`versions[]` スナップショットへ自動保存され、アプリのバージョン比較・復元で参照できます。
+
+### 導入
+
+リポジトリを開いて作業する場合は、`.claude/skills/schedule-adjust/` がプロジェクトSkillとして自動で有効になります。
+それ以外の環境へは Claude Code プラグインとして導入できます。
+
+```shell
+/plugin marketplace add lhideki/project-scheduler
+/plugin install schedule-adjust@project-scheduler
+```
+
+### アプリとの往復
+
+「同期フォルダ内のJSONを表示する」でローカルJSONを関連付けておくと、エージェントが編集したファイルを
+アプリの「最新版を再読込」で取り込めます。関連付けていない場合は、書き出したJSONを編集してもらい、
+「読み込み」で取り込みます。
+
 ## JSON書き出し形式
 
 JSON形式のフィールド、型、必須項目は[JSON形式ドキュメント](docs/json-format.md)にまとめています。この文書はコード内のJSON Schemaから自動生成されます。
@@ -104,7 +132,7 @@ npm run test
 npm run build
 ```
 
-`npm run build`は次の4ステップを順に実行します。
+`npm run build`は次の5ステップを順に実行します。
 
 | コマンド | 内容 |
 | --- | --- |
@@ -112,6 +140,7 @@ npm run build
 | `npm run build:css` | `src/input.css`から`dist/output.css`を生成します。 |
 | `npm run build:html` | JavaScriptとCSSを`template.html`へ差し込み、`project_scheduler.html`を生成します。 |
 | `npm run build:docs` | コード内のJSON Schemaから`docs/json-format.md`を生成します。 |
+| `npm run build:agent` | `src/agent/cli.js`をバンドルし、Skill用の`.claude/skills/schedule-adjust/cli.mjs`を生成します。 |
 
 ### 主なディレクトリ
 
@@ -122,11 +151,14 @@ npm run build
 │   ├── components/          # WBS / ガントなどのUIコンポーネント
 │   ├── lib/                 # CPM、カレンダー、依存関係、JSON入出力などのロジックとテスト
 │   ├── dom/                 # ポインタードラッグなどのDOMヘルパー
+│   ├── agent/               # AIエージェント用SkillのCLI（src/lib/を再利用するNodeスクリプト）
 │   ├── entry.jsx            # Reactアプリのエントリポイント
 │   ├── input.css            # Tailwind CSSの入力ファイル
 │   └── storage.js           # window.storageとlocalStorageの接続
-├── scripts/                 # HTMLとJSON文書の生成スクリプト
+├── scripts/                 # HTML・JSON文書・Skill CLIの生成スクリプト
 ├── docs/                    # JSON文書とREADME用画像
+├── .claude/skills/          # Claude Code 向け Skill（schedule-adjust）
+├── .claude-plugin/          # プラグインマーケットプレイス定義
 ├── template.html            # 配布用HTMLの雛形
 └── project_scheduler.html   # ビルド済みの配布物
 ```
