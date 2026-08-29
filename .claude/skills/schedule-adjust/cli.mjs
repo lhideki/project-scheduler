@@ -630,11 +630,15 @@ function detectSprintConflicts(tasks, sprints, schedule) {
   sprints.forEach((s) => sprintById[s.id] = s);
   const wbsNoById = {};
   buildFlatList(tasks, /* @__PURE__ */ new Set()).forEach((t) => wbsNoById[t.id] = t.wbsNo);
+  const groupIds = /* @__PURE__ */ new Set();
+  tasks.forEach((t) => {
+    if (t.parentId != null) groupIds.add(t.parentId);
+  });
   const out = [];
   tasks.forEach((t) => {
     const ids = t.sprintIds || [];
     if (!ids.length) return;
-    if (isGroupId(tasks, t.id)) return;
+    if (groupIds.has(t.id)) return;
     const sps = ids.map((id) => sprintById[id]).filter((sp) => sp && sp.startDate && sp.endDate);
     if (!sps.length) return;
     const rangeStart = sps.reduce((mn, sp) => sp.startDate < mn ? sp.startDate : mn, sps[0].startDate);
@@ -944,6 +948,115 @@ function nameOf(tasks, id) {
   const t = tasks.find((x) => x.id === id);
   return t ? t.name : id;
 }
+var ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+function isISODate(v) {
+  if (typeof v !== "string" || !ISO_DATE_RE.test(v)) return false;
+  const d = /* @__PURE__ */ new Date(`${v}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && v === d.toISOString().slice(0, 10);
+}
+function isFiniteNumber(v) {
+  return typeof v === "number" && Number.isFinite(v);
+}
+function checkFieldShapes(data) {
+  const issues = [];
+  const label = (t, i) => `\u30BF\u30B9\u30AF#${i + 1}${t && t.name ? `\u300C${t.name}\u300D` : t && t.id ? `\uFF08id: ${t.id}\uFF09` : ""}`;
+  const DEP_TYPES = /* @__PURE__ */ new Set(["FS", "SS", "FF", "SF"]);
+  (data.tasks || []).forEach((t, i) => {
+    if (typeof t !== "object" || t === null) {
+      issues.push({ severity: "error", code: "task-not-object", message: `\u30BF\u30B9\u30AF#${i + 1} \u304C\u30AA\u30D6\u30B8\u30A7\u30AF\u30C8\u3067\u306F\u3042\u308A\u307E\u305B\u3093` });
+      return;
+    }
+    if (typeof t.id !== "string" || !t.id) {
+      issues.push({ severity: "error", code: "task-id-invalid", message: `${label(t, i)} \u306E id \u304C\u6587\u5B57\u5217\u3067\u306F\u3042\u308A\u307E\u305B\u3093` });
+    }
+    if (t.parentId != null && typeof t.parentId !== "string") {
+      issues.push({ severity: "error", code: "task-parentId-invalid", ids: [t.id], message: `${label(t, i)} \u306E parentId \u304C\u6587\u5B57\u5217\u3067\u3082 null \u3067\u3082\u3042\u308A\u307E\u305B\u3093` });
+    }
+    if (t.startDate != null && !isISODate(t.startDate)) {
+      issues.push({ severity: "error", code: "task-startDate-invalid", ids: [t.id], message: `${label(t, i)} \u306E startDate\u300C${t.startDate}\u300D\u304C YYYY-MM-DD \u5F62\u5F0F\u3067\u306F\u3042\u308A\u307E\u305B\u3093` });
+    }
+    if (t.fixedDate != null && !isISODate(t.fixedDate)) {
+      issues.push({ severity: "error", code: "task-fixedDate-invalid", ids: [t.id], message: `${label(t, i)} \u306E fixedDate\u300C${t.fixedDate}\u300D\u304C YYYY-MM-DD \u5F62\u5F0F\u3067\u306F\u3042\u308A\u307E\u305B\u3093` });
+    }
+    if (t.duration != null && !isFiniteNumber(t.duration)) {
+      issues.push({ severity: "error", code: "task-duration-invalid", ids: [t.id], message: `${label(t, i)} \u306E duration \u304C\u6570\u5024\u3067\u306F\u3042\u308A\u307E\u305B\u3093` });
+    }
+    if (t.progress != null && !isFiniteNumber(t.progress)) {
+      issues.push({ severity: "error", code: "task-progress-invalid", ids: [t.id], message: `${label(t, i)} \u306E progress \u304C\u6570\u5024\u3067\u306F\u3042\u308A\u307E\u305B\u3093` });
+    }
+    if (t.sprintIds != null && !Array.isArray(t.sprintIds)) {
+      issues.push({ severity: "error", code: "task-sprintIds-invalid", ids: [t.id], message: `${label(t, i)} \u306E sprintIds \u304C\u914D\u5217\u3067\u306F\u3042\u308A\u307E\u305B\u3093` });
+    }
+    if (t.predecessors != null && !Array.isArray(t.predecessors)) {
+      issues.push({ severity: "error", code: "task-predecessors-invalid", ids: [t.id], message: `${label(t, i)} \u306E predecessors \u304C\u914D\u5217\u3067\u306F\u3042\u308A\u307E\u305B\u3093` });
+    } else {
+      (t.predecessors || []).forEach((p, j) => {
+        if (typeof p !== "object" || p === null || typeof p.id !== "string" || !p.id) {
+          issues.push({ severity: "error", code: "dependency-id-invalid", ids: [t.id], message: `${label(t, i)} \u306E\u5148\u884C\u30BF\u30B9\u30AF#${j + 1} \u306B id \u304C\u3042\u308A\u307E\u305B\u3093` });
+        }
+        if (!DEP_TYPES.has(p && p.type)) {
+          issues.push({ severity: "error", code: "dependency-type-invalid", ids: [t.id], message: `${label(t, i)} \u306E\u5148\u884C\u30BF\u30B9\u30AF#${j + 1} \u306E type\u300C${p && p.type}\u300D\u304C FS/SS/FF/SF \u3067\u306F\u3042\u308A\u307E\u305B\u3093` });
+        }
+        if (p && p.lag != null && !isFiniteNumber(p.lag)) {
+          issues.push({ severity: "error", code: "dependency-lag-invalid", ids: [t.id], message: `${label(t, i)} \u306E\u5148\u884C\u30BF\u30B9\u30AF#${j + 1} \u306E lag \u304C\u6570\u5024\u3067\u306F\u3042\u308A\u307E\u305B\u3093` });
+        }
+      });
+    }
+  });
+  (data.resources || []).forEach((r, i) => {
+    if (typeof r !== "object" || r === null || typeof r.id !== "string" || !r.id) {
+      issues.push({ severity: "error", code: "resource-id-invalid", message: `\u30EA\u30BD\u30FC\u30B9#${i + 1} \u306E id \u304C\u6587\u5B57\u5217\u3067\u306F\u3042\u308A\u307E\u305B\u3093` });
+    }
+    if (r && r.weeklyCapacity != null && !isFiniteNumber(r.weeklyCapacity)) {
+      issues.push({ severity: "error", code: "resource-weeklyCapacity-invalid", message: `\u30EA\u30BD\u30FC\u30B9#${i + 1} \u306E weeklyCapacity \u304C\u6570\u5024\u3067\u306F\u3042\u308A\u307E\u305B\u3093` });
+    }
+    if (r && r.monthlyCapacity != null && !isFiniteNumber(r.monthlyCapacity)) {
+      issues.push({ severity: "error", code: "resource-monthlyCapacity-invalid", message: `\u30EA\u30BD\u30FC\u30B9#${i + 1} \u306E monthlyCapacity \u304C\u6570\u5024\u3067\u306F\u3042\u308A\u307E\u305B\u3093` });
+    }
+  });
+  (data.sprints || []).forEach((s, i) => {
+    if (typeof s !== "object" || s === null || typeof s.id !== "string" || !s.id) {
+      issues.push({ severity: "error", code: "sprint-id-invalid", message: `\u30B9\u30D7\u30EA\u30F3\u30C8#${i + 1} \u306E id \u304C\u6587\u5B57\u5217\u3067\u306F\u3042\u308A\u307E\u305B\u3093` });
+    }
+    if (s && s.startDate != null && !isISODate(s.startDate)) {
+      issues.push({ severity: "error", code: "sprint-startDate-invalid", message: `\u30B9\u30D7\u30EA\u30F3\u30C8#${i + 1} \u306E startDate\u300C${s.startDate}\u300D\u304C YYYY-MM-DD \u5F62\u5F0F\u3067\u306F\u3042\u308A\u307E\u305B\u3093` });
+    }
+    if (s && s.endDate != null && !isISODate(s.endDate)) {
+      issues.push({ severity: "error", code: "sprint-endDate-invalid", message: `\u30B9\u30D7\u30EA\u30F3\u30C8#${i + 1} \u306E endDate\u300C${s.endDate}\u300D\u304C YYYY-MM-DD \u5F62\u5F0F\u3067\u306F\u3042\u308A\u307E\u305B\u3093` });
+    }
+  });
+  return issues;
+}
+function findParentCycles(tasks) {
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const cycles = [];
+  const reportedKeys = /* @__PURE__ */ new Set();
+  const settled = /* @__PURE__ */ new Set();
+  for (const start of tasks) {
+    if (settled.has(start.id)) continue;
+    const path = [];
+    const inPath = /* @__PURE__ */ new Set();
+    let cur = start;
+    let hitCycle = false;
+    while (cur && cur.parentId != null) {
+      if (inPath.has(cur.id)) {
+        const cyc = path.slice(path.indexOf(cur.id));
+        const key = [...cyc].sort().join("\0");
+        if (!reportedKeys.has(key)) {
+          reportedKeys.add(key);
+          cycles.push(cyc);
+        }
+        hitCycle = true;
+        break;
+      }
+      path.push(cur.id);
+      inPath.add(cur.id);
+      cur = byId.get(cur.parentId);
+    }
+    if (!hitCycle) path.forEach((id) => settled.add(id));
+  }
+  return cycles;
+}
 function findDependencyCycles(tasks) {
   const adj = new Map(tasks.map((t) => [t.id, []]));
   for (const t of tasks) {
@@ -973,8 +1086,10 @@ function findDependencyCycles(tasks) {
   return cycles;
 }
 function analyzeIntegrity(data) {
-  const issues = [];
   const tasks = data.tasks || [];
+  const shapeIssues = checkFieldShapes(data);
+  if (shapeIssues.some((i) => i.severity === "error")) return shapeIssues;
+  const issues = [...shapeIssues];
   const seen = /* @__PURE__ */ new Set();
   const dup = /* @__PURE__ */ new Set();
   for (const t of tasks) {
@@ -983,6 +1098,14 @@ function analyzeIntegrity(data) {
   }
   for (const id of dup) {
     issues.push({ severity: "error", code: "duplicate-task-id", ids: [id], message: `\u30BF\u30B9\u30AFID\u300C${id}\u300D\u304C\u91CD\u8907\u3057\u3066\u3044\u307E\u3059` });
+  }
+  for (const cyc of findParentCycles(tasks)) {
+    issues.push({
+      severity: "error",
+      code: "parent-cycle",
+      ids: cyc,
+      message: `\u89AA\u5B50\u95A2\u4FC2\u304C\u5FAA\u74B0\u3057\u3066\u3044\u307E\u3059: ${cyc.map((id) => nameOf(tasks, id)).join(" \u2192 ")}`
+    });
   }
   const taskIds = seen;
   const resIds = new Set((data.resources || []).map((r) => r.id));
@@ -1067,6 +1190,13 @@ function applyAutoSchedule(data, projectStart, cal) {
   });
   return { tasks, changed };
 }
+function tryComputeSchedule(data, opts) {
+  try {
+    return { ok: true, result: computeSchedule(data, opts) };
+  } catch (e) {
+    return { ok: false, error: `\u30B9\u30B1\u30B8\u30E5\u30FC\u30EB\u8A08\u7B97\u306B\u5931\u6557\u3057\u307E\u3057\u305F: ${String(e && e.message || e)}` };
+  }
+}
 function cmdValidate(positional) {
   const [path] = positional;
   if (!path) fail("\u4F7F\u3044\u65B9: validate <file>");
@@ -1110,7 +1240,11 @@ function cmdRecalc(positional, opts) {
   const data = normalizeOrFail(readProjectFile(path), path);
   const integrity = analyzeIntegrity(data);
   const leveling = resolveLeveling(opts.leveling, data);
-  const r = computeSchedule(data, { respectManualPins: true, leveling });
+  const computed = tryComputeSchedule(data, { respectManualPins: true, leveling });
+  if (!computed.ok) {
+    return emit({ command: "recalc", file: path, computeFailed: true, error: computed.error, integrityIssues: integrity });
+  }
+  const r = computed.result;
   emit({
     command: "recalc",
     file: path,
@@ -1148,7 +1282,11 @@ function cmdPlan(positional, opts) {
   const reschedule = !!opts.reschedule;
   const beforeLeveling = !!original.levelingOn;
   const afterLeveling = resolveLeveling(opts.leveling, edited);
-  const before = computeSchedule(original, { respectManualPins: true, leveling: beforeLeveling });
+  const beforeComputed = tryComputeSchedule(original, { respectManualPins: true, leveling: beforeLeveling });
+  if (!beforeComputed.ok) {
+    return emit({ command: "plan", original: originalPath, edited: editedPath, blocked: true, reason: beforeComputed.error, integrityIssues: analyzeIntegrity(original) });
+  }
+  const before = beforeComputed.result;
   let proposedTasks = edited.tasks;
   let startDateChanges = [];
   if (reschedule) {
@@ -1166,7 +1304,11 @@ function cmdPlan(positional, opts) {
     versions: [buildVersionSnapshot(original, before.schedule, snapshotName), ...edited.versions],
     exportedAt: (/* @__PURE__ */ new Date()).toISOString()
   };
-  const after = computeSchedule(proposed, { respectManualPins: true, leveling: afterLeveling });
+  const afterComputed = tryComputeSchedule(proposed, { respectManualPins: true, leveling: afterLeveling });
+  if (!afterComputed.ok) {
+    return emit({ command: "plan", original: originalPath, edited: editedPath, blocked: true, reason: afterComputed.error, integrityIssues: integrity });
+  }
+  const after = afterComputed.result;
   const leveling = afterLeveling;
   const beforeRows = scheduleRows(original, before.schedule);
   const afterRows = scheduleRows(proposed, after.schedule);
@@ -1239,7 +1381,11 @@ function cmdExplain(positional, opts) {
   const task = data.tasks.find((t) => t.id === taskId);
   if (!task) fail(`\u30BF\u30B9\u30AF\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093: ${taskId}`);
   const leveling = resolveLeveling(opts.leveling, data);
-  const r = computeSchedule(data, { respectManualPins: true, leveling });
+  const computed = tryComputeSchedule(data, { respectManualPins: true, leveling });
+  if (!computed.ok) {
+    return emit({ command: "explain", file: path, computeFailed: true, error: computed.error, integrityIssues: analyzeIntegrity(data) });
+  }
+  const r = computed.result;
   const s = r.schedule.get(taskId) || {};
   const byId = {};
   data.tasks.forEach((t) => byId[t.id] = t);
@@ -1347,7 +1493,9 @@ export {
   analyzeIntegrity,
   applyAutoSchedule,
   buildVersionSnapshot,
+  checkFieldShapes,
   computeSchedule,
   findDependencyCycles,
+  findParentCycles,
   scheduleRows
 };

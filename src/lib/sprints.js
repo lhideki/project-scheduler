@@ -3,7 +3,7 @@
    ========================================================================================= */
 
 import { fmtJP } from "./calendar.js";
-import { isGroupId, buildFlatList } from "./taskTree.js";
+import { buildFlatList } from "./taskTree.js";
 
 /**
  * @typedef {Object} Sprint
@@ -48,11 +48,15 @@ export function detectSprintConflicts(tasks, sprints, schedule) {
   sprints.forEach(s => (sprintById[s.id] = s));
   const wbsNoById = {};
   buildFlatList(tasks, new Set()).forEach(t => (wbsNoById[t.id] = t.wbsNo));
+  // 他タスクから parentId 参照されているタスク＝グループ。タスクごとに isGroupId（内部で
+  // tasks.some）を呼ぶと O(n^2) になるため、親ID集合を1回だけ作って線形で判定する。
+  const groupIds = new Set();
+  tasks.forEach(t => { if (t.parentId != null) groupIds.add(t.parentId); });
   const out = [];
   tasks.forEach(t => {
     const ids = t.sprintIds || [];
     if (!ids.length) return;
-    if (isGroupId(tasks, t.id)) return; // グループにはスプリントを紐付けない
+    if (groupIds.has(t.id)) return; // グループにはスプリントを紐付けない
     const sps = ids.map(id => sprintById[id]).filter(sp => sp && sp.startDate && sp.endDate);
     if (!sps.length) return; // 削除済み・未設定のスプリント参照のみの場合は対象外
     const rangeStart = sps.reduce((mn, sp) => (sp.startDate < mn ? sp.startDate : mn), sps[0].startDate);

@@ -5,8 +5,8 @@ import { buildProjectExport } from "../lib/exportUtils.js";
 import { buildHolidayMap, makeCalendar, parseISO } from "../lib/calendar.js";
 import { runCPM } from "../lib/scheduling.js";
 import {
-  computeSchedule, scheduleRows, analyzeIntegrity, findDependencyCycles,
-  buildVersionSnapshot, applyAutoSchedule,
+  computeSchedule, scheduleRows, analyzeIntegrity, findDependencyCycles, findParentCycles,
+  checkFieldShapes, buildVersionSnapshot, applyAutoSchedule,
 } from "./cli.js";
 
 function seedProject() {
@@ -98,6 +98,57 @@ describe("findDependencyCycles", () => {
   });
 });
 
+describe("findParentCycles", () => {
+  it("循環が無ければ空", () => {
+    expect(findParentCycles(seedProject().tasks)).toEqual([]);
+  });
+
+  it("自己親を検出する", () => {
+    expect(findParentCycles([{ id: "a", parentId: "a" }])).toEqual([["a"]]);
+  });
+
+  it("相互の親子参照を検出する", () => {
+    const cycles = findParentCycles([
+      { id: "a", parentId: "b" },
+      { id: "b", parentId: "a" },
+    ]);
+    expect(cycles.length).toBe(1);
+    expect(new Set(cycles[0])).toEqual(new Set(["a", "b"]));
+  });
+});
+
+describe("checkFieldShapes", () => {
+  it("正常な seed データでは issue を返さない", () => {
+    expect(checkFieldShapes(seedProject())).toEqual([]);
+  });
+
+  it("id 欠落・不正な日付・非数値の工数・不正な依存タイプを error として検出する", () => {
+    const data = seedProject();
+    data.tasks.push({ name: "no id", parentId: null, order: 99 });
+    data.tasks[1].startDate = "garbage";
+    data.tasks[2].duration = "five";
+    data.tasks[3].predecessors = [{ id: "x", type: "XX", lag: 0 }];
+    const codes = checkFieldShapes(data).map(i => i.code);
+    expect(codes).toContain("task-id-invalid");
+    expect(codes).toContain("task-startDate-invalid");
+    expect(codes).toContain("task-duration-invalid");
+    expect(codes).toContain("dependency-type-invalid");
+  });
+
+  it("不正な日付を含むと analyzeIntegrity は error を返し validate をブロックできる", () => {
+    const data = seedProject();
+    data.tasks[0].startDate = "2026-13-40";
+    const issues = analyzeIntegrity(data);
+    expect(issues.some(i => i.severity === "error" && i.code === "task-startDate-invalid")).toBe(true);
+  });
+
+  it("親子循環を analyzeIntegrity が error として報告する", () => {
+    const data = seedProject();
+    data.tasks[0].parentId = data.tasks[0].id;
+    expect(analyzeIntegrity(data).some(i => i.code === "parent-cycle")).toBe(true);
+  });
+});
+
 describe("buildVersionSnapshot", () => {
   it("App.jsx saveVersion と同じ構造（比較用 tasks ＋ 復元用 raw* ＋ 各フラグ）を返す", () => {
     const data = seedProject();
@@ -130,5 +181,21 @@ describe("applyAutoSchedule", () => {
     // 冪等性: 書き戻し済みデータに再適用しても startDate は動かない
     const again = applyAutoSchedule({ ...data, tasks }, projectStart, cal);
     expect(again.changed).toEqual([]);
+  });
+
+  it("固定マイルストーンも App.jsx runScheduling と同じく書き戻す（startDate が fixedDate 由来になる）", () => {
+    // App のボタンと結果をずらさないため、CLI 側でも固定マイルストーンを特別扱いしない。
+    const data = seedProject();
+    const ms = data.tasks.find(t => t.milestone && t.milestoneMode === "fixed" && t.fixedDate);
+    expect(ms).toBeTruthy();
+    ms.startDate = "2000-01-01"; // わざとずらす
+    const projectStart = "2026-08-01";
+    const y = parseISO(projectStart).getUTCFullYear();
+    const cal = makeCalendar(buildHolidayMap(y - 1, y + 6));
+
+    const { tasks, changed } = applyAutoSchedule(data, projectStart, cal);
+    const written = tasks.find(t => t.id === ms.id);
+    expect(written.startDate).toBe(ms.fixedDate);
+    expect(changed.some(c => c.id === ms.id)).toBe(true);
   });
 });

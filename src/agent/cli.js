@@ -180,6 +180,126 @@ function nameOf(tasks, id) {
   return t ? t.name : id;
 }
 
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+function isISODate(v) {
+  if (typeof v !== "string" || !ISO_DATE_RE.test(v)) return false;
+  const d = new Date(`${v}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && v === d.toISOString().slice(0, 10);
+}
+function isFiniteNumber(v) {
+  return typeof v === "number" && Number.isFinite(v);
+}
+
+/** タスク/リソース/スプリントのフィールド型・日付書式を検査する。
+ *  normalizeImportedProject はトップレベル形状しか見ないため、ここで計算を壊す値
+ *  （不正な日付・非数値の工数・id欠落・不正な依存タイプ等）を error として拾う。 */
+export function checkFieldShapes(data) {
+  const issues = [];
+  const label = (t, i) => `タスク#${i + 1}${t && t.name ? `「${t.name}」` : t && t.id ? `（id: ${t.id}）` : ""}`;
+  const DEP_TYPES = new Set(["FS", "SS", "FF", "SF"]);
+
+  (data.tasks || []).forEach((t, i) => {
+    if (typeof t !== "object" || t === null) {
+      issues.push({ severity: "error", code: "task-not-object", message: `タスク#${i + 1} がオブジェクトではありません` });
+      return;
+    }
+    if (typeof t.id !== "string" || !t.id) {
+      issues.push({ severity: "error", code: "task-id-invalid", message: `${label(t, i)} の id が文字列ではありません` });
+    }
+    if (t.parentId != null && typeof t.parentId !== "string") {
+      issues.push({ severity: "error", code: "task-parentId-invalid", ids: [t.id], message: `${label(t, i)} の parentId が文字列でも null でもありません` });
+    }
+    if (t.startDate != null && !isISODate(t.startDate)) {
+      issues.push({ severity: "error", code: "task-startDate-invalid", ids: [t.id], message: `${label(t, i)} の startDate「${t.startDate}」が YYYY-MM-DD 形式ではありません` });
+    }
+    if (t.fixedDate != null && !isISODate(t.fixedDate)) {
+      issues.push({ severity: "error", code: "task-fixedDate-invalid", ids: [t.id], message: `${label(t, i)} の fixedDate「${t.fixedDate}」が YYYY-MM-DD 形式ではありません` });
+    }
+    if (t.duration != null && !isFiniteNumber(t.duration)) {
+      issues.push({ severity: "error", code: "task-duration-invalid", ids: [t.id], message: `${label(t, i)} の duration が数値ではありません` });
+    }
+    if (t.progress != null && !isFiniteNumber(t.progress)) {
+      issues.push({ severity: "error", code: "task-progress-invalid", ids: [t.id], message: `${label(t, i)} の progress が数値ではありません` });
+    }
+    if (t.sprintIds != null && !Array.isArray(t.sprintIds)) {
+      issues.push({ severity: "error", code: "task-sprintIds-invalid", ids: [t.id], message: `${label(t, i)} の sprintIds が配列ではありません` });
+    }
+    if (t.predecessors != null && !Array.isArray(t.predecessors)) {
+      issues.push({ severity: "error", code: "task-predecessors-invalid", ids: [t.id], message: `${label(t, i)} の predecessors が配列ではありません` });
+    } else {
+      (t.predecessors || []).forEach((p, j) => {
+        if (typeof p !== "object" || p === null || typeof p.id !== "string" || !p.id) {
+          issues.push({ severity: "error", code: "dependency-id-invalid", ids: [t.id], message: `${label(t, i)} の先行タスク#${j + 1} に id がありません` });
+        }
+        if (!DEP_TYPES.has(p && p.type)) {
+          issues.push({ severity: "error", code: "dependency-type-invalid", ids: [t.id], message: `${label(t, i)} の先行タスク#${j + 1} の type「${p && p.type}」が FS/SS/FF/SF ではありません` });
+        }
+        if (p && p.lag != null && !isFiniteNumber(p.lag)) {
+          issues.push({ severity: "error", code: "dependency-lag-invalid", ids: [t.id], message: `${label(t, i)} の先行タスク#${j + 1} の lag が数値ではありません` });
+        }
+      });
+    }
+  });
+
+  (data.resources || []).forEach((r, i) => {
+    if (typeof r !== "object" || r === null || typeof r.id !== "string" || !r.id) {
+      issues.push({ severity: "error", code: "resource-id-invalid", message: `リソース#${i + 1} の id が文字列ではありません` });
+    }
+    if (r && r.weeklyCapacity != null && !isFiniteNumber(r.weeklyCapacity)) {
+      issues.push({ severity: "error", code: "resource-weeklyCapacity-invalid", message: `リソース#${i + 1} の weeklyCapacity が数値ではありません` });
+    }
+    if (r && r.monthlyCapacity != null && !isFiniteNumber(r.monthlyCapacity)) {
+      issues.push({ severity: "error", code: "resource-monthlyCapacity-invalid", message: `リソース#${i + 1} の monthlyCapacity が数値ではありません` });
+    }
+  });
+
+  (data.sprints || []).forEach((s, i) => {
+    if (typeof s !== "object" || s === null || typeof s.id !== "string" || !s.id) {
+      issues.push({ severity: "error", code: "sprint-id-invalid", message: `スプリント#${i + 1} の id が文字列ではありません` });
+    }
+    if (s && s.startDate != null && !isISODate(s.startDate)) {
+      issues.push({ severity: "error", code: "sprint-startDate-invalid", message: `スプリント#${i + 1} の startDate「${s.startDate}」が YYYY-MM-DD 形式ではありません` });
+    }
+    if (s && s.endDate != null && !isISODate(s.endDate)) {
+      issues.push({ severity: "error", code: "sprint-endDate-invalid", message: `スプリント#${i + 1} の endDate「${s.endDate}」が YYYY-MM-DD 形式ではありません` });
+    }
+  });
+
+  return issues;
+}
+
+/** parentId チェーンの循環（自己参照・相互参照）を検出する。同じ循環は1件だけ返す。 */
+export function findParentCycles(tasks) {
+  const byId = new Map(tasks.map(t => [t.id, t]));
+  const cycles = [];
+  const reportedKeys = new Set();
+  const settled = new Set(); // 循環でないと確定済みの起点
+  for (const start of tasks) {
+    if (settled.has(start.id)) continue;
+    const path = [];
+    const inPath = new Set();
+    let cur = start;
+    let hitCycle = false;
+    while (cur && cur.parentId != null) {
+      if (inPath.has(cur.id)) {
+        const cyc = path.slice(path.indexOf(cur.id));
+        const key = [...cyc].sort().join(" ");
+        if (!reportedKeys.has(key)) {
+          reportedKeys.add(key);
+          cycles.push(cyc);
+        }
+        hitCycle = true;
+        break;
+      }
+      path.push(cur.id);
+      inPath.add(cur.id);
+      cur = byId.get(cur.parentId);
+    }
+    if (!hitCycle) path.forEach(id => settled.add(id));
+  }
+  return cycles;
+}
+
 export function findDependencyCycles(tasks) {
   const adj = new Map(tasks.map(t => [t.id, []]));
   for (const t of tasks) {
@@ -209,10 +329,16 @@ export function findDependencyCycles(tasks) {
   return cycles;
 }
 
-/** 参照整合性・循環依存・スプリント重複を検査して issue 配列を返す。 */
+/** フィールド型・参照整合性・循環依存（依存関係／親子）・スプリント重複を検査して issue 配列を返す。 */
 export function analyzeIntegrity(data) {
-  const issues = [];
   const tasks = data.tasks || [];
+
+  // 型・書式の検査を先に行う。ここで error が出た場合、以降の参照チェックや
+  // findDependencyCycles は不正な値で誤動作しうるため、フィールド検査の結果だけ返す。
+  const shapeIssues = checkFieldShapes(data);
+  if (shapeIssues.some(i => i.severity === "error")) return shapeIssues;
+
+  const issues = [...shapeIssues];
 
   const seen = new Set();
   const dup = new Set();
@@ -222,6 +348,15 @@ export function analyzeIntegrity(data) {
   }
   for (const id of dup) {
     issues.push({ severity: "error", code: "duplicate-task-id", ids: [id], message: `タスクID「${id}」が重複しています` });
+  }
+
+  for (const cyc of findParentCycles(tasks)) {
+    issues.push({
+      severity: "error",
+      code: "parent-cycle",
+      ids: cyc,
+      message: `親子関係が循環しています: ${cyc.map(id => nameOf(tasks, id)).join(" → ")}`,
+    });
   }
 
   const taskIds = seen;
@@ -306,7 +441,11 @@ export function buildVersionSnapshot(data, schedule, name) {
 }
 
 /** 「自動スケジューリング実行」（App.jsx runScheduling）と同じ書き戻し。
- *  固定マイルストーン自身以外は CPM の ES/EF を startDate に書き戻す（平準化後の日付は焼き込まない）。 */
+ *  グループとサマリー以外の全リーフの startDate に、respectManualPins:false の CPM 結果の
+ *  schedStart を書き戻す。schedStart は runCPM の選択ロジックにより、固定マイルストーン自身は
+ *  LS/LF（＝fixedDate 由来）、それ以外は ES/EF（最短）となる（CLAUDE.md 準拠）。
+ *  リソース平準化後の日付は焼き込まない。App のボタンと完全に一致させるため、ここでも
+ *  固定マイルストーンを特別扱いしない（＝アプリと CLI で結果がずれないようにする）。 */
 export function applyAutoSchedule(data, projectStart, cal) {
   const auto = runCPM(data.tasks, cal, projectStart, data.sprints || [], { respectManualPins: false });
   const changed = [];
@@ -323,6 +462,16 @@ export function applyAutoSchedule(data, projectStart, cal) {
 /* -------------------------------------------------------------------------------------------
    コマンド
    ------------------------------------------------------------------------------------------- */
+
+/** computeSchedule を安全に呼ぶ。整合性検査をすり抜けた不正値でも例外を投げず、
+ *  呼び出し側で扱えるようにする（スタックトレースではなく整形済みエラーを返す）。 */
+function tryComputeSchedule(data, opts) {
+  try {
+    return { ok: true, result: computeSchedule(data, opts) };
+  } catch (e) {
+    return { ok: false, error: `スケジュール計算に失敗しました: ${String((e && e.message) || e)}` };
+  }
+}
 
 function cmdValidate(positional) {
   const [path] = positional;
@@ -373,7 +522,11 @@ function cmdRecalc(positional, opts) {
 
   const integrity = analyzeIntegrity(data);
   const leveling = resolveLeveling(opts.leveling, data);
-  const r = computeSchedule(data, { respectManualPins: true, leveling });
+  const computed = tryComputeSchedule(data, { respectManualPins: true, leveling });
+  if (!computed.ok) {
+    return emit({ command: "recalc", file: path, computeFailed: true, error: computed.error, integrityIssues: integrity });
+  }
+  const r = computed.result;
 
   emit({
     command: "recalc",
@@ -421,7 +574,11 @@ function cmdPlan(positional, opts) {
   const afterLeveling = resolveLeveling(opts.leveling, edited);
 
   // before: 元データを「現在アプリで見えている」条件で計算（差分とスナップショットの基準）
-  const before = computeSchedule(original, { respectManualPins: true, leveling: beforeLeveling });
+  const beforeComputed = tryComputeSchedule(original, { respectManualPins: true, leveling: beforeLeveling });
+  if (!beforeComputed.ok) {
+    return emit({ command: "plan", original: originalPath, edited: editedPath, blocked: true, reason: beforeComputed.error, integrityIssues: analyzeIntegrity(original) });
+  }
+  const before = beforeComputed.result;
 
   let proposedTasks = edited.tasks;
   let startDateChanges = [];
@@ -444,7 +601,11 @@ function cmdPlan(positional, opts) {
   };
 
   // after: 提案JSONを表示条件で計算（保存後にアプリで見えるスケジュール）
-  const after = computeSchedule(proposed, { respectManualPins: true, leveling: afterLeveling });
+  const afterComputed = tryComputeSchedule(proposed, { respectManualPins: true, leveling: afterLeveling });
+  if (!afterComputed.ok) {
+    return emit({ command: "plan", original: originalPath, edited: editedPath, blocked: true, reason: afterComputed.error, integrityIssues: integrity });
+  }
+  const after = afterComputed.result;
   const leveling = afterLeveling;
 
   const beforeRows = scheduleRows(original, before.schedule);
@@ -520,7 +681,11 @@ function cmdExplain(positional, opts) {
   if (!task) fail(`タスクが見つかりません: ${taskId}`);
 
   const leveling = resolveLeveling(opts.leveling, data);
-  const r = computeSchedule(data, { respectManualPins: true, leveling });
+  const computed = tryComputeSchedule(data, { respectManualPins: true, leveling });
+  if (!computed.ok) {
+    return emit({ command: "explain", file: path, computeFailed: true, error: computed.error, integrityIssues: analyzeIntegrity(data) });
+  }
+  const r = computed.result;
   const s = r.schedule.get(taskId) || {};
 
   const byId = {};
