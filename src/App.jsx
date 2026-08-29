@@ -6,7 +6,8 @@ import {
 
 import { toISO, parseISO, buildHolidayMap, makeCalendar, fmtJP } from "./lib/calendar.js";
 import { uid, migrateSprintIds, isGroupId, buildFlatList } from "./lib/taskTree.js";
-import { runCPM, rollupSummaries, levelResources } from "./lib/scheduling.js";
+import { runCPM, rollupSummaries, levelResources, deriveProjectStart } from "./lib/scheduling.js";
+import { detectSprintConflicts } from "./lib/sprints.js";
 import {
   downloadJSON, copyTextToClipboard, generateMermaidGantt,
   buildProjectExport, normalizeImportedProject, normalizeProjectVersions,
@@ -84,10 +85,7 @@ export default function App() {
     setConfirmState({ message, onConfirm, confirmLabel, danger });
   }
 
-  const projectStart = useMemo(() => {
-    const dates = tasks.filter(t => t.startDate).map(t => t.startDate);
-    return dates.length ? dates.reduce((a, b) => (a < b ? a : b)) : toISO(new Date());
-  }, [tasks]);
+  const projectStart = useMemo(() => deriveProjectStart(tasks, toISO(new Date())), [tasks]);
 
   const holidayMap = useMemo(() => {
     const y = parseISO(projectStart).getUTCFullYear();
@@ -293,6 +291,8 @@ export default function App() {
   // 通常表示時（cpm useMemo）は手入力済みの開始日を固定の起点として扱い、依存関係による
   // 自動的な後ろ倒しをしない。このボタンを押したときだけ、開始日の入力有無に関わらず
   // 純粋な依存関係ベースのCPM結果を計算し、全リーフタスクの開始日にその結果を書き戻す。
+  // リソース平準化の結果（placed）はここでは書き戻さない（表示スケジュールのみが毎レンダー
+  // 再計算で平準化を反映する。恒久的に固定したい場合はバージョンスナップショットを使う）。
   function runScheduling() {
     const auto = runCPM(tasks, cal, projectStart, sprints, { respectManualPins: false });
     const changedIds = new Set();
@@ -305,7 +305,9 @@ export default function App() {
     }));
     skipHighlightClearRef.current = true;
     setAutoScheduleHighlightIds(changedIds);
-    showToast(levelingOn ? "リソース平準化を考慮して再スケジューリングしました" : "依存関係に基づき再スケジューリングしました");
+    showToast(levelingOn
+      ? "依存関係に基づき開始日を再計算しました（表示はリソース平準化を反映）"
+      : "依存関係に基づき再スケジューリングしました");
   }
 
   async function saveVersion(name) {
@@ -416,40 +418,10 @@ export default function App() {
   // 依存関係・固定マイルストーンの日程は常に優先されるため（スプリントは開始日側の下限としてのみ
   // 考慮される）、ここで見つかる矛盾は「スプリント期間に収めようとしたが、依存関係や固定マイルストーンの
   // 都合でそれが叶わなかったタスク」を意味する＝ユーザーに通知すべき内容。
-  const sprintConflicts = useMemo(() => {
-    if (!sprints.length) return [];
-    const sprintById = {}; sprints.forEach(s => (sprintById[s.id] = s));
-    const wbsNoById = {}; buildFlatList(tasks, new Set()).forEach(t => (wbsNoById[t.id] = t.wbsNo));
-    const out = [];
-    tasks.forEach(t => {
-      const ids = t.sprintIds || [];
-      if (!ids.length) return;
-      if (isGroupId(tasks, t.id)) return; // グループにはスプリントを紐付けない
-      // 複数スプリントが紐付いている場合は、それらの期間の和集合（最も早い開始日〜最も遅い終了日）に
-      // 収まっているかを判定する（タスクが複数スプリントにまたがること自体は許容するため）。
-      const sps = ids.map(id => sprintById[id]).filter(sp => sp && sp.startDate && sp.endDate);
-      if (!sps.length) return; // 削除済み・未設定のスプリント参照のみの場合は対象外
-      const rangeStart = sps.reduce((mn, sp) => (sp.startDate < mn ? sp.startDate : mn), sps[0].startDate);
-      const rangeEnd = sps.reduce((mx, sp) => (sp.endDate > mx ? sp.endDate : mx), sps[0].endDate);
-      const s = schedule.get(t.id);
-      if (!s || !s.schedStart || !s.schedFinish) return;
-      const reasons = [];
-      if (s.schedStart < rangeStart) {
-        reasons.push(`開始日（${fmtJP(s.schedStart)}）がスプリント開始日（${fmtJP(rangeStart)}）より前になっています`);
-      }
-      if (s.schedFinish > rangeEnd) {
-        reasons.push(`終了日（${fmtJP(s.schedFinish)}）がスプリント終了日（${fmtJP(rangeEnd)}）を超えています`);
-      }
-      if (!reasons.length) return;
-      if (s.governed) {
-        reasons.push("固定マイルストーンの期日が優先されているため、スプリント期間内に収まりません");
-      }
-      const sprintName = sps.map(sp => sp.name || sp.theme || "（無題のスプリント）").join("、");
-      out.push({ taskId: t.id, name: t.name, wbsNo: wbsNoById[t.id] || "", sprintName, reasons });
-    });
-    out.sort((a, b) => (a.wbsNo || "").localeCompare(b.wbsNo || "", undefined, { numeric: true }));
-    return out;
-  }, [tasks, sprints, schedule]);
+  const sprintConflicts = useMemo(
+    () => detectSprintConflicts(tasks, sprints, schedule),
+    [tasks, sprints, schedule]
+  );
 
   return (
     <div className="flex flex-col bg-slate-50 text-slate-800 ps-app-root" style={{ fontFamily: "ui-sans-serif, system-ui, sans-serif" }}>

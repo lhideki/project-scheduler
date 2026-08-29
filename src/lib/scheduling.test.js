@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { buildHolidayMap, makeCalendar } from "./calendar.js";
 import {
   runCPM, rollupSummaries, levelResources, dailyLoads, topoOrder, earliestSprintFloor,
+  deriveProjectStart,
 } from "./scheduling.js";
 
 // 2024-01-09(火)〜2024-02-09の間は土日以外の非稼働日が無い期間なので、
@@ -193,5 +194,23 @@ describe("topoOrder", () => {
   it("循環がある場合でも全IDを漏らさずフォールバックで返す", () => {
     const order = topoOrder(["a", "b"], { a: [{ id: "b" }], b: [{ id: "a" }] });
     expect(new Set(order)).toEqual(new Set(["a", "b"]));
+  });
+});
+
+describe("deriveProjectStart", () => {
+  it("開始日を持つタスクのうち最も早い日付を返す", () => {
+    const tasks = [
+      { id: "a", startDate: "2024-03-01" },
+      { id: "b", startDate: "2024-02-15" },
+      { id: "c" },
+    ];
+    expect(deriveProjectStart(tasks, "2024-01-01")).toBe("2024-02-15");
+  });
+  it("開始日を持つタスクが無い場合は fallback を返す", () => {
+    expect(deriveProjectStart([{ id: "a" }, { id: "b" }], "2024-01-01")).toBe("2024-01-01");
+  });
+  it("空配列・未定義でも fallback を返す", () => {
+    expect(deriveProjectStart([], "2024-01-01")).toBe("2024-01-01");
+    expect(deriveProjectStart(undefined, "2024-01-01")).toBe("2024-01-01");
   });
 });
