@@ -48,6 +48,8 @@ export function WBSGanttView({
   const [showInazuma, setShowInazuma] = useState(true);
   // クリティカルパスの強調表示（WBS表の赤文字・ガントバー・依存線の赤色）の表示切り替え。
   const [showCritical, setShowCritical] = useState(true);
+  // 進捗基準日（稲妻線・今日の縦線の基準。デフォルトは本日）
+  const [baseDateISO, setBaseDateISO] = useState(() => toISO(new Date()));
 
   // --- バージョン比較（基準バージョンをWBS番号で突き合わせ、1行目=現在／2行目=基準として表示） ---
   const baselineVersion = useMemo(() => versions.find(v => v.id === baselineVersionId) || null, [versions, baselineVersionId]);
@@ -671,6 +673,24 @@ export function WBSGanttView({
         </div>
         <div className="w-px h-5 bg-slate-200 mx-1" />
         <IconBtn icon={Zap} label="稲妻線" onClick={() => setShowInazuma(v => !v)} small active={showInazuma} />
+        {showInazuma && (
+          <div className="flex items-center gap-1" title="進捗基準日（稲妻線・今日の縦線の基準）">
+            <input
+              type="date"
+              value={baseDateISO}
+              onChange={e => e.target.value && setBaseDateISO(e.target.value)}
+              className="text-[11px] border border-slate-200 rounded px-1.5 py-1 bg-white text-slate-600"
+            />
+            {baseDateISO !== todayISO && (
+              <button
+                type="button"
+                onClick={() => setBaseDateISO(todayISO)}
+                className="text-[10px] text-indigo-600 hover:underline whitespace-nowrap"
+                title="本日に戻す"
+              >今日</button>
+            )}
+          </div>
+        )}
         <IconBtn icon={Flame} label="クリティカルパス" onClick={() => setShowCritical(v => !v)} small active={showCritical} />
         <div className="w-px h-5 bg-slate-200 mx-1" />
         <IconBtn icon={Save} label="バージョンを保存" onClick={() => onSaveVersion(`バージョン ${versions.length + 1}`)} small />
@@ -1045,8 +1065,8 @@ export function WBSGanttView({
                 {dayCells.map(c => (c.weekend || c.holiday) && (
                   <rect key={c.iso} x={c.x} y={0} width={dayWidth} height={bodyHeight} fill={c.holiday ? "#FEF3C7" : "#F1F5F9"} />
                 ))}
-                {xOf(todayISO) >= 0 && xOf(todayISO) <= chartWidth && (
-                  <line x1={xOf(todayISO) + dayWidth / 2} x2={xOf(todayISO) + dayWidth / 2} y1={0} y2={bodyHeight} stroke="#DC2626" strokeDasharray="3,3" strokeWidth={1} />
+                {xOf(baseDateISO) >= 0 && xOf(baseDateISO) <= chartWidth && (
+                  <line x1={xOf(baseDateISO) + dayWidth / 2} x2={xOf(baseDateISO) + dayWidth / 2} y1={0} y2={bodyHeight} stroke="#DC2626" strokeDasharray="3,3" strokeWidth={1} />
                 )}
                 {flat.map((t, i) => <line key={t.id} x1={0} x2={chartWidth} y1={(i + 1) * rowStride} y2={(i + 1) * rowStride} stroke="#F1F5F9" />)}
                 <GanttDeps flat={flat} schedule={schedule} xOf={xOf} dayWidth={dayWidth} rowStride={rowStride} showCritical={showCritical} />
@@ -1127,7 +1147,7 @@ export function WBSGanttView({
                     </React.Fragment>
                   );
                 })}
-                {showInazuma && <InazumaLine flat={flat} schedule={schedule} xOf={xOf} dayWidth={dayWidth} cal={cal} todayISO={todayISO} rowStride={rowStride} />}
+                {showInazuma && <InazumaLine flat={flat} schedule={schedule} xOf={xOf} dayWidth={dayWidth} cal={cal} baseDateISO={baseDateISO} rowStride={rowStride} />}
                 {linkDrag && (
                   <path d={`M${linkDrag.x1},${linkDrag.y1} L${linkDrag.x2},${linkDrag.y2}`}
                     stroke="#4F46E5" strokeWidth={1.5} strokeDasharray="4,3" fill="none" markerEnd="url(#ganttLinkArrow)" />

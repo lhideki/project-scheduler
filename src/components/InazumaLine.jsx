@@ -19,8 +19,8 @@ import { ROW_H } from "../constants.js";
  *  5. マイルストーンは期間を持たないため、進捗率で按分せずマークの位置そのものを点とする。
  *
  *  予定日程（schedStart/schedFinish）そのものは進捗率によって変化させない。 */
-export function InazumaLine({ flat, schedule, xOf, dayWidth, cal, todayISO, rowStride = ROW_H }) {
-  const todayX = xOf(todayISO) + dayWidth / 2;
+export function InazumaLine({ flat, schedule, xOf, dayWidth, cal, todayISO, baseDateISO, rowStride = ROW_H }) {
+  const todayX = xOf(baseDateISO ?? todayISO) + dayWidth / 2;
   const points = [];
   flat.forEach((t, i) => {
     const s = schedule.get(t.id);
