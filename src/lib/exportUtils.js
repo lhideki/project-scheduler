@@ -208,9 +208,9 @@ export function normalizeImportedProject(data) {
   };
 }
 
-/** JSON を生成しブラウザのダウンロードとしてトリガーする（プロジェクトのエクスポート用） */
-export function downloadJSON(filename, dataObj) {
-  const blob = new Blob([JSON.stringify(dataObj, null, 2)], { type: "application/json" });
+/** テキストを Blob にしてブラウザのダウンロードとしてトリガーする。 */
+export function downloadTextFile(filename, text, mime = "text/plain") {
+  const blob = new Blob([text], { type: mime });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -219,6 +219,11 @@ export function downloadJSON(filename, dataObj) {
   a.click();
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/** JSON を生成しブラウザのダウンロードとしてトリガーする（プロジェクトのエクスポート用） */
+export function downloadJSON(filename, dataObj) {
+  downloadTextFile(filename, JSON.stringify(dataObj, null, 2), "application/json");
 }
 
 /**
