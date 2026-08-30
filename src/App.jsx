@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef, useReducer, useCallback } 
 import {
   Play, X, AlertTriangle, Check, Clock, GitBranch, Users, Table2,
   History, Download, Upload, CalendarRange, CalendarOff, Copy, RefreshCw, Link,
+  Share2, Camera,
 } from "lucide-react";
 
 import { toISO, parseISO, buildHolidayMap, makeCalendar, fmtJP } from "./lib/calendar.js";
@@ -9,13 +10,14 @@ import { uid, migrateSprintIds, isGroupId, buildFlatList } from "./lib/taskTree.
 import { runCPM, rollupSummaries, levelResources, deriveProjectStart } from "./lib/scheduling.js";
 import { detectSprintConflicts } from "./lib/sprints.js";
 import {
-  downloadJSON, copyTextToClipboard, generateMermaidGantt,
+  downloadJSON, downloadTextFile, copyTextToClipboard, generateMermaidGantt,
   buildProjectExport, normalizeImportedProject, normalizeProjectVersions,
 } from "./lib/exportUtils.js";
 import { seedData } from "./lib/seedData.js";
 import { createTaskHistory, taskHistoryReducer } from "./lib/history.js";
 import { storageGet, storageSet } from "./storage.js";
 import { getLinkedProjectKey } from "./lib/linkedProject.js";
+import { readEmbeddedProject, buildSharedHtml } from "./dom/embeddedProjectDom.js";
 import {
   getLinkedFileHandle, pickLinkedProjectFile, queryLinkedFilePermission,
   readLinkedProjectFile, requestLinkedFilePermission, saveLinkedFileHandle,
@@ -34,15 +36,52 @@ import { VersionsView } from "./components/VersionsView.jsx";
 /* =========================================================================================
    13. アプリ本体
    ========================================================================================= */
+function fmtDateTimeJP(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return String(iso || "");
+  return d.toLocaleString("ja-JP", {
+    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
+  });
+}
+
 export default function App() {
   const seed = useMemo(() => seedData(), []);
+  // 「共有用HTML」に埋め込まれたプロジェクトデータ（embedded 起動）。
+  // linked（?schedule=）と同様に「原本と切り離されたデータを表示中」というセマンティクスを持ち、
+  // 画面上の変更は localStorage へ自動保存しない（リロードで埋め込み時点の状態に戻る）。
+  const embeddedProject = useMemo(() => readEmbeddedProject(), []);
   const linkedProjectKey = useMemo(
-    () => (typeof window === "undefined" ? null : getLinkedProjectKey(window.location.search)),
-    []
+    // 共有用HTMLを ?schedule= 付きで開いた場合は embedded を優先し、linked 処理はしない。
+    () => (typeof window === "undefined" || embeddedProject ? null : getLinkedProjectKey(window.location.search)),
+    [embeddedProject]
   );
+  // localStorage への自動保存を止めるべき起動モードか（linked / embedded）。
+  const autoSaveDisabled = !!linkedProjectKey || !!embeddedProject;
+  // 初期表示に使うデータ。embedded は埋め込みデータをそのまま初期状態にする（フラッシュを避ける）。
+  // linked は初回ロード effect でファイルから読み込むため空で開始する。
+  const initialProject = useMemo(() => {
+    if (embeddedProject && embeddedProject.ok) {
+      const d = embeddedProject.data;
+      return {
+        tasks: migrateSprintIds(d.tasks),
+        resources: d.resources,
+        sprints: d.sprints,
+        versions: d.versions,
+        levelingOn: !!d.levelingOn,
+        calendarExceptions: Array.isArray(d.calendarExceptions) ? d.calendarExceptions : [],
+      };
+    }
+    if (linkedProjectKey) {
+      return { tasks: [], resources: [], sprints: [], versions: [], levelingOn: false, calendarExceptions: [] };
+    }
+    return {
+      tasks: seed.tasks, resources: seed.resources, sprints: seed.sprints,
+      versions: [], levelingOn: false, calendarExceptions: seed.calendarExceptions || [],
+    };
+  }, [embeddedProject, linkedProjectKey, seed]);
   const [taskHistory, dispatchTasks] = useReducer(
     taskHistoryReducer,
-    linkedProjectKey ? [] : seed.tasks,
+    initialProject.tasks,
     createTaskHistory
   );
   const tasks = taskHistory.present;
@@ -52,10 +91,10 @@ export default function App() {
   const resetTasks = useCallback(value => dispatchTasks({ type: "reset", value }), []);
   const undoTasks = useCallback(() => dispatchTasks({ type: "undo" }), []);
   const redoTasks = useCallback(() => dispatchTasks({ type: "redo" }), []);
-  const [resources, setResources] = useState(linkedProjectKey ? [] : seed.resources);
-  const [sprints, setSprints] = useState(linkedProjectKey ? [] : seed.sprints);
-  const [calendarExceptions, setCalendarExceptions] = useState(linkedProjectKey ? [] : (seed.calendarExceptions || []));
-  const [versions, setVersions] = useState([]);
+  const [resources, setResources] = useState(initialProject.resources);
+  const [sprints, setSprints] = useState(initialProject.sprints);
+  const [calendarExceptions, setCalendarExceptions] = useState(initialProject.calendarExceptions);
+  const [versions, setVersions] = useState(initialProject.versions);
   const [tab, setTab] = useState("gantt");
   const [selectedId, setSelectedId] = useState(null);
   const [collapsed, setCollapsed] = useState(new Set());
@@ -68,7 +107,7 @@ export default function App() {
   const [autoScheduleHighlightIds, setAutoScheduleHighlightIds] = useState(() => new Set());
   const skipHighlightClearRef = useRef(false);
   const [baselineVersionId, setBaselineVersionId] = useState(null);
-  const [levelingOn, setLevelingOn] = useState(false);
+  const [levelingOn, setLevelingOn] = useState(initialProject.levelingOn);
   const [loaded, setLoaded] = useState(false);
   const [toast, setToast] = useState(null);
   const fileInputRef = useRef(null);
@@ -178,6 +217,12 @@ export default function App() {
   // 初回ロード。schedule queryがある場合はローカル保存より関連付け済みJSONを優先する。
   useEffect(() => {
     (async () => {
+      if (embeddedProject) {
+        // 共有用HTML。埋め込みデータは initialProject で初期状態へ反映済みなので、
+        // localStorage は一切読み書きしない（リロードで埋め込み時点に戻る）。
+        setLoaded(true);
+        return;
+      }
       if (linkedProjectKey) {
         const handle = await getLinkedFileHandle(linkedProjectKey);
         if (handle) {
@@ -205,7 +250,7 @@ export default function App() {
       setLoaded(true);
     })();
     // eslint-disable-next-line
-  }, [linkedProjectKey, resetTasks, seed.resources]);
+  }, [linkedProjectKey, embeddedProject, resetTasks, seed.resources]);
 
   // 自動スケジューリング実行によるボールド表示は、次に何らかの編集操作が行われたら解除する。
   // runScheduling 自身が行う書き戻し（setTasks）による変化はここでスキップする。
@@ -217,20 +262,20 @@ export default function App() {
     setAutoScheduleHighlightIds(prev => (prev.size ? new Set() : prev));
   }, [tasks, resources, sprints]);
 
-  // 自動保存
+  // 自動保存（linked / embedded 起動時は原本と切り離されているため保存しない）
   useEffect(() => {
-    if (!loaded || linkedProjectKey) return;
+    if (!loaded || autoSaveDisabled) return;
     const t = setTimeout(() => { storageSet("pm_project", { tasks, resources, sprints, levelingOn, calendarExceptions }); }, 800);
     return () => clearTimeout(t);
-  }, [tasks, resources, sprints, levelingOn, calendarExceptions, loaded, linkedProjectKey]);
+  }, [tasks, resources, sprints, levelingOn, calendarExceptions, loaded, autoSaveDisabled]);
 
   // バージョン名の変更などによる versions の更新も自動保存する
   // （新規保存・削除は即時persistしているため、これは主に名称変更のためのデバウンス保存）。
   useEffect(() => {
-    if (!loaded || linkedProjectKey) return;
+    if (!loaded || autoSaveDisabled) return;
     const t = setTimeout(() => { storageSet("pm_versions", versions); }, 800);
     return () => clearTimeout(t);
-  }, [versions, loaded, linkedProjectKey]);
+  }, [versions, loaded, autoSaveDisabled]);
 
   function renameVersion(id, newName) {
     setVersions(prev => prev.map(v => (v.id === id ? { ...v, name: newName } : v)));
@@ -339,13 +384,13 @@ export default function App() {
     };
     const next = [v, ...versions];
     setVersions(next);
-    if (!linkedProjectKey) await storageSet("pm_versions", next);
+    if (!autoSaveDisabled) await storageSet("pm_versions", next);
     showToast(`バージョン「${name}」を保存しました`);
   }
   async function deleteVersion(id) {
     const next = versions.filter(v => v.id !== id);
     setVersions(next);
-    if (!linkedProjectKey) await storageSet("pm_versions", next);
+    if (!autoSaveDisabled) await storageSet("pm_versions", next);
     setBaselineVersionId(prev => (prev === id ? null : prev));
   }
   function restoreVersion(id) {
@@ -374,6 +419,16 @@ export default function App() {
     const data = buildProjectExport(tasks, resources, sprints, versions, levelingOn, calendarExceptions);
     downloadJSON(`project-scheduler_${toISO(new Date())}.json`, data);
     showToast("プロジェクトをJSONファイルに書き出しました");
+  }
+  function exportSharedHtml() {
+    try {
+      const data = buildProjectExport(tasks, resources, sprints, versions, levelingOn, calendarExceptions);
+      const html = buildSharedHtml(data);
+      downloadTextFile(`project-scheduler-share_${toISO(new Date())}.html`, html, "text/html");
+      showToast("共有用HTMLを書き出しました（このファイルを開くと書き出し時点のスケジュールが表示されます）");
+    } catch (e) {
+      showToast("共有用HTMLの書き出しに失敗しました");
+    }
   }
   async function copyMermaidGantt() {
     const text = generateMermaidGantt(tasks, schedule);
@@ -413,7 +468,7 @@ export default function App() {
           return normalizeProjectVersions(Array.from(map.values())).sort((a, b) => b.createdAt - a.createdAt);
         })();
         setVersions(merged);
-        if (!linkedProjectKey) await storageSet("pm_versions", merged);
+        if (!autoSaveDisabled) await storageSet("pm_versions", merged);
       }
       showToast("JSONファイルからプロジェクトを読み込みました");
     }, "読み込む", false);
@@ -452,6 +507,7 @@ export default function App() {
         )}
         <IconBtn icon={Upload} label="読み込み" onClick={triggerImport} small />
         <IconBtn icon={Download} label="書き出し" onClick={exportProject} small />
+        <IconBtn icon={Share2} label="共有用HTML" onClick={exportSharedHtml} small />
         <IconBtn icon={Copy} label="Mermaidコピー" onClick={copyMermaidGantt} small />
         <div className="w-px h-5 bg-slate-200 mx-1" />
         <label className="flex items-center gap-1.5 text-xs text-slate-500 mr-1">
@@ -532,6 +588,23 @@ export default function App() {
                       ? "JSONを選び直す"
                       : "JSONを選択"}
               </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {embeddedProject && (
+        <div className="bg-amber-50 border-b border-amber-200 text-xs px-4 py-2 flex items-center gap-3">
+          <Camera size={14} className="text-amber-600 flex-shrink-0" />
+          <div className="min-w-0 flex-1 text-amber-900">
+            {embeddedProject.ok ? (
+              <>
+                <span className="font-medium">{fmtDateTimeJP(embeddedProject.data.exportedAt)}</span>
+                {" に書き出されたスケジュールを表示中です。"}
+                この画面での変更はこのHTMLファイルには保存されません（再読み込みすると書き出し時点の状態に戻ります）。
+              </>
+            ) : (
+              <span className="text-red-700">このHTMLに埋め込まれたスケジュールデータを読み込めませんでした。</span>
             )}
           </div>
         </div>
