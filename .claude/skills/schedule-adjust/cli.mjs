@@ -838,7 +838,8 @@ var PROJECT_JSON_SCHEMA = Object.freeze({
         rawTasks: { type: "array", description: "\u5FA9\u5143\u7528\u306E\u5B8C\u5168\u306A tasks", items: { $ref: "#/$defs/task" } },
         rawResources: { type: "array", description: "\u5FA9\u5143\u7528\u306E\u5B8C\u5168\u306A resources", items: { $ref: "#/$defs/resource" } },
         rawSprints: { type: "array", description: "\u5FA9\u5143\u7528\u306E\u5B8C\u5168\u306A sprints", items: { $ref: "#/$defs/sprint" } },
-        hasFullSnapshot: { type: "boolean", description: "\u5FA9\u5143\u306B\u5FC5\u8981\u306A raw* \u304C\u63C3\u3063\u3066\u3044\u308B\u304B" }
+        rawCalendarExceptions: { type: "array", description: "\u5FA9\u5143\u7528\u306E\u5B8C\u5168\u306A calendarExceptions\uFF08\u3053\u306E\u9805\u76EE\u304C\u7121\u3044\u53E4\u3044\u30B9\u30CA\u30C3\u30D7\u30B7\u30E7\u30C3\u30C8\u306F\u5FA9\u5143\u6642\u306B\u7A7A\u914D\u5217\u6271\u3044\uFF09", items: { $ref: "#/$defs/calendarException" } },
+        hasFullSnapshot: { type: "boolean", description: "\u5FA9\u5143\u306B\u5FC5\u8981\u306A raw*\uFF08rawTasks/rawResources/rawSprints\uFF09\u304C\u63C3\u3063\u3066\u3044\u308B\u304B" }
       }
     }
   }
@@ -859,7 +860,7 @@ function normalizeProjectVersions(versions) {
   }));
 }
 function normalizeImportedProject(data) {
-  if (!isObject(data) || data.schemaVersion !== PROJECT_SCHEMA_VERSION || typeof data.exportedAt !== "string" || !Array.isArray(data.tasks) || !Array.isArray(data.resources) || !Array.isArray(data.sprints) || !Array.isArray(data.versions)) {
+  if (!isObject(data) || data.schemaVersion !== PROJECT_SCHEMA_VERSION || typeof data.exportedAt !== "string" || !Array.isArray(data.tasks) || !Array.isArray(data.resources) || !Array.isArray(data.sprints) || !Array.isArray(data.versions) || data.calendarExceptions !== void 0 && !Array.isArray(data.calendarExceptions)) {
     throw new Error("invalid_project_json");
   }
   return {
@@ -871,7 +872,7 @@ function normalizeImportedProject(data) {
     versions: normalizeProjectVersions(data.versions),
     // 旧形式のJSON（levelingOn未対応）を読み込んだ場合は false にフォールバックする。
     levelingOn: typeof data.levelingOn === "boolean" ? data.levelingOn : false,
-    // 旧形式のJSON（calendarExceptions未対応）を読み込んだ場合は空配列にフォールバックする。
+    // 旧形式のJSON（calendarExceptions キーなし）のみ空配列にフォールバックする。
     calendarExceptions: Array.isArray(data.calendarExceptions) ? cloneJSON(data.calendarExceptions) : []
   };
 }

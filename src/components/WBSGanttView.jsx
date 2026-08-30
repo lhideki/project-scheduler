@@ -597,6 +597,8 @@ export function WBSGanttView({
 
   const dayCells = useMemo(() => {
     const cells = [];
+    // 稼働日指定（type: "workday"）の日付集合。土日・祝日でなくても、明示的に指定された日は淡色で示す。
+    const forcedWorkdays = new Set(cal.exceptions.filter(e => e.type === "workday").map(e => e.date));
     let d = parseISO(minDate);
     const end = parseISO(maxDate);
     while (d <= end) {
@@ -608,8 +610,8 @@ export function WBSGanttView({
         iso, x: xOf(iso),
         weekend: !working && weekend,
         holiday: !working ? (cal.holidayName(iso) || undefined) : undefined,
-        // 本来なら非稼働（土日 or 祝日）だが稼働日指定で稼働扱いにした日
-        workdayOverride: working && (weekend || cal.holidayMap.has(iso)),
+        // 稼働日指定で稼働扱いにした日（土日・祝日・休日指定を上書きした日を含む）
+        workdayOverride: working && forcedWorkdays.has(iso),
         month: iso.slice(0, 7), day: d.getUTCDate(), dowLabel: WEEKDAY_JA[dow],
       });
       d = new Date(d.getTime() + 86400000);

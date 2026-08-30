@@ -140,6 +140,15 @@ describe("normalizeImportedProject", () => {
     expect(withoutEx.calendarExceptions).toEqual([]);
   });
 
+  it("calendarExceptions キーが存在するのに配列でない場合は拒否する（黙って [] に丸めない）", () => {
+    expect(() => normalizeImportedProject({
+      schemaVersion: PROJECT_SCHEMA_VERSION,
+      exportedAt: "2026-08-26T00:00:00.000Z",
+      tasks: [], resources: [], sprints: [], versions: [],
+      calendarExceptions: {},
+    })).toThrow("invalid_project_json");
+  });
+
   it("旧形式や必須項目不足のJSONは拒否する", () => {
     expect(() => normalizeImportedProject({ tasks: [] })).toThrow("invalid_project_json");
     expect(() => normalizeImportedProject({

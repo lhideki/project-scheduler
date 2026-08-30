@@ -191,6 +191,11 @@ describe("checkFieldShapes", () => {
     expect(codes).toContain("calendar-exception-type-invalid");
   });
 
+  it("配列でない calendarExceptions を error として検出する", () => {
+    const data = { ...seedProject(), calendarExceptions: {} };
+    expect(checkFieldShapes(data).map(i => i.code)).toContain("calendarExceptions-invalid");
+  });
+
   it("同一日の休日＋稼働日を warning として報告する", () => {
     const data = seedProject();
     data.calendarExceptions = [

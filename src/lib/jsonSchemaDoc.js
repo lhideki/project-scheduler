@@ -113,6 +113,7 @@ export function renderJsonSchemaMarkdown(rootSchema) {
     "- 必須トップレベル項目が欠けている場合は読み込みに失敗します",
     "- `hasFullSnapshot` は `rawTasks` / `rawResources` / `rawSprints` の有無から再計算します",
     "- `levelingOn` / `calendarExceptions` が無い旧形式JSONは、それぞれ `false` / `[]` として読み込みます",
+    "- `calendarExceptions` キーが存在するのに配列でない場合は読み込みに失敗します",
     "",
   ].join("\n");
 }

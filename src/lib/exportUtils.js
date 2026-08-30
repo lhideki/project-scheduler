@@ -136,7 +136,8 @@ export const PROJECT_JSON_SCHEMA = Object.freeze({
         rawTasks: { type: "array", description: "復元用の完全な tasks", items: { $ref: "#/$defs/task" } },
         rawResources: { type: "array", description: "復元用の完全な resources", items: { $ref: "#/$defs/resource" } },
         rawSprints: { type: "array", description: "復元用の完全な sprints", items: { $ref: "#/$defs/sprint" } },
-        hasFullSnapshot: { type: "boolean", description: "復元に必要な raw* が揃っているか" },
+        rawCalendarExceptions: { type: "array", description: "復元用の完全な calendarExceptions（この項目が無い古いスナップショットは復元時に空配列扱い）", items: { $ref: "#/$defs/calendarException" } },
+        hasFullSnapshot: { type: "boolean", description: "復元に必要な raw*（rawTasks/rawResources/rawSprints）が揃っているか" },
       },
     },
   },
@@ -187,6 +188,9 @@ export function normalizeImportedProject(data) {
     || !Array.isArray(data.resources)
     || !Array.isArray(data.sprints)
     || !Array.isArray(data.versions)
+    // calendarExceptions は任意だが、キーが存在する場合は配列でなければ不正とみなす
+    // （黙って [] に丸めるとカレンダー設定を失ったまま読み込めてしまうため）。
+    || (data.calendarExceptions !== undefined && !Array.isArray(data.calendarExceptions))
   ) {
     throw new Error("invalid_project_json");
   }
@@ -199,7 +203,7 @@ export function normalizeImportedProject(data) {
     versions: normalizeProjectVersions(data.versions),
     // 旧形式のJSON（levelingOn未対応）を読み込んだ場合は false にフォールバックする。
     levelingOn: typeof data.levelingOn === "boolean" ? data.levelingOn : false,
-    // 旧形式のJSON（calendarExceptions未対応）を読み込んだ場合は空配列にフォールバックする。
+    // 旧形式のJSON（calendarExceptions キーなし）のみ空配列にフォールバックする。
     calendarExceptions: Array.isArray(data.calendarExceptions) ? cloneJSON(data.calendarExceptions) : [],
   };
 }

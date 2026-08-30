@@ -107,7 +107,8 @@ WBS上のタスクです。階層は parentId で表現します。
 | `rawTasks` | `task[]` | 任意 | 復元用の完全な tasks |
 | `rawResources` | `resource[]` | 任意 | 復元用の完全な resources |
 | `rawSprints` | `sprint[]` | 任意 | 復元用の完全な sprints |
-| `hasFullSnapshot` | `boolean` | 必須 | 復元に必要な raw* が揃っているか |
+| `rawCalendarExceptions` | `calendarException[]` | 任意 | 復元用の完全な calendarExceptions（この項目が無い古いスナップショットは復元時に空配列扱い） |
+| `hasFullSnapshot` | `boolean` | 必須 | 復元に必要な raw*（rawTasks/rawResources/rawSprints）が揃っているか |
 
 ## versions.tasks の要素
 
@@ -145,3 +146,4 @@ WBS上のタスクです。階層は parentId で表現します。
 - 必須トップレベル項目が欠けている場合は読み込みに失敗します
 - `hasFullSnapshot` は `rawTasks` / `rawResources` / `rawSprints` の有無から再計算します
 - `levelingOn` / `calendarExceptions` が無い旧形式JSONは、それぞれ `false` / `[]` として読み込みます
+- `calendarExceptions` キーが存在するのに配列でない場合は読み込みに失敗します

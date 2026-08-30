@@ -1,5 +1,5 @@
 import React, { useMemo } from "react";
-import { toISO, parseISO, fmtJP, WEEKDAY_JA } from "../lib/calendar.js";
+import { toISO, parseISO, fmtJP, WEEKDAY_JA, buildHolidayMap } from "../lib/calendar.js";
 import { CalendarExceptionsEditor } from "./CalendarExceptionsEditor.jsx";
 
 /* =========================================================================================
@@ -10,11 +10,15 @@ import { CalendarExceptionsEditor } from "./CalendarExceptionsEditor.jsx";
    ========================================================================================= */
 export function CalendarView({ calendarExceptions, setCalendarExceptions, cal, requestConfirm }) {
   // 今日以降の「日本の祝日」（振替休日・国民の休日を含む自動計算分）を参考表示する。
-  // 稼働日指定で上書きした日（holidayName が null）は除外する。
+  // スケジュール用の cal.holidayMap は projectStart 起点の範囲なので、参考リストは
+  // 「現在の年」を起点に専用の祝日マップを作る（プロジェクトが過去/未来始まりでもズレない）。
+  // 稼働日指定（type: "workday"）で上書きした日は非表示にする。
   const upcomingHolidays = useMemo(() => {
     const today = toISO(new Date());
-    return [...cal.holidayMap.entries()]
-      .filter(([date]) => date >= today && cal.holidayName(date) !== null)
+    const thisYear = new Date().getUTCFullYear();
+    const forcedWorkdays = new Set(cal.exceptions.filter(e => e.type === "workday").map(e => e.date));
+    return [...buildHolidayMap(thisYear, thisYear + 1).entries()]
+      .filter(([date]) => date >= today && !forcedWorkdays.has(date))
       .sort((a, b) => a[0].localeCompare(b[0]))
       .slice(0, 12);
   }, [cal]);
