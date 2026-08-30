@@ -48,6 +48,38 @@ describe("computeSchedule", () => {
     expect(r.sprintConflicts).toEqual([]);
     expect(r.levelWarnings).toEqual([]);
   });
+
+  const finishOf = (data, r, name) => scheduleRows(data, r.schedule).find(row => row.name === name).schedFinish;
+
+  it("calendarExceptions（休日指定）を反映してタスクの終了日が後ろ倒しになる", () => {
+    const data = seedProject();
+    const before = computeSchedule(data, { leveling: false });
+    const start = parseISO(before.projectStart);
+    const exceptions = [];
+    for (let i = 1; i <= 12; i++) {
+      const d = new Date(start.getTime() + i * 86400000);
+      const dow = d.getUTCDay();
+      if (dow !== 0 && dow !== 6) exceptions.push({ date: d.toISOString().slice(0, 10), type: "holiday", name: "臨時休業" });
+    }
+    const edited = { ...data, calendarExceptions: exceptions };
+    const after = computeSchedule(edited, { leveling: false });
+    expect(finishOf(edited, after, "業務要件ヒアリング") > finishOf(data, before, "業務要件ヒアリング")).toBe(true);
+  });
+
+  it("calendarExceptions（稼働日指定）を反映してタスクの終了日が前倒しになる", () => {
+    const data = seedProject();
+    const before = computeSchedule(data, { leveling: false });
+    const start = parseISO(before.projectStart);
+    const exceptions = [];
+    for (let i = 0; i <= 30; i++) {
+      const d = new Date(start.getTime() + i * 86400000);
+      const dow = d.getUTCDay();
+      if (dow === 0 || dow === 6) exceptions.push({ date: d.toISOString().slice(0, 10), type: "workday", name: "休日出勤" });
+    }
+    const edited = { ...data, calendarExceptions: exceptions };
+    const after = computeSchedule(edited, { leveling: false });
+    expect(finishOf(edited, after, "業務要件ヒアリング") < finishOf(data, before, "業務要件ヒアリング")).toBe(true);
+  });
 });
 
 describe("analyzeIntegrity", () => {
@@ -147,6 +179,31 @@ describe("checkFieldShapes", () => {
     data.tasks[0].parentId = data.tasks[0].id;
     expect(analyzeIntegrity(data).some(i => i.code === "parent-cycle")).toBe(true);
   });
+
+  it("不正な calendarExceptions（日付書式・type）を error として検出する", () => {
+    const data = seedProject();
+    data.calendarExceptions = [
+      { date: "2026-13-40", type: "holiday" },
+      { date: "2026-05-01", type: "invalid" },
+    ];
+    const codes = checkFieldShapes(data).map(i => i.code);
+    expect(codes).toContain("calendar-exception-date-invalid");
+    expect(codes).toContain("calendar-exception-type-invalid");
+  });
+
+  it("配列でない calendarExceptions を error として検出する", () => {
+    const data = { ...seedProject(), calendarExceptions: {} };
+    expect(checkFieldShapes(data).map(i => i.code)).toContain("calendarExceptions-invalid");
+  });
+
+  it("同一日の休日＋稼働日を warning として報告する", () => {
+    const data = seedProject();
+    data.calendarExceptions = [
+      { date: "2026-05-01", type: "holiday", name: "休日" },
+      { date: "2026-05-01", type: "workday", name: "稼働" },
+    ];
+    expect(analyzeIntegrity(data).some(i => i.code === "calendar-exception-conflict" && i.severity === "warning")).toBe(true);
+  });
 });
 
 describe("buildVersionSnapshot", () => {
@@ -164,6 +221,15 @@ describe("buildVersionSnapshot", () => {
     expect(v.rawTasks.length).toBe(data.tasks.length);
     expect(Array.isArray(v.rawResources)).toBe(true);
     expect(Array.isArray(v.rawSprints)).toBe(true);
+    expect(Array.isArray(v.rawCalendarExceptions)).toBe(true);
+  });
+
+  it("rawCalendarExceptions にカレンダー例外を含める", () => {
+    const data = seedProject();
+    data.calendarExceptions = [{ date: "2026-05-01", type: "holiday", name: "創立記念日" }];
+    const r = computeSchedule(data, { leveling: false });
+    const v = buildVersionSnapshot(data, r.schedule, "テスト");
+    expect(v.rawCalendarExceptions).toEqual([{ date: "2026-05-01", type: "holiday", name: "創立記念日" }]);
   });
 });
 

@@ -42,5 +42,7 @@ export function seedData() {
     { id: sp2, name: "Sprint 2", theme: "基本設計・詳細設計", startDate: cal_addDaysISO(base, 20), endDate: cal_addDaysISO(base, 32), order: 1 },
     { id: sp3, name: "Sprint 3", theme: "設計完了・実装開始", startDate: cal_addDaysISO(base, 33), endDate: cal_addDaysISO(base, 54), order: 2 },
   ];
-  return { tasks, resources, sprints };
+  // 非稼働日カレンダーの例外（休日・稼働日の上書き）。サンプルでは未設定。
+  const calendarExceptions = [];
+  return { tasks, resources, sprints, calendarExceptions };
 }

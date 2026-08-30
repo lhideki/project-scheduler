@@ -18,8 +18,28 @@ export const PROJECT_JSON_SCHEMA = Object.freeze({
     sprints: { type: "array", description: "スプリント一覧", items: { $ref: "#/$defs/sprint" } },
     versions: { type: "array", description: "保存済みバージョン一覧", items: { $ref: "#/$defs/version" } },
     levelingOn: { type: "boolean", default: false, description: "リソース平準化の有効/無効（旧形式のJSONには存在せず、その場合は false 扱い）" },
+    calendarExceptions: {
+      type: "array",
+      description: "非稼働日カレンダーの例外（休日・稼働日の上書き指定）。旧形式のJSONには存在せず、その場合は空配列扱い。",
+      items: { $ref: "#/$defs/calendarException" },
+    },
   },
   $defs: {
+    calendarException: {
+      type: "object",
+      description: "非稼働日カレンダーの例外です。土日・日本の祝日の計算結果に対する上書き指定です。",
+      additionalProperties: false,
+      required: ["date", "type"],
+      properties: {
+        date: { type: "string", format: "date", description: "対象日（YYYY-MM-DD）" },
+        type: {
+          type: "string",
+          enum: ["holiday", "workday"],
+          description: "holiday（休日）: 平日を非稼働日にする / workday（稼働日）: 土日・祝日・休日指定を稼働日にする（最優先）",
+        },
+        name: { type: "string", description: "表示用ラベル（任意）" },
+      },
+    },
     dependency: {
       type: "object",
       description: "先行タスクを表すオブジェクトです。",
@@ -116,7 +136,8 @@ export const PROJECT_JSON_SCHEMA = Object.freeze({
         rawTasks: { type: "array", description: "復元用の完全な tasks", items: { $ref: "#/$defs/task" } },
         rawResources: { type: "array", description: "復元用の完全な resources", items: { $ref: "#/$defs/resource" } },
         rawSprints: { type: "array", description: "復元用の完全な sprints", items: { $ref: "#/$defs/sprint" } },
-        hasFullSnapshot: { type: "boolean", description: "復元に必要な raw* が揃っているか" },
+        rawCalendarExceptions: { type: "array", description: "復元用の完全な calendarExceptions（この項目が無い古いスナップショットは復元時に空配列扱い）", items: { $ref: "#/$defs/calendarException" } },
+        hasFullSnapshot: { type: "boolean", description: "復元に必要な raw*（rawTasks/rawResources/rawSprints）が揃っているか" },
       },
     },
   },
@@ -141,7 +162,7 @@ export function normalizeProjectVersions(versions) {
 }
 
 /** 現行の正規化済みJSONエクスポートデータを組み立てる。 */
-export function buildProjectExport(tasks, resources, sprints = [], versions = [], levelingOn = false) {
+export function buildProjectExport(tasks, resources, sprints = [], versions = [], levelingOn = false, calendarExceptions = []) {
   return {
     schemaVersion: PROJECT_SCHEMA_VERSION,
     exportedAt: new Date().toISOString(),
@@ -150,6 +171,7 @@ export function buildProjectExport(tasks, resources, sprints = [], versions = []
     sprints: cloneJSON(Array.isArray(sprints) ? sprints : []),
     versions: normalizeProjectVersions(versions),
     levelingOn: !!levelingOn,
+    calendarExceptions: cloneJSON(Array.isArray(calendarExceptions) ? calendarExceptions : []),
   };
 }
 
@@ -166,6 +188,9 @@ export function normalizeImportedProject(data) {
     || !Array.isArray(data.resources)
     || !Array.isArray(data.sprints)
     || !Array.isArray(data.versions)
+    // calendarExceptions は任意だが、キーが存在する場合は配列でなければ不正とみなす
+    // （黙って [] に丸めるとカレンダー設定を失ったまま読み込めてしまうため）。
+    || (data.calendarExceptions !== undefined && !Array.isArray(data.calendarExceptions))
   ) {
     throw new Error("invalid_project_json");
   }
@@ -178,6 +203,8 @@ export function normalizeImportedProject(data) {
     versions: normalizeProjectVersions(data.versions),
     // 旧形式のJSON（levelingOn未対応）を読み込んだ場合は false にフォールバックする。
     levelingOn: typeof data.levelingOn === "boolean" ? data.levelingOn : false,
+    // 旧形式のJSON（calendarExceptions キーなし）のみ空配列にフォールバックする。
+    calendarExceptions: Array.isArray(data.calendarExceptions) ? cloneJSON(data.calendarExceptions) : [],
   };
 }
 

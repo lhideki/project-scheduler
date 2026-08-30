@@ -4,7 +4,7 @@ import {
   AlertTriangle, ArrowLeftRight, Info, Diamond, GripVertical, Zap, Flame,
   Undo2, Redo2, Copy, ClipboardPaste,
 } from "lucide-react";
-import { toISO, parseISO, WEEKDAY_JA, fmtJP, cal_addDaysISO } from "../lib/calendar.js";
+import { toISO, parseISO, WEEKDAY_JA, fmtJP, cal_addDaysISO, isWeekend } from "../lib/calendar.js";
 import { uid, buildFlatList, allDescendantIds } from "../lib/taskTree.js";
 import { sprintColorForId } from "../lib/sprints.js";
 import { copyTextToClipboard } from "../lib/exportUtils.js";
@@ -597,16 +597,27 @@ export function WBSGanttView({
 
   const dayCells = useMemo(() => {
     const cells = [];
+    // 稼働日指定（type: "workday"）の日付集合。土日・祝日でなくても、明示的に指定された日は淡色で示す。
+    const forcedWorkdays = new Set(cal.exceptions.filter(e => e.type === "workday").map(e => e.date));
     let d = parseISO(minDate);
     const end = parseISO(maxDate);
     while (d <= end) {
       const iso = toISO(d);
       const dow = d.getUTCDay();
-      cells.push({ iso, x: xOf(iso), weekend: dow === 0 || dow === 6, holiday: cal.holidayMap.get(iso), month: iso.slice(0, 7), day: d.getUTCDate(), dowLabel: WEEKDAY_JA[dow] });
+      const weekend = isWeekend(d);
+      const working = cal.isWorkdayStr(iso);
+      cells.push({
+        iso, x: xOf(iso),
+        weekend: !working && weekend,
+        holiday: !working ? (cal.holidayName(iso) || undefined) : undefined,
+        // 稼働日指定で稼働扱いにした日（土日・祝日・休日指定を上書きした日を含む）
+        workdayOverride: working && forcedWorkdays.has(iso),
+        month: iso.slice(0, 7), day: d.getUTCDate(), dowLabel: WEEKDAY_JA[dow],
+      });
       d = new Date(d.getTime() + 86400000);
     }
     return cells;
-  }, [minDate, maxDate, dayWidth]);
+  }, [minDate, maxDate, dayWidth, cal]);
 
   const monthBands = useMemo(() => {
     const bands = [];
@@ -1044,6 +1055,9 @@ export function WBSGanttView({
                 ))}
                 {dayCells.map(c => (c.weekend || c.holiday) && (
                   <rect key={c.iso} x={c.x} y={0} width={dayWidth} height={bodyHeight} fill={c.holiday ? "#FEF3C7" : "#F1F5F9"} />
+                ))}
+                {dayCells.map(c => c.workdayOverride && (
+                  <rect key={`w-${c.iso}`} x={c.x} y={0} width={dayWidth} height={bodyHeight} fill="#EFF6FF" />
                 ))}
                 {xOf(todayISO) >= 0 && xOf(todayISO) <= chartWidth && (
                   <line x1={xOf(todayISO) + dayWidth / 2} x2={xOf(todayISO) + dayWidth / 2} y1={0} y2={bodyHeight} stroke="#DC2626" strokeDasharray="3,3" strokeWidth={1} />
