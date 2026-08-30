@@ -105,9 +105,9 @@ function resolveLeveling(optValue, data) {
    スケジュール計算（App.jsx の cpm / schedule useMemo と同じ手順）
    ------------------------------------------------------------------------------------------- */
 
-function makeProjectCalendar(projectStart) {
+function makeProjectCalendar(projectStart, calendarExceptions = []) {
   const y = Number(projectStart.slice(0, 4));
-  return makeCalendar(buildHolidayMap(y - 1, y + 6));
+  return makeCalendar(buildHolidayMap(y - 1, y + 6), calendarExceptions);
 }
 
 /**
@@ -120,9 +120,10 @@ export function computeSchedule(data, opts = {}) {
   const tasks = data.tasks || [];
   const resources = data.resources || [];
   const sprints = data.sprints || [];
+  const calendarExceptions = data.calendarExceptions || [];
 
   const projectStart = deriveProjectStart(tasks, toISO(new Date()));
-  const cal = makeProjectCalendar(projectStart);
+  const cal = makeProjectCalendar(projectStart, calendarExceptions);
   const cpm = runCPM(tasks, cal, projectStart, sprints, { respectManualPins });
 
   let schedule = cpm.result;
@@ -265,6 +266,23 @@ export function checkFieldShapes(data) {
     }
   });
 
+  if (data.calendarExceptions != null && !Array.isArray(data.calendarExceptions)) {
+    issues.push({ severity: "error", code: "calendarExceptions-invalid", message: "calendarExceptions が配列ではありません" });
+  } else {
+    (data.calendarExceptions || []).forEach((e, i) => {
+      if (typeof e !== "object" || e === null) {
+        issues.push({ severity: "error", code: "calendar-exception-not-object", message: `カレンダー例外#${i + 1} がオブジェクトではありません` });
+        return;
+      }
+      if (!isISODate(e.date)) {
+        issues.push({ severity: "error", code: "calendar-exception-date-invalid", message: `カレンダー例外#${i + 1} の date「${e.date}」が YYYY-MM-DD 形式ではありません` });
+      }
+      if (e.type !== "holiday" && e.type !== "workday") {
+        issues.push({ severity: "error", code: "calendar-exception-type-invalid", message: `カレンダー例外#${i + 1} の type「${e.type}」が holiday / workday ではありません` });
+      }
+    });
+  }
+
   return issues;
 }
 
@@ -401,6 +419,19 @@ export function analyzeIntegrity(data) {
     issues.push({ severity: "warning", code: "sprint-overlap", ids: [...overlaps], message: `期間が重複しているスプリントがあります: ${[...overlaps].join(", ")}` });
   }
 
+  // 同一日に休日（holiday）と稼働日（workday）が両方あると分かりにくい（workday が優先される）。
+  const exByDate = new Map();
+  for (const e of data.calendarExceptions || []) {
+    if (!e || typeof e.date !== "string") continue;
+    if (!exByDate.has(e.date)) exByDate.set(e.date, new Set());
+    exByDate.get(e.date).add(e.type);
+  }
+  for (const [date, types] of exByDate) {
+    if (types.has("holiday") && types.has("workday")) {
+      issues.push({ severity: "warning", code: "calendar-exception-conflict", message: `${date} に休日と稼働日の両方が指定されています（稼働日が優先されます）` });
+    }
+  }
+
   return issues;
 }
 
@@ -436,6 +467,7 @@ export function buildVersionSnapshot(data, schedule, name) {
     rawTasks: JSON.parse(JSON.stringify(data.tasks)),
     rawResources: JSON.parse(JSON.stringify(data.resources || [])),
     rawSprints: JSON.parse(JSON.stringify(data.sprints || [])),
+    rawCalendarExceptions: JSON.parse(JSON.stringify(data.calendarExceptions || [])),
     hasFullSnapshot: true,
   };
 }
@@ -584,7 +616,7 @@ function cmdPlan(positional, opts) {
   let startDateChanges = [];
   if (reschedule) {
     const editedProjectStart = deriveProjectStart(edited.tasks, toISO(new Date()));
-    const editedCal = makeProjectCalendar(editedProjectStart);
+    const editedCal = makeProjectCalendar(editedProjectStart, edited.calendarExceptions || []);
     const applied = applyAutoSchedule(edited, editedProjectStart, editedCal);
     proposedTasks = applied.tasks;
     startDateChanges = applied.changed;

@@ -15,6 +15,10 @@ function toISO(d) {
 function parseISO(s) {
   return /* @__PURE__ */ new Date(s + "T00:00:00Z");
 }
+function isWeekend(d) {
+  const dow = d.getUTCDay();
+  return dow === 0 || dow === 6;
+}
 function vernalEquinoxDay(year) {
   return Math.floor(20.8431 + 0.242194 * (year - 1980)) - Math.floor((year - 1980) / 4);
 }
@@ -96,12 +100,33 @@ function buildHolidayMap(startYear, endYear) {
   }
   return map;
 }
-function makeCalendar(holidayMap) {
+function normalizeCalendarExceptions(exceptions) {
+  const forcedWorkdays = /* @__PURE__ */ new Map();
+  const extraHolidays = /* @__PURE__ */ new Map();
+  const list = [];
+  for (const e of Array.isArray(exceptions) ? exceptions : []) {
+    if (!e || typeof e.date !== "string" || !e.date) continue;
+    if (e.type !== "workday" && e.type !== "holiday") continue;
+    const name = typeof e.name === "string" ? e.name : "";
+    list.push({ date: e.date, type: e.type, name });
+    (e.type === "workday" ? forcedWorkdays : extraHolidays).set(e.date, name);
+  }
+  return { list, forcedWorkdays, extraHolidays };
+}
+function makeCalendar(holidayMap, exceptions = []) {
+  const { list: normalizedExceptions, forcedWorkdays, extraHolidays } = normalizeCalendarExceptions(exceptions);
   function isWorkday(d) {
-    const dow = d.getUTCDay();
-    if (dow === 0 || dow === 6) return false;
-    if (holidayMap.has(toISO(d))) return false;
+    const iso = toISO(d);
+    if (forcedWorkdays.has(iso)) return true;
+    if (isWeekend(d)) return false;
+    if (holidayMap.has(iso)) return false;
+    if (extraHolidays.has(iso)) return false;
     return true;
+  }
+  function holidayName(s) {
+    if (forcedWorkdays.has(s)) return null;
+    if (extraHolidays.has(s)) return extraHolidays.get(s) || "\u4F11\u65E5";
+    return holidayMap.get(s) || null;
   }
   function isWorkdayStr(s) {
     return isWorkday(parseISO(s));
@@ -161,7 +186,7 @@ function makeCalendar(holidayMap) {
     }
     return cnt;
   }
-  return { isWorkday, isWorkdayStr, snapForward, snapBackward, shift, endFromStart, startFromEnd, workdaysBetween, holidayMap };
+  return { isWorkday, isWorkdayStr, snapForward, snapBackward, shift, endFromStart, startFromEnd, workdaysBetween, holidayName, holidayMap, exceptions: normalizedExceptions };
 }
 function weekKey(dateStr) {
   const d = parseISO(dateStr);
@@ -694,9 +719,29 @@ var PROJECT_JSON_SCHEMA = Object.freeze({
     resources: { type: "array", description: "\u62C5\u5F53\u8005\u4E00\u89A7", items: { $ref: "#/$defs/resource" } },
     sprints: { type: "array", description: "\u30B9\u30D7\u30EA\u30F3\u30C8\u4E00\u89A7", items: { $ref: "#/$defs/sprint" } },
     versions: { type: "array", description: "\u4FDD\u5B58\u6E08\u307F\u30D0\u30FC\u30B8\u30E7\u30F3\u4E00\u89A7", items: { $ref: "#/$defs/version" } },
-    levelingOn: { type: "boolean", default: false, description: "\u30EA\u30BD\u30FC\u30B9\u5E73\u6E96\u5316\u306E\u6709\u52B9/\u7121\u52B9\uFF08\u65E7\u5F62\u5F0F\u306EJSON\u306B\u306F\u5B58\u5728\u305B\u305A\u3001\u305D\u306E\u5834\u5408\u306F false \u6271\u3044\uFF09" }
+    levelingOn: { type: "boolean", default: false, description: "\u30EA\u30BD\u30FC\u30B9\u5E73\u6E96\u5316\u306E\u6709\u52B9/\u7121\u52B9\uFF08\u65E7\u5F62\u5F0F\u306EJSON\u306B\u306F\u5B58\u5728\u305B\u305A\u3001\u305D\u306E\u5834\u5408\u306F false \u6271\u3044\uFF09" },
+    calendarExceptions: {
+      type: "array",
+      description: "\u975E\u7A3C\u50CD\u65E5\u30AB\u30EC\u30F3\u30C0\u30FC\u306E\u4F8B\u5916\uFF08\u4F11\u65E5\u30FB\u7A3C\u50CD\u65E5\u306E\u4E0A\u66F8\u304D\u6307\u5B9A\uFF09\u3002\u65E7\u5F62\u5F0F\u306EJSON\u306B\u306F\u5B58\u5728\u305B\u305A\u3001\u305D\u306E\u5834\u5408\u306F\u7A7A\u914D\u5217\u6271\u3044\u3002",
+      items: { $ref: "#/$defs/calendarException" }
+    }
   },
   $defs: {
+    calendarException: {
+      type: "object",
+      description: "\u975E\u7A3C\u50CD\u65E5\u30AB\u30EC\u30F3\u30C0\u30FC\u306E\u4F8B\u5916\u3067\u3059\u3002\u571F\u65E5\u30FB\u65E5\u672C\u306E\u795D\u65E5\u306E\u8A08\u7B97\u7D50\u679C\u306B\u5BFE\u3059\u308B\u4E0A\u66F8\u304D\u6307\u5B9A\u3067\u3059\u3002",
+      additionalProperties: false,
+      required: ["date", "type"],
+      properties: {
+        date: { type: "string", format: "date", description: "\u5BFE\u8C61\u65E5\uFF08YYYY-MM-DD\uFF09" },
+        type: {
+          type: "string",
+          enum: ["holiday", "workday"],
+          description: "holiday\uFF08\u4F11\u65E5\uFF09: \u5E73\u65E5\u3092\u975E\u7A3C\u50CD\u65E5\u306B\u3059\u308B / workday\uFF08\u7A3C\u50CD\u65E5\uFF09: \u571F\u65E5\u30FB\u795D\u65E5\u30FB\u4F11\u65E5\u6307\u5B9A\u3092\u7A3C\u50CD\u65E5\u306B\u3059\u308B\uFF08\u6700\u512A\u5148\uFF09"
+        },
+        name: { type: "string", description: "\u8868\u793A\u7528\u30E9\u30D9\u30EB\uFF08\u4EFB\u610F\uFF09" }
+      }
+    },
     dependency: {
       type: "object",
       description: "\u5148\u884C\u30BF\u30B9\u30AF\u3092\u8868\u3059\u30AA\u30D6\u30B8\u30A7\u30AF\u30C8\u3067\u3059\u3002",
@@ -825,7 +870,9 @@ function normalizeImportedProject(data) {
     sprints: cloneJSON(data.sprints),
     versions: normalizeProjectVersions(data.versions),
     // 旧形式のJSON（levelingOn未対応）を読み込んだ場合は false にフォールバックする。
-    levelingOn: typeof data.levelingOn === "boolean" ? data.levelingOn : false
+    levelingOn: typeof data.levelingOn === "boolean" ? data.levelingOn : false,
+    // 旧形式のJSON（calendarExceptions未対応）を読み込んだ場合は空配列にフォールバックする。
+    calendarExceptions: Array.isArray(data.calendarExceptions) ? cloneJSON(data.calendarExceptions) : []
   };
 }
 
@@ -889,9 +936,9 @@ function resolveLeveling(optValue, data) {
   if (v === "auto") return !!data.levelingOn;
   fail(`--leveling \u306F on / off / auto \u306E\u3044\u305A\u308C\u304B\u3092\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044\uFF08\u6307\u5B9A\u5024: ${optValue}\uFF09`);
 }
-function makeProjectCalendar(projectStart) {
+function makeProjectCalendar(projectStart, calendarExceptions = []) {
   const y = Number(projectStart.slice(0, 4));
-  return makeCalendar(buildHolidayMap(y - 1, y + 6));
+  return makeCalendar(buildHolidayMap(y - 1, y + 6), calendarExceptions);
 }
 function computeSchedule(data, opts = {}) {
   const respectManualPins = opts.respectManualPins !== false;
@@ -899,8 +946,9 @@ function computeSchedule(data, opts = {}) {
   const tasks = data.tasks || [];
   const resources = data.resources || [];
   const sprints = data.sprints || [];
+  const calendarExceptions = data.calendarExceptions || [];
   const projectStart = deriveProjectStart(tasks, toISO(/* @__PURE__ */ new Date()));
-  const cal = makeProjectCalendar(projectStart);
+  const cal = makeProjectCalendar(projectStart, calendarExceptions);
   const cpm = runCPM(tasks, cal, projectStart, sprints, { respectManualPins });
   let schedule = cpm.result;
   let levelWarnings = [];
@@ -1025,6 +1073,22 @@ function checkFieldShapes(data) {
       issues.push({ severity: "error", code: "sprint-endDate-invalid", message: `\u30B9\u30D7\u30EA\u30F3\u30C8#${i + 1} \u306E endDate\u300C${s.endDate}\u300D\u304C YYYY-MM-DD \u5F62\u5F0F\u3067\u306F\u3042\u308A\u307E\u305B\u3093` });
     }
   });
+  if (data.calendarExceptions != null && !Array.isArray(data.calendarExceptions)) {
+    issues.push({ severity: "error", code: "calendarExceptions-invalid", message: "calendarExceptions \u304C\u914D\u5217\u3067\u306F\u3042\u308A\u307E\u305B\u3093" });
+  } else {
+    (data.calendarExceptions || []).forEach((e, i) => {
+      if (typeof e !== "object" || e === null) {
+        issues.push({ severity: "error", code: "calendar-exception-not-object", message: `\u30AB\u30EC\u30F3\u30C0\u30FC\u4F8B\u5916#${i + 1} \u304C\u30AA\u30D6\u30B8\u30A7\u30AF\u30C8\u3067\u306F\u3042\u308A\u307E\u305B\u3093` });
+        return;
+      }
+      if (!isISODate(e.date)) {
+        issues.push({ severity: "error", code: "calendar-exception-date-invalid", message: `\u30AB\u30EC\u30F3\u30C0\u30FC\u4F8B\u5916#${i + 1} \u306E date\u300C${e.date}\u300D\u304C YYYY-MM-DD \u5F62\u5F0F\u3067\u306F\u3042\u308A\u307E\u305B\u3093` });
+      }
+      if (e.type !== "holiday" && e.type !== "workday") {
+        issues.push({ severity: "error", code: "calendar-exception-type-invalid", message: `\u30AB\u30EC\u30F3\u30C0\u30FC\u4F8B\u5916#${i + 1} \u306E type\u300C${e.type}\u300D\u304C holiday / workday \u3067\u306F\u3042\u308A\u307E\u305B\u3093` });
+      }
+    });
+  }
   return issues;
 }
 function findParentCycles(tasks) {
@@ -1145,6 +1209,17 @@ function analyzeIntegrity(data) {
   if (overlaps.size) {
     issues.push({ severity: "warning", code: "sprint-overlap", ids: [...overlaps], message: `\u671F\u9593\u304C\u91CD\u8907\u3057\u3066\u3044\u308B\u30B9\u30D7\u30EA\u30F3\u30C8\u304C\u3042\u308A\u307E\u3059: ${[...overlaps].join(", ")}` });
   }
+  const exByDate = /* @__PURE__ */ new Map();
+  for (const e of data.calendarExceptions || []) {
+    if (!e || typeof e.date !== "string") continue;
+    if (!exByDate.has(e.date)) exByDate.set(e.date, /* @__PURE__ */ new Set());
+    exByDate.get(e.date).add(e.type);
+  }
+  for (const [date, types] of exByDate) {
+    if (types.has("holiday") && types.has("workday")) {
+      issues.push({ severity: "warning", code: "calendar-exception-conflict", message: `${date} \u306B\u4F11\u65E5\u3068\u7A3C\u50CD\u65E5\u306E\u4E21\u65B9\u304C\u6307\u5B9A\u3055\u308C\u3066\u3044\u307E\u3059\uFF08\u7A3C\u50CD\u65E5\u304C\u512A\u5148\u3055\u308C\u307E\u3059\uFF09` });
+    }
+  }
   return issues;
 }
 function buildVersionSnapshot(data, schedule, name) {
@@ -1175,6 +1250,7 @@ function buildVersionSnapshot(data, schedule, name) {
     rawTasks: JSON.parse(JSON.stringify(data.tasks)),
     rawResources: JSON.parse(JSON.stringify(data.resources || [])),
     rawSprints: JSON.parse(JSON.stringify(data.sprints || [])),
+    rawCalendarExceptions: JSON.parse(JSON.stringify(data.calendarExceptions || [])),
     hasFullSnapshot: true
   };
 }
@@ -1291,7 +1367,7 @@ function cmdPlan(positional, opts) {
   let startDateChanges = [];
   if (reschedule) {
     const editedProjectStart = deriveProjectStart(edited.tasks, toISO(/* @__PURE__ */ new Date()));
-    const editedCal = makeProjectCalendar(editedProjectStart);
+    const editedCal = makeProjectCalendar(editedProjectStart, edited.calendarExceptions || []);
     const applied = applyAutoSchedule(edited, editedProjectStart, editedCal);
     proposedTasks = applied.tasks;
     startDateChanges = applied.changed;

@@ -63,6 +63,7 @@ export function renderJsonSchemaMarkdown(rootSchema) {
   const versionSchema = rootSchema.$defs.version;
   const dependencySchema = rootSchema.$defs.dependency;
   const versionTaskSchema = rootSchema.$defs.versionTask;
+  const calendarExceptionSchema = rootSchema.$defs.calendarException;
 
   return [
     "# JSON保存形式",
@@ -87,6 +88,7 @@ export function renderJsonSchemaMarkdown(rootSchema) {
       resources: [],
       sprints: [],
       versions: [],
+      calendarExceptions: [],
     }, null, 2),
     "```",
     "",
@@ -102,12 +104,15 @@ export function renderJsonSchemaMarkdown(rootSchema) {
     "",
     renderSection(rootSchema, "versions.tasks の要素", versionTaskSchema),
     "",
+    renderSection(rootSchema, "calendarExceptions の要素", calendarExceptionSchema),
+    "",
     "## インポート時の扱い",
     "",
     "- JSONとして解釈できない場合は読み込みに失敗します",
     `- \`schemaVersion !== ${rootSchema.properties.schemaVersion.const}\` の場合は読み込みに失敗します`,
     "- 必須トップレベル項目が欠けている場合は読み込みに失敗します",
     "- `hasFullSnapshot` は `rawTasks` / `rawResources` / `rawSprints` の有無から再計算します",
+    "- `levelingOn` / `calendarExceptions` が無い旧形式JSONは、それぞれ `false` / `[]` として読み込みます",
     "",
   ].join("\n");
 }

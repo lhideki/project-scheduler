@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, useReducer, useCallback } from "react";
 import {
   Play, X, AlertTriangle, Check, Clock, GitBranch, Users, Table2,
-  History, Download, Upload, CalendarRange, Copy, RefreshCw, Link,
+  History, Download, Upload, CalendarRange, CalendarOff, Copy, RefreshCw, Link,
 } from "lucide-react";
 
 import { toISO, parseISO, buildHolidayMap, makeCalendar, fmtJP } from "./lib/calendar.js";
@@ -28,6 +28,7 @@ import { WBSGanttView } from "./components/WBSGanttView.jsx";
 import { NetworkView } from "./components/NetworkView.jsx";
 import { ResourceView } from "./components/ResourceView.jsx";
 import { SprintsView } from "./components/SprintsView.jsx";
+import { CalendarView } from "./components/CalendarView.jsx";
 import { VersionsView } from "./components/VersionsView.jsx";
 
 /* =========================================================================================
@@ -53,6 +54,7 @@ export default function App() {
   const redoTasks = useCallback(() => dispatchTasks({ type: "redo" }), []);
   const [resources, setResources] = useState(linkedProjectKey ? [] : seed.resources);
   const [sprints, setSprints] = useState(linkedProjectKey ? [] : seed.sprints);
+  const [calendarExceptions, setCalendarExceptions] = useState(linkedProjectKey ? [] : (seed.calendarExceptions || []));
   const [versions, setVersions] = useState([]);
   const [tab, setTab] = useState("gantt");
   const [selectedId, setSelectedId] = useState(null);
@@ -91,7 +93,7 @@ export default function App() {
     const y = parseISO(projectStart).getUTCFullYear();
     return buildHolidayMap(y - 1, y + 6);
   }, [projectStart]);
-  const cal = useMemo(() => makeCalendar(holidayMap), [holidayMap]);
+  const cal = useMemo(() => makeCalendar(holidayMap, calendarExceptions), [holidayMap, calendarExceptions]);
 
   const cpm = useMemo(() => runCPM(tasks, cal, projectStart, sprints), [tasks, cal, projectStart, sprints]);
 
@@ -120,6 +122,7 @@ export default function App() {
     setSprints(data.sprints);
     setVersions(data.versions);
     setLevelingOn(typeof data.levelingOn === "boolean" ? data.levelingOn : false);
+    setCalendarExceptions(Array.isArray(data.calendarExceptions) ? data.calendarExceptions : []);
     setSelectedId(null);
     setLinkedProjectState({
       status: "loaded",
@@ -194,6 +197,7 @@ export default function App() {
           // 旧バージョンのデータ（sprints未対応）を開いた場合は空配列にフォールバックする。
           setSprints(Array.isArray(proj.sprints) ? proj.sprints : []);
           setLevelingOn(typeof proj.levelingOn === "boolean" ? proj.levelingOn : false);
+          setCalendarExceptions(Array.isArray(proj.calendarExceptions) ? proj.calendarExceptions : []);
         }
         const vs = await storageGet("pm_versions");
         if (vs) setVersions(normalizeProjectVersions(vs));
@@ -216,9 +220,9 @@ export default function App() {
   // 自動保存
   useEffect(() => {
     if (!loaded || linkedProjectKey) return;
-    const t = setTimeout(() => { storageSet("pm_project", { tasks, resources, sprints, levelingOn }); }, 800);
+    const t = setTimeout(() => { storageSet("pm_project", { tasks, resources, sprints, levelingOn, calendarExceptions }); }, 800);
     return () => clearTimeout(t);
-  }, [tasks, resources, sprints, levelingOn, loaded, linkedProjectKey]);
+  }, [tasks, resources, sprints, levelingOn, calendarExceptions, loaded, linkedProjectKey]);
 
   // バージョン名の変更などによる versions の更新も自動保存する
   // （新規保存・削除は即時persistしているため、これは主に名称変更のためのデバウンス保存）。
@@ -330,6 +334,7 @@ export default function App() {
       rawTasks: JSON.parse(JSON.stringify(tasks)),
       rawResources: JSON.parse(JSON.stringify(resources)),
       rawSprints: JSON.parse(JSON.stringify(sprints)),
+      rawCalendarExceptions: JSON.parse(JSON.stringify(calendarExceptions)),
       hasFullSnapshot: true,
     };
     const next = [v, ...versions];
@@ -356,6 +361,7 @@ export default function App() {
         setTasks(migrateSprintIds(JSON.parse(JSON.stringify(v.rawTasks))));
         setResources(JSON.parse(JSON.stringify(v.rawResources)));
         setSprints(Array.isArray(v.rawSprints) ? JSON.parse(JSON.stringify(v.rawSprints)) : []);
+        setCalendarExceptions(Array.isArray(v.rawCalendarExceptions) ? JSON.parse(JSON.stringify(v.rawCalendarExceptions)) : []);
         setSelectedId(null);
         showToast(`バージョン「${v.name}」の状態に戻しました`);
       },
@@ -365,7 +371,7 @@ export default function App() {
   }
 
   function exportProject() {
-    const data = buildProjectExport(tasks, resources, sprints, versions, levelingOn);
+    const data = buildProjectExport(tasks, resources, sprints, versions, levelingOn, calendarExceptions);
     downloadJSON(`project-scheduler_${toISO(new Date())}.json`, data);
     showToast("プロジェクトをJSONファイルに書き出しました");
   }
@@ -398,6 +404,7 @@ export default function App() {
       setResources(data.resources);
       setSprints(data.sprints);
       setLevelingOn(typeof data.levelingOn === "boolean" ? data.levelingOn : false);
+      setCalendarExceptions(Array.isArray(data.calendarExceptions) ? data.calendarExceptions : []);
       setSelectedId(null);
       if (Array.isArray(data.versions) && data.versions.length) {
         const merged = (() => {
@@ -542,6 +549,7 @@ export default function App() {
         <Tab icon={GitBranch} label="ネットワーク図" active={tab === "network"} onClick={() => setTab("network")} />
         <Tab icon={Users} label="リソース" active={tab === "resource"} onClick={() => setTab("resource")} />
         <Tab icon={CalendarRange} label="スプリント" active={tab === "sprints"} onClick={() => setTab("sprints")} count={sprints.length || null} />
+        <Tab icon={CalendarOff} label="カレンダー編集" active={tab === "calendar"} onClick={() => setTab("calendar")} count={calendarExceptions.length || null} />
         <Tab icon={History} label="バージョン" active={tab === "versions"} onClick={() => setTab("versions")} count={versions.length || null} />
       </div>
 
@@ -573,6 +581,12 @@ export default function App() {
         )}
         {tab === "sprints" && (
           <SprintsView sprints={sprints} setSprints={setSprints} tasks={tasks} requestConfirm={requestConfirm} />
+        )}
+        {tab === "calendar" && (
+          <CalendarView
+            calendarExceptions={calendarExceptions} setCalendarExceptions={setCalendarExceptions}
+            cal={cal} requestConfirm={requestConfirm}
+          />
         )}
         {tab === "versions" && (
           <VersionsView versions={versions} onSave={saveVersion} onDelete={deleteVersion} onRename={renameVersion} onRestore={restoreVersion} resources={resources} />

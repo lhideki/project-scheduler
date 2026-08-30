@@ -21,6 +21,7 @@ Project Scheduler の「書き出し」「読み込み」で使うJSON形式で�
 | `sprints` | `sprint[]` | 必須 | スプリント一覧 |
 | `versions` | `version[]` | 必須 | 保存済みバージョン一覧 |
 | `levelingOn` | `boolean` | 任意 | リソース平準化の有効/無効（旧形式のJSONには存在せず、その場合は false 扱い） |
+| `calendarExceptions` | `calendarException[]` | 任意 | 非稼働日カレンダーの例外（休日・稼働日の上書き指定）。旧形式のJSONには存在せず、その場合は空配列扱い。 |
 
 ```json
 {
@@ -29,7 +30,8 @@ Project Scheduler の「書き出し」「読み込み」で使うJSON形式で�
   "tasks": [],
   "resources": [],
   "sprints": [],
-  "versions": []
+  "versions": [],
+  "calendarExceptions": []
 }
 ```
 
@@ -126,9 +128,20 @@ WBS上のタスクです。階層は parentId で表現します。
 | `assigneeId` | `string` \| `null` | 必須 | 担当者ID |
 | `progress` | `number` | 必須 | 進捗率 |
 
+## calendarExceptions の要素
+
+非稼働日カレンダーの例外です。土日・日本の祝日の計算結果に対する上書き指定です。
+
+| フィールド | 型 | 必須 | 説明 |
+| --- | --- | --- | --- |
+| `date` | `string` | 必須 | 対象日（YYYY-MM-DD） |
+| `type` | `holiday` \| `workday` | 必須 | holiday（休日）: 平日を非稼働日にする / workday（稼働日）: 土日・祝日・休日指定を稼働日にする（最優先） |
+| `name` | `string` | 任意 | 表示用ラベル（任意） |
+
 ## インポート時の扱い
 
 - JSONとして解釈できない場合は読み込みに失敗します
 - `schemaVersion !== 1` の場合は読み込みに失敗します
 - 必須トップレベル項目が欠けている場合は読み込みに失敗します
 - `hasFullSnapshot` は `rawTasks` / `rawResources` / `rawSprints` の有無から再計算します
+- `levelingOn` / `calendarExceptions` が無い旧形式JSONは、それぞれ `false` / `[]` として読み込みます
