@@ -46,6 +46,11 @@ export function CalendarExceptionsEditor({ exceptions, setExceptions, cal, reque
 
   function hintFor(e) {
     if (!e.date) return "日付を入力してください";
+    // 未知の種別（不正なJSONのインポート等）。makeCalendar 側では無視されるため、
+    // 画面にも「この行は効いていない」ことを明示する。
+    if (e.type !== "holiday" && e.type !== "workday") {
+      return "種別が不正です（この行はスケジュールに反映されません。種別を選び直してください）";
+    }
     if (dupDates.has(e.date)) return "同じ日付の行が複数あります（稼働日が優先されます）";
     const weekend = isWeekendStr(e.date);
     const isNationalHoliday = cal.holidayMap.has(e.date);
@@ -95,8 +100,12 @@ export function CalendarExceptionsEditor({ exceptions, setExceptions, cal, reque
                     </div>
                   </td>
                   <td className="px-3 py-1.5">
-                    <select value={e.type} onChange={ev => update(index, { type: ev.target.value })}
+                    <select value={e.type === "workday" ? "workday" : e.type === "holiday" ? "holiday" : ""}
+                      onChange={ev => update(index, { type: ev.target.value })}
                       className="bg-transparent outline-none">
+                      {e.type !== "workday" && e.type !== "holiday" && (
+                        <option value="" disabled>（不正な種別）</option>
+                      )}
                       <option value="holiday">休日</option>
                       <option value="workday">稼働日</option>
                     </select>
