@@ -46,7 +46,7 @@ src/
     sprints.js                  # スプリント配色・期間重複検出
     exportUtils.js               # JSON/Mermaidエクスポート
     linkedProject.js              # ?schedule= クエリのパース
-    embeddedProject.js             # 共有用HTMLの埋め込みJSONのシリアライズ/パース（< エスケープ）
+    embeddedProject.js             # 共有用HTMLの埋め込みJSONのシリアライズ/パース（"<" のユニコードエスケープ）
     seedData.js                   # サンプルデータ
     *.test.js                     # 上記各モジュールに対応するVitestユニットテスト
   dom/
@@ -106,7 +106,7 @@ App は起動元を概念的に3種類として扱う。`autoSaveDisabled`（= `
 - `linked`: URL に `?schedule=` がある起動。関連付けた外部JSONを表示し、自動保存しない。最新版の再読込が可能（`src/lib/linkedProject.js`・`src/dom/linkedProjectFile.js`）。
 - `embedded`: 「共有用HTML」で書き出されたHTMLでの起動。`<head>` 内の `<script type="application/json" id="project-scheduler-embedded">` に **既存のProject JSON（`schemaVersion:1`）をそのまま埋め込む**（共有HTML専用スキーマは作らない）。`readEmbeddedProject()` が初期 state を組み立て、`initialProject` 経由で state を初期化する（linked のような非同期ロードはせず、フラッシュを避けるため同期的に初期化）。自動保存しないので、リロードすれば書き出し時点の状態に戻る。ヘッダー下に amber のスナップショットバナー（`Camera` アイコン + `exportedAt` 表示）を出す。
 
-「共有用HTML書き出し」（ヘッダーの `Share2` ボタン → `exportSharedHtml`）は、`buildSharedHtml()`（`src/dom/embeddedProjectDom.js`）で現在ロード済みのHTMLを `cloneNode` し、`#root` を空にして埋め込み `<script>` を差し込んだ自己完結HTMLをダウンロードさせる。埋め込みJSONは `<script>` 内の `</script>` 混入を防ぐため `<` を `<` にエスケープする（`serializeEmbeddedProject`。`JSON.parse` で元に戻る）。埋め込み `<script>` は必ず `<head>` に置く（body内のバンドル `<script>` が起動時に `getElementById` で読むため、それより前に解析されている必要がある）。
+「共有用HTML書き出し」（ヘッダーの `Share2` ボタン → `exportSharedHtml`）は、`buildSharedHtml()`（`src/dom/embeddedProjectDom.js`）で現在ロード済みのHTMLを `cloneNode` し、`#root` を空にして埋め込み `<script>` を差し込んだ自己完結HTMLをダウンロードさせる。埋め込みJSONは `<script>` 内の `</script>` 混入を防ぐため、`serializeEmbeddedProject` が `<`（U+003C）をすべて JSON のユニコードエスケープ（バックスラッシュ + `u003c`）へ置換する（結果の文字列に `<` は現れない。`JSON.parse` で元に戻る）。埋め込み `<script>` は必ず `<head>` に置く（body内のバンドル `<script>` が起動時に `getElementById` で読むため、それより前に解析されている必要がある）。
 
 ### 永続化・window.storage
 

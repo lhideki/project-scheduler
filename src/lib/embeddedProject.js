@@ -9,8 +9,10 @@ export const EMBEDDED_PROJECT_SCRIPT_TYPE = "application/json";
  * 安全に埋め込める文字列へ変換する。
  *
  * タスクメモ等に "</script>" が含まれていてもHTMLパーサがそこでスクリプトを
- * 終端しないよう、"<" をすべてユニコードエスケープ（<）する。JSON.parse は
- * < を "<" として解釈するため、往復しても値は一切変わらない。
+ * 終端しないよう、"<"（U+003C）をすべて JSON のユニコードエスケープ表記
+ * （バックスラッシュ + "u003c"）へ置き換える。結果の文字列には "<" が1つも
+ * 現れないため "</script>" も作れない。JSON.parse はこのエスケープを "<" に
+ * 戻すため、往復しても値は一切変わらない。
  */
 export function serializeEmbeddedProject(projectExport) {
   return JSON.stringify(projectExport).replace(/</g, "\\u003c");

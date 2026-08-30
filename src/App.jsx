@@ -71,7 +71,9 @@ export default function App() {
         calendarExceptions: Array.isArray(d.calendarExceptions) ? d.calendarExceptions : [],
       };
     }
-    if (linkedProjectKey) {
+    // linked、または埋め込みデータの解析に失敗した embedded は空で開始する
+    // （後者でサンプルデータを出すと、スナップショットと誤認されるため）。
+    if (linkedProjectKey || embeddedProject) {
       return { tasks: [], resources: [], sprints: [], versions: [], levelingOn: false, calendarExceptions: [] };
     }
     return {
@@ -126,7 +128,19 @@ export default function App() {
     setConfirmState({ message, onConfirm, confirmLabel, danger });
   }
 
-  const projectStart = useMemo(() => deriveProjectStart(tasks, toISO(new Date())), [tasks]);
+  // 開始日が未入力のタスクしかない場合の起点。通常は「今日」だが、共有用HTML（embedded）では
+  // 書き出し時点の日付に固定する（後日開いてもスケジュールが今日基準で再計算されないように）。
+  const scheduleAnchorToday = useMemo(() => {
+    if (embeddedProject && embeddedProject.ok) {
+      const d = new Date(embeddedProject.data.exportedAt);
+      if (!Number.isNaN(d.getTime())) return toISO(d);
+    }
+    return toISO(new Date());
+  }, [embeddedProject]);
+  const projectStart = useMemo(
+    () => deriveProjectStart(tasks, scheduleAnchorToday),
+    [tasks, scheduleAnchorToday]
+  );
 
   const holidayMap = useMemo(() => {
     const y = parseISO(projectStart).getUTCFullYear();
