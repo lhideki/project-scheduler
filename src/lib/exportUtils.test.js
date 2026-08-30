@@ -24,6 +24,12 @@ describe("PROJECT_JSON_SCHEMA", () => {
     expect(PROJECT_JSON_SCHEMA.$defs.resource.required).toEqual(["id", "name", "weeklyCapacity", "monthlyCapacity"]);
     expect(PROJECT_JSON_SCHEMA.$defs.sprint.required).toEqual(["id", "name", "startDate", "endDate", "order"]);
   });
+
+  it("calendarException を $defs に定義し、type の enum を持つ（required には含めない）", () => {
+    expect(PROJECT_JSON_SCHEMA.$defs.calendarException.required).toEqual(["date", "type"]);
+    expect(PROJECT_JSON_SCHEMA.$defs.calendarException.properties.type.enum).toEqual(["holiday", "workday"]);
+    expect(PROJECT_JSON_SCHEMA.required).not.toContain("calendarExceptions");
+  });
 });
 
 describe("buildProjectExport", () => {
@@ -49,6 +55,18 @@ describe("buildProjectExport", () => {
   it("levelingOn を省略すると false になる", () => {
     const out = buildProjectExport([], [], [], []);
     expect(out.levelingOn).toBe(false);
+  });
+
+  it("calendarExceptions を第6引数で受け取り、ディープコピーして返す", () => {
+    const exceptions = [{ date: "2026-05-01", type: "holiday", name: "創立記念日" }];
+    const out = buildProjectExport([], [], [], [], false, exceptions);
+    expect(out.calendarExceptions).toEqual(exceptions);
+    exceptions[0].name = "changed";
+    expect(out.calendarExceptions[0].name).toBe("創立記念日");
+  });
+
+  it("calendarExceptions を省略すると空配列になる", () => {
+    expect(buildProjectExport([], [], [], []).calendarExceptions).toEqual([]);
   });
 });
 
@@ -103,6 +121,32 @@ describe("normalizeImportedProject", () => {
       versions: [],
     });
     expect(out.levelingOn).toBe(false);
+  });
+
+  it("calendarExceptions を保持し、無い旧形式は空配列にフォールバックする", () => {
+    const withEx = normalizeImportedProject({
+      schemaVersion: PROJECT_SCHEMA_VERSION,
+      exportedAt: "2026-08-26T00:00:00.000Z",
+      tasks: [], resources: [], sprints: [], versions: [],
+      calendarExceptions: [{ date: "2026-05-01", type: "holiday", name: "創立記念日" }],
+    });
+    expect(withEx.calendarExceptions).toEqual([{ date: "2026-05-01", type: "holiday", name: "創立記念日" }]);
+
+    const withoutEx = normalizeImportedProject({
+      schemaVersion: PROJECT_SCHEMA_VERSION,
+      exportedAt: "2026-08-26T00:00:00.000Z",
+      tasks: [], resources: [], sprints: [], versions: [],
+    });
+    expect(withoutEx.calendarExceptions).toEqual([]);
+  });
+
+  it("calendarExceptions キーが存在するのに配列でない場合は拒否する（黙って [] に丸めない）", () => {
+    expect(() => normalizeImportedProject({
+      schemaVersion: PROJECT_SCHEMA_VERSION,
+      exportedAt: "2026-08-26T00:00:00.000Z",
+      tasks: [], resources: [], sprints: [], versions: [],
+      calendarExceptions: {},
+    })).toThrow("invalid_project_json");
   });
 
   it("旧形式や必須項目不足のJSONは拒否する", () => {

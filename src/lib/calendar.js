@@ -3,8 +3,16 @@
    ========================================================================================= */
 
 /**
+ * @typedef {Object} CalendarException
+ * ユーザーが編集する非稼働日カレンダーの例外。
+ * @property {string} date - 対象日(YYYY-MM-DD)
+ * @property {"holiday"|"workday"} type - "holiday"（休日）: 平日を非稼働日にする / "workday"（稼働日）: 土日・祝日・休日を稼働日にする（最優先）
+ * @property {string} [name] - 表示用ラベル（任意）
+ */
+
+/**
  * @typedef {Object} Calendar
- * makeCalendar() が返す、稼働日カレンダー（土日・祝日を除外）に基づく日付計算関数群。
+ * makeCalendar() が返す、稼働日カレンダー（土日・祝日・ユーザー編集の例外を反映）に基づく日付計算関数群。
  * @property {(d: Date) => boolean} isWorkday
  * @property {(s: string) => boolean} isWorkdayStr
  * @property {(s: string) => string} snapForward - 稼働日でなければ次の稼働日まで進める
@@ -13,12 +21,19 @@
  * @property {(startStr: string, duration: number) => string} endFromStart
  * @property {(finishStr: string, duration: number) => string} startFromEnd
  * @property {(aStr: string, bStr: string) => number} workdaysBetween - 稼働日数の差（符号あり）
- * @property {Map<string,string>} holidayMap - 日付(YYYY-MM-DD) -> 祝日名
+ * @property {(s: string) => (string|null)} holidayName - 表示用の休日名（休日名・祝日名。稼働日指定の日は null）
+ * @property {Map<string,string>} holidayMap - 日付(YYYY-MM-DD) -> 国民の祝日名（例外は含まない）
+ * @property {CalendarException[]} exceptions - 適用中のカレンダー例外（正規化済み）
  */
 
 export function toISO(d) { return d.toISOString().slice(0, 10); }
 export function parseISO(s) { return new Date(s + "T00:00:00Z"); }
 export const WEEKDAY_JA = ["日", "月", "火", "水", "木", "金", "土"];
+
+/** 土曜(6)・日曜(0)か。カレンダー例外による上書きは考慮しない純粋な曜日判定。 */
+export function isWeekend(d) { const dow = d.getUTCDay(); return dow === 0 || dow === 6; }
+/** YYYY-MM-DD 文字列版の isWeekend。 */
+export function isWeekendStr(s) { return isWeekend(parseISO(s)); }
 
 export function vernalEquinoxDay(year) {
   return Math.floor(20.8431 + 0.242194 * (year - 1980)) - Math.floor((year - 1980) / 4);
@@ -97,16 +112,56 @@ export function buildHolidayMap(startYear, endYear) {
 }
 
 /**
- * holidayMap を束ねた稼働日カレンダー（土日・祝日を除外）を作る。
- * @param {Map<string,string>} holidayMap - 日付(YYYY-MM-DD) -> 祝日名
+ * ユーザー編集の非稼働日カレンダー例外を正規化する。
+ * 不正な要素（date 欠落・未知の type）は捨て、name は文字列へ丸める。
+ * @param {CalendarException[]} exceptions
+ * @returns {{ list: CalendarException[], forcedWorkdays: Map<string,string>, extraHolidays: Map<string,string> }}
+ *   list: 正規化済み配列（入力順を保持） / forcedWorkdays: 稼働日指定 date->name / extraHolidays: 休日指定 date->name
+ */
+export function normalizeCalendarExceptions(exceptions) {
+  const forcedWorkdays = new Map();
+  const extraHolidays = new Map();
+  const list = [];
+  for (const e of Array.isArray(exceptions) ? exceptions : []) {
+    if (!e || typeof e.date !== "string" || !e.date) continue;
+    if (e.type !== "workday" && e.type !== "holiday") continue;
+    const name = typeof e.name === "string" ? e.name : "";
+    list.push({ date: e.date, type: e.type, name });
+    (e.type === "workday" ? forcedWorkdays : extraHolidays).set(e.date, name);
+  }
+  return { list, forcedWorkdays, extraHolidays };
+}
+
+/**
+ * holidayMap（国民の祝日）とユーザー編集の例外を束ねた稼働日カレンダーを作る。
+ *
+ * 稼働日判定の優先順位:
+ *   1. 稼働日指定（type: "workday"）… 土日・祝日・休日指定を上書きして稼働日にする
+ *   2. 土日 … 非稼働日
+ *   3. 国民の祝日（holidayMap）… 非稼働日
+ *   4. 休日指定（type: "holiday"）… 非稼働日
+ *   5. それ以外 … 稼働日
+ *
+ * @param {Map<string,string>} holidayMap - 日付(YYYY-MM-DD) -> 国民の祝日名
+ * @param {CalendarException[]} [exceptions] - ユーザーが編集した非稼働日カレンダーの例外
  * @returns {Calendar}
  */
-export function makeCalendar(holidayMap) {
+export function makeCalendar(holidayMap, exceptions = []) {
+  const { list: normalizedExceptions, forcedWorkdays, extraHolidays } = normalizeCalendarExceptions(exceptions);
+
   function isWorkday(d) {
-    const dow = d.getUTCDay();
-    if (dow === 0 || dow === 6) return false;
-    if (holidayMap.has(toISO(d))) return false;
+    const iso = toISO(d);
+    if (forcedWorkdays.has(iso)) return true;
+    if (isWeekend(d)) return false;
+    if (holidayMap.has(iso)) return false;
+    if (extraHolidays.has(iso)) return false;
     return true;
+  }
+  /** 表示用の休日名。稼働日指定の日は null（＝稼働日扱いなので休日ラベルを出さない）。 */
+  function holidayName(s) {
+    if (forcedWorkdays.has(s)) return null;
+    if (extraHolidays.has(s)) return extraHolidays.get(s) || "休日";
+    return holidayMap.get(s) || null;
   }
   function isWorkdayStr(s) { return isWorkday(parseISO(s)); }
   function snapForward(s) { const d = parseISO(s); while (!isWorkday(d)) d.setUTCDate(d.getUTCDate() + 1); return toISO(d); }
@@ -143,7 +198,7 @@ export function makeCalendar(holidayMap) {
     while (d.getTime() !== b.getTime()) { d.setUTCDate(d.getUTCDate() + sign); if (isWorkday(d)) cnt += sign; }
     return cnt;
   }
-  return { isWorkday, isWorkdayStr, snapForward, snapBackward, shift, endFromStart, startFromEnd, workdaysBetween, holidayMap };
+  return { isWorkday, isWorkdayStr, snapForward, snapBackward, shift, endFromStart, startFromEnd, workdaysBetween, holidayName, holidayMap, exceptions: normalizedExceptions };
 }
 
 export function weekKey(dateStr) {

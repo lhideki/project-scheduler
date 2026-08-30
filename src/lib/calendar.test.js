@@ -1,7 +1,47 @@
 import { describe, it, expect } from "vitest";
 import {
   buildHolidayMap, makeCalendar, weekKey, monthKey, fmtJP, fmtMD, cal_addDaysISO,
+  isWeekend, isWeekendStr, normalizeCalendarExceptions, parseISO,
 } from "./calendar.js";
+
+describe("isWeekend / isWeekendStr", () => {
+  it("土日を true、平日を false と判定する", () => {
+    expect(isWeekendStr("2024-01-06")).toBe(true);  // 土
+    expect(isWeekendStr("2024-01-07")).toBe(true);  // 日
+    expect(isWeekendStr("2024-01-09")).toBe(false); // 火
+    expect(isWeekend(parseISO("2024-01-08"))).toBe(false); // 月（祝日だが曜日判定のみ）
+  });
+});
+
+describe("normalizeCalendarExceptions", () => {
+  it("date 欠落・未知の type の要素を捨てる", () => {
+    const { list } = normalizeCalendarExceptions([
+      { type: "holiday" },
+      { date: "2026-05-01", type: "party" },
+      { date: "2026-05-02", type: "workday" },
+    ]);
+    expect(list).toEqual([{ date: "2026-05-02", type: "workday", name: "" }]);
+  });
+
+  it("name を文字列へ丸め、forcedWorkdays / extraHolidays マップを構築する（入力順を保持）", () => {
+    const { list, forcedWorkdays, extraHolidays } = normalizeCalendarExceptions([
+      { date: "2026-05-01", type: "holiday", name: "創立記念日" },
+      { date: "2026-05-02", type: "workday" },
+      { date: "2026-05-03", type: "holiday", name: 123 },
+    ]);
+    expect(list.map(e => e.date)).toEqual(["2026-05-01", "2026-05-02", "2026-05-03"]);
+    expect(extraHolidays.get("2026-05-01")).toBe("創立記念日");
+    expect(extraHolidays.get("2026-05-03")).toBe("");
+    expect(forcedWorkdays.get("2026-05-02")).toBe("");
+  });
+
+  it("配列以外の入力は空の結果を返す", () => {
+    const { list, forcedWorkdays, extraHolidays } = normalizeCalendarExceptions(undefined);
+    expect(list).toEqual([]);
+    expect(forcedWorkdays.size).toBe(0);
+    expect(extraHolidays.size).toBe(0);
+  });
+});
 
 describe("buildHolidayMap", () => {
   const map = buildHolidayMap(2024, 2026);
@@ -66,6 +106,63 @@ describe("makeCalendar", () => {
     expect(cal.workdaysBetween("2024-01-09", "2024-01-11")).toBe(2);
     expect(cal.workdaysBetween("2024-01-11", "2024-01-09")).toBe(-2);
     expect(cal.workdaysBetween("2024-01-09", "2024-01-09")).toBe(0);
+  });
+});
+
+describe("makeCalendar（非稼働日カレンダーの編集）", () => {
+  const holidayMap = buildHolidayMap(2024, 2026);
+
+  it("休日指定（平日）を非稼働日にする", () => {
+    const cal = makeCalendar(holidayMap, [{ date: "2024-01-10", type: "holiday", name: "創立記念日" }]);
+    expect(cal.isWorkdayStr("2024-01-10")).toBe(false); // 水曜だが休日指定
+    expect(cal.isWorkdayStr("2024-01-11")).toBe(true);
+  });
+
+  it("休日指定は shift / endFromStart に反映される", () => {
+    const cal = makeCalendar(holidayMap, [{ date: "2024-01-10", type: "holiday", name: "創立記念日" }]);
+    // 2024-01-09(火)から稼働日で+1 → 1/10は休日指定なので1/11(木)
+    expect(cal.shift("2024-01-09", 1)).toBe("2024-01-11");
+    // 2024-01-09(火)から3人日 → 火・木・金（水は休日指定）→ 1/12(金)
+    expect(cal.endFromStart("2024-01-09", 3)).toBe("2024-01-12");
+  });
+
+  it("稼働日指定は土曜を稼働日にする", () => {
+    const cal = makeCalendar(holidayMap, [{ date: "2024-01-13", type: "workday", name: "休日出勤" }]);
+    expect(cal.isWorkdayStr("2024-01-13")).toBe(true); // 本来は土曜
+    expect(cal.isWorkdayStr("2024-01-14")).toBe(false); // 日曜はそのまま
+  });
+
+  it("稼働日指定は国民の祝日も上書きする", () => {
+    const cal = makeCalendar(holidayMap, [{ date: "2024-01-01", type: "workday", name: "元日出社" }]);
+    expect(cal.isWorkdayStr("2024-01-01")).toBe(true); // 元日
+  });
+
+  it("同一日に holiday と workday がある場合は workday が勝つ", () => {
+    const cal = makeCalendar(holidayMap, [
+      { date: "2024-01-10", type: "holiday", name: "休日" },
+      { date: "2024-01-10", type: "workday", name: "やっぱり稼働" },
+    ]);
+    expect(cal.isWorkdayStr("2024-01-10")).toBe(true);
+  });
+
+  it("holidayName は休日名・祝日名を返し、稼働日指定は null", () => {
+    const cal = makeCalendar(holidayMap, [
+      { date: "2024-01-10", type: "holiday", name: "創立記念日" },
+      { date: "2024-03-21", type: "holiday", name: "" },
+      { date: "2024-01-01", type: "workday", name: "元日出社" },
+    ]);
+    expect(cal.holidayName("2024-01-10")).toBe("創立記念日");
+    expect(cal.holidayName("2024-03-21")).toBe("休日"); // 名称未入力時のフォールバック
+    expect(cal.holidayName("2024-05-03")).toBe("憲法記念日"); // 国民の祝日
+    expect(cal.holidayName("2024-01-01")).toBe(null); // 稼働日指定
+    expect(cal.holidayName("2024-01-11")).toBe(null); // 通常の平日
+  });
+
+  it("例外を渡さない場合は従来の挙動と一致する", () => {
+    const cal = makeCalendar(holidayMap);
+    expect(cal.isWorkdayStr("2024-01-01")).toBe(false);
+    expect(cal.isWorkdayStr("2024-01-09")).toBe(true);
+    expect(cal.exceptions).toEqual([]);
   });
 });
 

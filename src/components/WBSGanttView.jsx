@@ -4,7 +4,7 @@ import {
   AlertTriangle, ArrowLeftRight, Info, Diamond, GripVertical, Zap, Flame,
   Undo2, Redo2, Copy, ClipboardPaste,
 } from "lucide-react";
-import { toISO, parseISO, WEEKDAY_JA, fmtJP, cal_addDaysISO } from "../lib/calendar.js";
+import { toISO, parseISO, WEEKDAY_JA, fmtJP, cal_addDaysISO, isWeekend } from "../lib/calendar.js";
 import { uid, buildFlatList, allDescendantIds } from "../lib/taskTree.js";
 import { sprintColorForId } from "../lib/sprints.js";
 import { copyTextToClipboard } from "../lib/exportUtils.js";
@@ -48,8 +48,9 @@ export function WBSGanttView({
   const [showInazuma, setShowInazuma] = useState(true);
   // クリティカルパスの強調表示（WBS表の赤文字・ガントバー・依存線の赤色）の表示切り替え。
   const [showCritical, setShowCritical] = useState(true);
-  // 進捗基準日（稲妻線・今日の縦線の基準。デフォルトは本日）
-  const [baseDateISO, setBaseDateISO] = useState(() => toISO(new Date()));
+  // 進捗基準日の手動指定（稲妻線・今日の縦線の基準）。null のときは「本日」を意味し、
+  // 実効値は下で todayISO から導出する（日付を固定値で持たないので日跨ぎでもズレない）。
+  const [baseDateOverride, setBaseDateOverride] = useState(null);
 
   // --- バージョン比較（基準バージョンをWBS番号で突き合わせ、1行目=現在／2行目=基準として表示） ---
   const baselineVersion = useMemo(() => versions.find(v => v.id === baselineVersionId) || null, [versions, baselineVersionId]);
@@ -583,15 +584,25 @@ export function WBSGanttView({
     updateTask(id, { parentId: grandParentId, order });
   }
 
+  // レンダーごとに1回だけ現在日付を評価してキャッシュする。
+  const todayISO = toISO(new Date());
+  // 進捗基準日の実効値。手動指定があればそれを、なければ本日を使う。
+  const baseDateISO = baseDateOverride || todayISO;
+
   const minDate = useMemo(() => {
     let m = null;
     schedule.forEach(v => { if (v.schedStart && (!m || v.schedStart < m)) m = v.schedStart; });
-    return m ? cal_addDaysISO(m, -3) : toISO(new Date());
-  }, [schedule]);
+    let start = m ? cal_addDaysISO(m, -3) : todayISO;
+    // 基準日を範囲外に選んでも稲妻線・縦線が見切れないよう、チャート範囲へ含める。
+    if (baseDateISO < start) start = baseDateISO;
+    return start;
+  }, [schedule, baseDateISO, todayISO]);
   const maxDate = useMemo(() => {
-    let m = projectEnd || toISO(new Date());
-    return cal_addDaysISO(m, 7);
-  }, [projectEnd]);
+    let m = projectEnd || todayISO;
+    let end = cal_addDaysISO(m, 7);
+    if (baseDateISO > end) end = baseDateISO;
+    return end;
+  }, [projectEnd, baseDateISO, todayISO]);
   const totalDays = Math.max(1, Math.round((parseISO(maxDate) - parseISO(minDate)) / 86400000));
   const chartWidth = totalDays * dayWidth;
 
@@ -599,16 +610,27 @@ export function WBSGanttView({
 
   const dayCells = useMemo(() => {
     const cells = [];
+    // 稼働日指定（type: "workday"）の日付集合。土日・祝日でなくても、明示的に指定された日は淡色で示す。
+    const forcedWorkdays = new Set(cal.exceptions.filter(e => e.type === "workday").map(e => e.date));
     let d = parseISO(minDate);
     const end = parseISO(maxDate);
     while (d <= end) {
       const iso = toISO(d);
       const dow = d.getUTCDay();
-      cells.push({ iso, x: xOf(iso), weekend: dow === 0 || dow === 6, holiday: cal.holidayMap.get(iso), month: iso.slice(0, 7), day: d.getUTCDate(), dowLabel: WEEKDAY_JA[dow] });
+      const weekend = isWeekend(d);
+      const working = cal.isWorkdayStr(iso);
+      cells.push({
+        iso, x: xOf(iso),
+        weekend: !working && weekend,
+        holiday: !working ? (cal.holidayName(iso) || undefined) : undefined,
+        // 稼働日指定で稼働扱いにした日（土日・祝日・休日指定を上書きした日を含む）
+        workdayOverride: working && forcedWorkdays.has(iso),
+        month: iso.slice(0, 7), day: d.getUTCDate(), dowLabel: WEEKDAY_JA[dow],
+      });
       d = new Date(d.getTime() + 86400000);
     }
     return cells;
-  }, [minDate, maxDate, dayWidth]);
+  }, [minDate, maxDate, dayWidth, cal]);
 
   const monthBands = useMemo(() => {
     const bands = [];
@@ -632,8 +654,6 @@ export function WBSGanttView({
       })
       .filter(Boolean);
   }, [sprints, minDate, dayWidth, chartWidth]);
-
-  const todayISO = toISO(new Date());
 
   return (
     <div className="flex flex-col h-full" onKeyDown={handleViewKeyDown}>
@@ -677,14 +697,15 @@ export function WBSGanttView({
           <div className="flex items-center gap-1" title="進捗基準日（稲妻線・今日の縦線の基準）">
             <input
               type="date"
+              aria-label="進捗基準日（稲妻線・今日の縦線の基準）"
               value={baseDateISO}
-              onChange={e => e.target.value && setBaseDateISO(e.target.value)}
+              onChange={e => setBaseDateOverride(e.target.value || null)}
               className="text-[11px] border border-slate-200 rounded px-1.5 py-1 bg-white text-slate-600"
             />
             {baseDateISO !== todayISO && (
               <button
                 type="button"
-                onClick={() => setBaseDateISO(todayISO)}
+                onClick={() => setBaseDateOverride(null)}
                 className="text-[10px] text-indigo-600 hover:underline whitespace-nowrap"
                 title="本日に戻す"
               >今日</button>
@@ -1064,6 +1085,9 @@ export function WBSGanttView({
                 ))}
                 {dayCells.map(c => (c.weekend || c.holiday) && (
                   <rect key={c.iso} x={c.x} y={0} width={dayWidth} height={bodyHeight} fill={c.holiday ? "#FEF3C7" : "#F1F5F9"} />
+                ))}
+                {dayCells.map(c => c.workdayOverride && (
+                  <rect key={`w-${c.iso}`} x={c.x} y={0} width={dayWidth} height={bodyHeight} fill="#EFF6FF" />
                 ))}
                 {xOf(baseDateISO) >= 0 && xOf(baseDateISO) <= chartWidth && (
                   <line x1={xOf(baseDateISO) + dayWidth / 2} x2={xOf(baseDateISO) + dayWidth / 2} y1={0} y2={bodyHeight} stroke="#DC2626" strokeDasharray="3,3" strokeWidth={1} />

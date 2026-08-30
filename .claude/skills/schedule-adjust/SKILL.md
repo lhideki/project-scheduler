@@ -42,6 +42,12 @@ CLI（`cli.mjs`）が担当する。**CLIはJSONファイルを一切書き換�
 `parentId` で階層を表現。他タスクから `parentId` 参照されているタスクが「グループ」で、
 グループは工数・依存・スプリントを持たない。
 
+`calendarExceptions[]`（トップレベル、任意）は非稼働日カレンダーの上書き指定。
+`{ date: "YYYY-MM-DD", type: "holiday" | "workday", name?: string }` の配列で、
+`holiday`（UIラベル「休日」）= 平日を非稼働日にする、`workday`（UIラベル「稼働日」）= 土日・祝日・
+`holiday` 指定でもその日を稼働日にする＝最優先。CLI は「土日 ＋ 日本の祝日 ＋ `calendarExceptions`」を
+織り込んで CPM・リソース平準化を計算する。旧形式JSON（キーなし）は空配列扱い。
+
 **実効スケジュール（`schedStart`/`schedFinish`/`critical`/`float`）は常に再計算され、
 `tasks[]` には保存されない。** 確定した時点のスケジュールは `versions[]` スナップショットに凍結される。
 `levelingOn`（トップレベル、boolean）がリソース平準化トグルの状態。
@@ -59,7 +65,8 @@ node <CLI> explain  <file> --task <taskId> [--leveling on|off|auto]
 
 ### `validate <file>`
 スキーマ検証＋参照整合性（存在しない親/担当者/スプリント/先行タスク、自己依存、循環依存、
-スプリント期間重複）。`valid`（error が無いか）、`issues[]`（`severity: error|warning`）を返す。
+スプリント期間重複、`calendarExceptions` の日付書式・type、同一日の休日＋稼働日の競合）。
+`valid`（error が無いか）、`issues[]`（`severity: error|warning`）を返す。
 
 ### `recalc <file>`
 非破壊。現在のファイルの実効スケジュールを返す（アプリを開いた状態と一致）。
@@ -142,6 +149,12 @@ node <CLI> explain  <file> --task <taskId> [--leveling on|off|auto]
   遅延分を `duration` に上乗せする／未着手タスクの `startDate` を基準日以降へ前進させる、
   のいずれをやるかユーザーに確認してから編集する。
 - そのうえで `plan`（必要なら `--reschedule`）で後続への波及を見せる。
+
+### 「年末年始を休みにして」「この土曜は稼働日にして」（非稼働日カレンダー）
+- `edited.json` の `calendarExceptions[]` に行を追加する。
+  休日は `{ date, type: "holiday", name }`、稼働日は `{ date, type: "workday", name }`。
+- 連続期間（年末年始など）は各日を1行ずつ列挙する（土日は元々非稼働なので省いてよい）。
+- `plan` で全タスクへの波及（`scheduleChanges`・`projectEnd`）を提示してから保存する。
 
 ### 「このマイルストーンを固定にしたら？」（what-if）
 - `edited.json` で `milestoneMode: "fixed"` ＋ `fixedDate` を設定し、`plan` で影響を提示。
