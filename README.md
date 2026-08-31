@@ -1,130 +1,128 @@
+English | [日本語](README.ja.md)
+
 # Project Scheduler
 
-> A local-first WBS/Gantt planning sandbox with dependency-aware scheduling, CPM, resource leveling, milestones, and sprints. It runs from a single HTML file.
+> A local-first, single-file project scheduling simulator with WBS/Gantt planning, CPM, resource leveling, fixed milestones, sprints, and AI-assisted replanning.
 
-依存関係・マイルストーン・スプリント・担当者の稼働上限を考慮して日程を自動計算できる、ローカル完結のWBS / ガント計画ツールです。サーバーやアカウント登録は不要で、`project_scheduler.html`をブラウザで開くだけで使えます。
+Project Scheduler helps you test project plans against dependencies, milestones, sprint windows, and resource capacity. It runs entirely in your browser from a single HTML file, with no server or account required.
 
-[Live Demo](https://lhideki.github.io/project-scheduler/) | [配布用HTML](project_scheduler.html) | [機能紹介](https://www.inoue-kobo.com/webservice/project-scheduler/) | [実践チュートリアル](https://www.inoue-kobo.com/webservice/tutorial-project-scheduler/) | [JSON形式](docs/json-format.md)
+[Live Demo](https://lhideki.github.io/project-scheduler/) | [Downloadable HTML](project_scheduler.html) | [Feature Overview (Japanese)](https://www.inoue-kobo.com/webservice/project-scheduler/) | [Hands-on Tutorial (Japanese)](https://www.inoue-kobo.com/webservice/tutorial-project-scheduler/) | [JSON Format](docs/json-format.md)
 
-![WBS / ガント](docs/images/wbs-gantt.png)
+![WBS and Gantt view](docs/images/wbs-gantt.png)
 
-## このツールの位置付け
+## What it is for
 
-Project Schedulerは、JiraやBacklogなどの共同管理ツールを置き換えるものではありません。タスクを登録する前や計画を変更するときに、依存関係、固定期日、担当者の競合を踏まえた日程案を手元で試算するための計画シミュレーターです。
+Project Scheduler is a planning simulator, not a replacement for collaborative tools such as Jira or Backlog. Use it before entering tasks into those systems, or when a plan changes and you need to explore the impact of dependencies, fixed dates, and resource conflicts.
 
-- 見積もりや依存関係を変更し、後続タスクへの影響を自動計算できます。
-- クリティカルパスと余裕日数を確認し、遅延の影響が大きいタスクを把握できます。
-- 担当者の稼働上限を考慮し、同時期の割り当て過多を調整できます。
-- 入力内容を外部サービスへ登録せず、通常のブラウザ内に保存できます。
+- Change estimates or dependencies and recalculate downstream dates.
+- Identify critical tasks by viewing the critical path and float.
+- Resolve overlapping assignments against weekly and monthly resource capacity.
+- Keep planning data in your browser instead of sending it to an external service.
 
-## 3分で試す
+## Try it in 3 minutes
 
-1. [Live Demo](https://lhideki.github.io/project-scheduler/)を開きます。
-2. 最初から表示されるサンプルWBSで「基本設計」の工数を`6`から`10`へ変更します。
-3. 画面右上の「自動スケジューリング実行」を押します。
-4. 後続タスクの日程、完了予定日、クリティカルパスが変化することを確認します。
+1. Open the [Live Demo](https://lhideki.github.io/project-scheduler/).
+2. In the sample WBS, change the effort for `基本設計` (Basic Design) from `6` to `10`.
+3. Select `自動スケジューリング実行` (Run Auto Scheduling) in the upper-right corner.
+4. Check how the downstream dates, projected completion date, and critical path change.
 
-ビルドやインストールは不要です。オフラインで利用する場合は、[project_scheduler.html](project_scheduler.html)を開き、GitHub画面右上の「Download raw file」からダウンロードしてブラウザで開きます。
+No build or installation is required. For offline use, open [project_scheduler.html](project_scheduler.html), select `Download raw file` on GitHub, and open the downloaded file in your browser.
 
-別の端末やLive Demoとダウンロード版の間で計画を移す場合は、画面上部の「書き出し」でJSONファイルを保存し、移行先で「読み込み」を実行します。
+To move a plan between devices, or between the Live Demo and the downloaded HTML, export it as JSON from the header and import it in the other environment.
 
-## 主な機能
+## Features
 
-- アウトライン形式でWBSを編集し、稼働日カレンダー(土日・日本の祝日を考慮)に基づくガントチャートを表示します。
-- 矢印キーによるセル移動、セル・行単位のコピー＆ペースト、Undo / Redoに対応しています。
-- FS / SS / FF / SFの4種類の依存関係と、リード / ラグ(前後にずらす日数)を設定できます。
-- CPM(クリティカルパス法)により、フロートとクリティカルパスを自動計算して可視化します。
-- マイルストーンは「柔軟(依存関係から順算)」「固定(期日から逆算)」の2モードを切り替えられます。
-- 担当者の週次・月次の稼働上限を考慮した自動リソース平準化に対応しています。
-- 開始日・終了日・テーマを持つスプリントを定義し、1タスクへ複数のスプリントを割り当てられます。
-- スプリント期間と計算後の日程に矛盾がある場合は、アラートで確認できます。
-- タスクの依存関係をネットワーク図(PERT図)で確認し、Mermaid形式でもコピーできます。
-- 任意のタイミングでスナップショットを保存し、複数バージョンの比較や過去の状態への復元ができます。
-- プロジェクト全体(タスク・担当者・スプリント・バージョン履歴)をJSONファイルとして書き出し・読み込みできます。
-- Claude Code 向けの Skill を同梱し、AIエージェントに保存JSONを直接調整させられます([詳細](#aiエージェントでスケジュールを調整する))。
+- Edit a WBS as an outline and view its Gantt chart against a working-day calendar that accounts for weekends and Japanese public holidays.
+- Navigate cells with the arrow keys, copy and paste individual cells or rows, and use Undo and Redo.
+- Model all four dependency types (FS, SS, FF, and SF) with lead and lag offsets.
+- Calculate and visualize float and the critical path with the Critical Path Method (CPM).
+- Switch milestones between flexible mode, scheduled forward from dependencies, and fixed mode, scheduled backward from a due date.
+- Automatically level resources against weekly and monthly capacity limits.
+- Define sprints with start dates, end dates, and themes, and assign multiple sprints to a task.
+- Flag conflicts between sprint windows and calculated task dates.
+- Inspect dependencies in a network (PERT) view and copy the graph as Mermaid syntax.
+- Save snapshots, compare multiple versions on a Gantt-style timeline, and restore an earlier state.
+- Export and import the complete project, including tasks, resources, sprints, and version history, as JSON.
+- Use the included Claude Code Skill to let an AI agent adjust an exported plan directly. See [AI-assisted replanning](#ai-assisted-replanning).
 
 <details>
-<summary>その他の画面を見る</summary>
+<summary>See more screens</summary>
 
-### バージョン比較
+### Version comparison
 
-![バージョン比較](docs/images/compare-version.png)
+![Version comparison](docs/images/compare-version.png)
 
-### ネットワーク図
+### Network view
 
-![ネットワーク図](docs/images/network.png)
+![Network view](docs/images/network.png)
 
-### スプリント定義
+### Sprint definition
 
-![スプリント定義](docs/images/define-sprint.png)
+![Sprint definition](docs/images/define-sprint.png)
 
 </details>
 
-## データの保存
+## Data storage
 
-通常のブラウザで開いた場合、入力内容はそのブラウザの`localStorage`へ自動保存されます(変更後、約0.8秒で保存)。データはブラウザと端末に閉じており、他の端末やブラウザとは自動共有されません。
+When opened in a regular browser, the app automatically saves changes to that browser's `localStorage` after about 0.8 seconds. Data stays in that browser and on that device; it is not synchronized automatically with other browsers or devices.
 
-ブラウザのプライベートモードやサイトデータの削除によって消える場合があるため、重要なデータは「書き出し」から定期的にJSONファイルへバックアップしてください。
+Private browsing or clearing site data may delete the saved plan. Export important plans to JSON regularly as a backup.
 
-## 同期フォルダ内のJSONを表示する
+## Link a JSON file from a synced folder
 
-Dropbox、Google Drive、OneDriveなどのクライアントで同期されたJSONは、`schedule` queryを付けたURLから関連付けて表示できます。queryの値はローカルファイルを直接開くパスではなく、ユーザーが選択したファイルをブラウザ内で識別するキーとして使います。
+You can link a JSON file synchronized by a desktop client such as Dropbox, Google Drive, or OneDrive by adding a `schedule` query parameter to the URL. The query value does not grant access to a local path. It is only a key that the browser uses to identify a file you explicitly select.
 
 ```text
 project_scheduler.html?schedule=%2FUsers%2Ftaro%2FDropbox%2Fschedules%2Fproject-a.json
 ```
 
-1. 利用者ごとのローカルパスをURLエンコードし、`schedule` queryへ指定します。
-2. 初回表示時に「JSONを選択」を押し、queryに対応するローカルJSONを選択します。
-3. File System Access APIに対応したブラウザでは、ファイルへの関連付けをIndexedDBへ保存します。次回以降は権限が維持されていれば同じURLから自動で読み込みます。
-4. 同期後の内容を開き直す場合は「最新版を再読込」を押します。
+1. URL-encode the user's local path and pass it as the `schedule` query value.
+2. On the first visit, select `JSONを選択` (Choose JSON) and choose the local file associated with that query.
+3. In browsers that support the File System Access API, the app stores the file association in IndexedDB. It can reopen the file on later visits while permission remains available.
+4. Select `最新版を再読込` (Reload Latest) to reopen the synchronized file after it changes.
 
-連携JSONの表示中は、画面上での変更を`localStorage`へ自動保存しません。File System Access APIに対応していないブラウザや権限が失効した場合は、JSONの再選択が必要です。HTTP(S)で配信されたURLに実際のローカルパスを含めるとアクセスログ等へ残る可能性があるため、パスを秘匿したい場合はプロジェクト名などの論理キーを指定してください。
+While a linked JSON file is open, edits are not automatically saved to `localStorage`. You must select the file again if the browser does not support the File System Access API or if permission is lost. A real local path in an HTTP(S) URL may appear in access logs, so use a logical key such as a project name if the path is sensitive.
 
-## AIエージェントでスケジュールを調整する
+## AI-assisted replanning
 
-Claude Code 向けの Skill「schedule-adjust」を同梱しています。保存JSON（`schemaVersion: 1`）を
-読み書きして、「このタスクを2週間後ろ倒しして依存タスクを自動調整」「担当者がかぶらないように平準化」
-「着手済みの遅延を踏まえて引き直す」といった依頼を、画面操作なしで処理できます。
+The repository includes the `schedule-adjust` Skill for Claude Code. It reads and writes exported Project Scheduler JSON (`schemaVersion: 1`), so you can ask an AI agent to handle requests such as:
 
-CPM再計算・リソース平準化・整合性チェック・変更影響レポートは同梱のCLI（`.claude/skills/schedule-adjust/cli.mjs`、
-Node 18以上・追加インストール不要）が担当します。**CLIはJSONファイルを書き換えません。** Skillは
-「変更内容のレポートを提示 → 保存してよいか確認 → 承認後に書き込み」の順で進めます。変更前の状態は
-`versions[]` スナップショットへ自動保存され、アプリのバージョン比較・復元で参照できます。
+- "Move this task back by two weeks and reschedule its dependents."
+- "Level the plan so that the same person is not assigned to overlapping tasks."
+- "Replan around a delay in work that has already started."
 
-### 導入
+The included CLI (`.claude/skills/schedule-adjust/cli.mjs`) performs CPM recalculation, resource leveling, validation, and impact reporting. It requires Node.js 18 or later and no additional installation. The CLI itself does **not** overwrite JSON files. The Skill first reports the proposed changes, asks for approval, and writes them only after approval. Before writing, it saves the previous state in a `versions[]` snapshot that you can compare or restore in the app.
 
-リポジトリを開いて作業する場合は、`.claude/skills/schedule-adjust/` がプロジェクトSkillとして自動で有効になります。
-それ以外の環境へは Claude Code プラグインとして導入できます。
+### Install the Skill
+
+When Claude Code is opened in this repository, `.claude/skills/schedule-adjust/` is available automatically as a project Skill. To use it elsewhere, install it as a Claude Code plugin:
 
 ```shell
 /plugin marketplace add lhideki/project-scheduler
 /plugin install schedule-adjust@project-scheduler
 ```
 
-### アプリとの往復
+### Move changes between the agent and the app
 
-「同期フォルダ内のJSONを表示する」でローカルJSONを関連付けておくと、エージェントが編集したファイルを
-アプリの「最新版を再読込」で取り込めます。関連付けていない場合は、書き出したJSONを編集してもらい、
-「読み込み」で取り込みます。
+If you linked a local JSON file as described in [Link a JSON file from a synced folder](#link-a-json-file-from-a-synced-folder), select `最新版を再読込` (Reload Latest) after the agent edits it. Otherwise, export a JSON file, have the agent edit it, and import the result back into the app.
 
-## JSON書き出し形式
+## JSON format
 
-JSON形式のフィールド、型、必須項目は[JSON形式ドキュメント](docs/json-format.md)にまとめています。この文書はコード内のJSON Schemaから自動生成されます。
+See the [JSON format reference](docs/json-format.md) for fields, types, and required properties. The reference is generated from the JSON Schema in the source code.
 
-インポートは現行の`schemaVersion: 1`形式のみ受け付けます。旧形式JSONへの後方互換はありません。
+Imports currently accept only `schemaVersion: 1`. Older JSON formats are not supported.
 
-## 開発・再ビルド
+## Development and rebuilding
 
-`project_scheduler.html`は、`src/entry.jsx`を起点にReact製のソースを[esbuild](https://esbuild.github.io/)でバンドルし、[Tailwind CSS](https://tailwindcss.com/)のスタイルとともに1つのHTMLへ埋め込んだビルド成果物です。手で直接編集せず、ソースを変更した後に再生成してください。
+`project_scheduler.html` is a generated artifact. The build bundles the React source from `src/entry.jsx` with [esbuild](https://esbuild.github.io/) and embeds it with the [Tailwind CSS](https://tailwindcss.com/) output into a single HTML file. Do not edit the generated HTML directly; rebuild it after changing the source.
 
-`master`ブランチへpushすると、GitHub Actionsがテストとビルドを実行し、生成したHTMLをGitHub Pagesの[Live Demo](https://lhideki.github.io/project-scheduler/)へ公開します。
+Pushing to `master` runs the tests and build in GitHub Actions, then publishes the generated HTML to the [Live Demo](https://lhideki.github.io/project-scheduler/) on GitHub Pages.
 
-### 必要環境
+### Requirements
 
-- Node.js 18以上
+- Node.js 18 or later
 
-### セットアップと確認
+### Setup and verification
 
 ```bash
 npm install
@@ -132,46 +130,46 @@ npm run test
 npm run build
 ```
 
-`npm run build`は次の5ステップを順に実行します。
+`npm run build` runs these five steps:
 
-| コマンド | 内容 |
+| Command | Output |
 | --- | --- |
-| `npm run build:js` | `src/entry.jsx`をバンドル・minifyし、`dist/bundle.js`を生成します。 |
-| `npm run build:css` | `src/input.css`から`dist/output.css`を生成します。 |
-| `npm run build:html` | JavaScriptとCSSを`template.html`へ差し込み、`project_scheduler.html`を生成します。 |
-| `npm run build:docs` | コード内のJSON Schemaから`docs/json-format.md`を生成します。 |
-| `npm run build:agent` | `src/agent/cli.js`をバンドルし、Skill用の`.claude/skills/schedule-adjust/cli.mjs`を生成します。 |
+| `npm run build:js` | Bundles and minifies `src/entry.jsx` into `dist/bundle.js`. |
+| `npm run build:css` | Generates `dist/output.css` from `src/input.css`. |
+| `npm run build:html` | Embeds the JavaScript and CSS into `template.html` and generates `project_scheduler.html`. |
+| `npm run build:docs` | Generates `docs/json-format.md` from the JSON Schema in the source code. |
+| `npm run build:agent` | Bundles `src/agent/cli.js` into `.claude/skills/schedule-adjust/cli.mjs`. |
 
-### 主なディレクトリ
+### Project structure
 
 ```text
 .
 ├── src/
-│   ├── App.jsx              # 状態管理と画面全体の組み立て
-│   ├── components/          # WBS / ガントなどのUIコンポーネント
-│   ├── lib/                 # CPM、カレンダー、依存関係、JSON入出力などのロジックとテスト
-│   ├── dom/                 # ポインタードラッグなどのDOMヘルパー
-│   ├── agent/               # AIエージェント用SkillのCLI（src/lib/を再利用するNodeスクリプト）
-│   ├── entry.jsx            # Reactアプリのエントリポイント
-│   ├── input.css            # Tailwind CSSの入力ファイル
-│   └── storage.js           # window.storageとlocalStorageの接続
-├── scripts/                 # HTML・JSON文書・Skill CLIの生成スクリプト
-├── docs/                    # JSON文書とREADME用画像
-├── .claude/skills/          # Claude Code 向け Skill（schedule-adjust）
-├── .claude-plugin/          # プラグインマーケットプレイス定義
-├── template.html            # 配布用HTMLの雛形
-└── project_scheduler.html   # ビルド済みの配布物
+│   ├── App.jsx              # Application state and top-level composition
+│   ├── components/          # UI components, including WBS and Gantt views
+│   ├── lib/                 # CPM, calendar, dependencies, JSON logic, and tests
+│   ├── dom/                 # DOM helpers such as pointer dragging
+│   ├── agent/               # Skill CLI, reusing the scheduling logic in src/lib
+│   ├── entry.jsx            # React entry point
+│   ├── input.css            # Tailwind CSS input
+│   └── storage.js           # window.storage and localStorage integration
+├── scripts/                 # HTML, JSON documentation, and Skill CLI generators
+├── docs/                    # JSON reference and README images
+├── .claude/skills/          # Claude Code Skill (schedule-adjust)
+├── .claude-plugin/          # Plugin marketplace metadata
+├── template.html            # Source template for the distributable HTML
+└── project_scheduler.html   # Generated distributable
 ```
 
-## 既知の制約
+## Known limitations
 
-- 複数人での同時編集や、端末をまたいだ自動同期には対応していません。共有・引き継ぎにはJSONエクスポート / インポートを利用してください。
-- 稼働日カレンダーの祝日計算は、日本の祝日をもとにした簡易実装です。
+- Real-time multi-user editing and automatic cross-device synchronization are not supported. Use JSON export and import to share or transfer a plan.
+- The working-day calendar uses a simplified implementation of Japanese public holidays.
 
-## フィードバック
+## Feedback
 
-不具合や改善案は[GitHub Issues](https://github.com/lhideki/project-scheduler/issues)へお寄せください。役に立った場合は、リポジトリへのStarで応援していただけると励みになります。
+Please report bugs and feature requests in [GitHub Issues](https://github.com/lhideki/project-scheduler/issues). If Project Scheduler is useful to you, a Star is always appreciated.
 
-## ライセンス
+## License
 
 [MIT License](LICENSE)
