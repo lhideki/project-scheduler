@@ -218,6 +218,26 @@ export function WBSGanttView({
       setSelectedId(null);
     }
   }, [tasks, selectedId, setSelectedId]);
+
+  // 右ペイン（ガントのスクロール外枠）の表示幅。日付軸を「画面の描画領域いっぱい」まで
+  // 伸ばすために使う。ウィンドウリサイズ・ペイン境界ドラッグ・左ペイン幅変更など、
+  // 発火源を問わず ResizeObserver で拾える（chartWidth 側には依存しないのでループしない）。
+  const [viewportWidth, setViewportWidth] = useState(0);
+  useEffect(() => {
+    const el = rightRef.current;
+    if (!el) return;
+    if (typeof ResizeObserver === "undefined") { setViewportWidth(el.clientWidth); return; }
+    let raf = 0;
+    const measure = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => { if (rightRef.current) setViewportWidth(rightRef.current.clientWidth); });
+    };
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    setViewportWidth(el.clientWidth);
+    return () => { cancelAnimationFrame(raf); ro.disconnect(); };
+  }, []);
+
   const onScrollLeft = () => { if (syncing.current) return; syncing.current = true; rightRef.current.scrollTop = leftRef.current.scrollTop; syncing.current = false; };
   const onScrollRight = () => { if (syncing.current) return; syncing.current = true; leftRef.current.scrollTop = rightRef.current.scrollTop; syncing.current = false; };
 
@@ -598,12 +618,26 @@ export function WBSGanttView({
     if (baseDateISO < start) start = baseDateISO;
     return start;
   }, [schedule, baseDateISO, todayISO]);
-  const maxDate = useMemo(() => {
+  // タスク内容から決まる本来の右端（プロジェクト終了 + 余白 + 基準日）。
+  const contentMaxDate = useMemo(() => {
     let m = projectEnd || todayISO;
     let end = cal_addDaysISO(m, 7);
     if (baseDateISO > end) end = baseDateISO;
     return end;
   }, [projectEnd, baseDateISO, todayISO]);
+  // 実際に日付軸・網掛け・グリッド・SVG を描画する右端。
+  //  1) タスク名ラベルはバー右端の外側へ描くため、常に LABEL_MARGIN_PX ぶんの日数を足す。
+  //  2) それでも右ペインの表示幅に届かない場合は、画面の描画領域いっぱいまで軸を伸ばす。
+  const LABEL_MARGIN_PX = 160;
+  const maxDate = useMemo(() => {
+    let end = cal_addDaysISO(contentMaxDate, Math.ceil(LABEL_MARGIN_PX / dayWidth));
+    if (viewportWidth > 0) {
+      // floor で「表示幅を超えない最大の日数」に留め、余分な横スクロールバーを出さない。
+      const viewEnd = cal_addDaysISO(minDate, Math.floor(viewportWidth / dayWidth));
+      if (viewEnd > end) end = viewEnd;
+    }
+    return end;
+  }, [contentMaxDate, minDate, viewportWidth, dayWidth]);
   const totalDays = Math.max(1, Math.round((parseISO(maxDate) - parseISO(minDate)) / 86400000));
   const chartWidth = totalDays * dayWidth;
 
