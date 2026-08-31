@@ -4,7 +4,7 @@ import {
   AlertTriangle, ArrowLeftRight, Info, Diamond, GripVertical, Zap, Flame,
   Undo2, Redo2, Copy, ClipboardPaste,
 } from "lucide-react";
-import { toISO, parseISO, WEEKDAY_JA, fmtJP, cal_addDaysISO, isWeekend } from "../lib/calendar.js";
+import { toISO, parseISO, fmtJP, cal_addDaysISO, isWeekend } from "../lib/calendar.js";
 import { uid, buildFlatList, allDescendantIds } from "../lib/taskTree.js";
 import { sprintColorForId } from "../lib/sprints.js";
 import { copyTextToClipboard } from "../lib/exportUtils.js";
@@ -12,6 +12,7 @@ import {
   WBS_EDITABLE_COLUMNS, taskCellText, taskCellPatch, taskRowText, taskRowPatch, copiedTaskRowPatch,
 } from "../lib/wbsEditing.js";
 import { startPointerDrag, svgPointFromRef, makeDateScale } from "../dom/pointerDrag.js";
+import { axisTier, buildTimeAxis, stepDayWidth, MIN_DAY_WIDTH, MAX_DAY_WIDTH } from "../lib/timeAxis.js";
 import {
   ROW_H, ROW_H_BASE, GANTT_HEADER_H, DEFAULT_WBS_COLS, MIN_WBS_COL_WIDTHS,
 } from "../constants.js";
@@ -608,7 +609,16 @@ export function WBSGanttView({
 
   const xOf = makeDateScale(minDate, dayWidth);
 
+  // 日付軸の表示粒度（day / week / month）。ズームアウトすると目盛りを週・月単位へ縮約する。
+  const tier = axisTier(dayWidth);
+  const axis = useMemo(
+    () => buildTimeAxis({ minDate, maxDate, dayWidth, tier, cal }),
+    [minDate, maxDate, dayWidth, tier, cal],
+  );
+
+  // 背景の網掛け（週末・祝日・稼働日指定）用の日別セル。month tier では日単位の網掛けをしないため生成しない。
   const dayCells = useMemo(() => {
+    if (tier === "month") return [];
     const cells = [];
     // 稼働日指定（type: "workday"）の日付集合。土日・祝日でなくても、明示的に指定された日は淡色で示す。
     const forcedWorkdays = new Set(cal.exceptions.filter(e => e.type === "workday").map(e => e.date));
@@ -616,7 +626,6 @@ export function WBSGanttView({
     const end = parseISO(maxDate);
     while (d <= end) {
       const iso = toISO(d);
-      const dow = d.getUTCDay();
       const weekend = isWeekend(d);
       const working = cal.isWorkdayStr(iso);
       cells.push({
@@ -625,22 +634,11 @@ export function WBSGanttView({
         holiday: !working ? (cal.holidayName(iso) || undefined) : undefined,
         // 稼働日指定で稼働扱いにした日（土日・祝日・休日指定を上書きした日を含む）
         workdayOverride: working && forcedWorkdays.has(iso),
-        month: iso.slice(0, 7), day: d.getUTCDate(), dowLabel: WEEKDAY_JA[dow],
       });
       d = new Date(d.getTime() + 86400000);
     }
     return cells;
-  }, [minDate, maxDate, dayWidth, cal]);
-
-  const monthBands = useMemo(() => {
-    const bands = [];
-    let cur = null;
-    dayCells.forEach(c => {
-      if (!cur || cur.month !== c.month) { cur = { month: c.month, x: c.x, w: dayWidth }; bands.push(cur); }
-      else cur.w += dayWidth;
-    });
-    return bands;
-  }, [dayCells, dayWidth]);
+  }, [minDate, maxDate, dayWidth, cal, tier]);
 
   // ガント上部に表示するスプリント帯（表示範囲外にはみ出す分はクリップする）。
   const sprintBands = useMemo(() => {
@@ -716,8 +714,8 @@ export function WBSGanttView({
         <div className="w-px h-5 bg-slate-200 mx-1" />
         <IconBtn icon={Save} label="バージョンを保存" onClick={() => onSaveVersion(`バージョン ${versions.length + 1}`)} small />
         <div className="w-px h-5 bg-slate-200 mx-1" />
-        <IconBtn icon={ZoomOut} onClick={() => setDayWidth(w => Math.max(6, w - 4))} small />
-        <IconBtn icon={ZoomIn} onClick={() => setDayWidth(w => Math.min(40, w + 4))} small />
+        <IconBtn icon={ZoomOut} label="ズームアウト（日→週→月へ縮約）" iconOnly onClick={() => setDayWidth(w => stepDayWidth(w, -1))} small disabled={dayWidth <= MIN_DAY_WIDTH} />
+        <IconBtn icon={ZoomIn} label="ズームイン" iconOnly onClick={() => setDayWidth(w => stepDayWidth(w, +1))} small disabled={dayWidth >= MAX_DAY_WIDTH} />
       </div>
 
       <div className="flex flex-1 min-h-0">
@@ -1060,19 +1058,23 @@ export function WBSGanttView({
                 })}
               </div>
               <div className="relative h-5 border-b border-slate-200 text-[10px] text-slate-500">
-                {monthBands.map((b, i) => (
-                  <div key={i} style={{ position: "absolute", left: b.x, width: b.w }} className="px-1 border-l border-slate-200 truncate">{b.month}</div>
+                {axis.major.map(b => (
+                  <div key={b.key} style={{ position: "absolute", left: b.x, width: b.w }} className="px-1 border-l border-slate-200 truncate">{b.label}</div>
                 ))}
               </div>
               <div className="relative text-[9px] text-slate-400" style={{ height: GANTT_HEADER_H - 36 }}>
-                {dayCells.filter((_, i) => dayWidth >= 14 || i % 2 === 0).map(c => (
+                {axis.minor.map(m => (
                   <div
-                    key={c.iso}
-                    style={{ position: "absolute", left: c.x, width: dayWidth }}
-                    className={"text-center leading-tight " + ((c.weekend || c.holiday) ? "text-red-400" : "")}
+                    key={m.key}
+                    style={{ position: "absolute", left: m.x, width: m.w }}
+                    className={
+                      (tier === "day" ? "text-center " : "text-left pl-1 border-l border-slate-200 ") +
+                      "leading-tight overflow-hidden whitespace-nowrap " +
+                      (m.muted ? "text-red-400" : "")
+                    }
                   >
-                    <div>{c.day}</div>
-                    <div>{c.dowLabel}</div>
+                    <div>{m.label}</div>
+                    {m.sub && <div>{m.sub}</div>}
                   </div>
                 ))}
               </div>
@@ -1088,6 +1090,10 @@ export function WBSGanttView({
                 ))}
                 {dayCells.map(c => c.workdayOverride && (
                   <rect key={`w-${c.iso}`} x={c.x} y={0} width={dayWidth} height={bodyHeight} fill="#EFF6FF" />
+                ))}
+                {/* 週・月へ縮約表示した粒度では、日単位の網掛けの代わりに目盛りの境界へ縦罫線を引く。 */}
+                {tier !== "day" && axis.minor.map(m => m.x > 0 && (
+                  <line key={`grid-${m.key}`} x1={m.x} x2={m.x} y1={0} y2={bodyHeight} stroke="#E2E8F0" strokeWidth={1} />
                 ))}
                 {xOf(baseDateISO) >= 0 && xOf(baseDateISO) <= chartWidth && (
                   <line x1={xOf(baseDateISO) + dayWidth / 2} x2={xOf(baseDateISO) + dayWidth / 2} y1={0} y2={bodyHeight} stroke="#DC2626" strokeDasharray="3,3" strokeWidth={1} />
