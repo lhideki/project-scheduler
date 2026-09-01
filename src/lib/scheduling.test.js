@@ -139,6 +139,33 @@ describe("levelResources", () => {
     expect(placed.T2.start).toBe("2024-01-12"); // T1の稼働をリソース使用量として尊重し押し出される
   });
 
+  it("先行タスクを持つタスクでも手入力の開始日を後ろ倒しのみの下限として尊重する", () => {
+    const tasks = [
+      { id: "A", name: "A", parentId: null, order: 0, startDate: "2024-01-09", duration: 3, assigneeId: "r1", predecessors: [] },
+      { id: "B", name: "B", parentId: null, order: 1, startDate: "2024-01-22", duration: 2, assigneeId: "r1", predecessors: [{ id: "A", type: "FS", lag: 0 }] },
+    ];
+    const resources = [{ id: "r1", name: "R1", weeklyCapacity: 5, monthlyCapacity: 20 }];
+    const { result: cpmResult } = runCPM(tasks, cal, "2024-01-09", []);
+    const { placed } = levelResources(tasks, cpmResult, resources, cal, []);
+    // 依存関係だけならAの直後(1/12〜)に置けるが、手入力の開始日1/22まで後ろ倒しされる
+    expect(placed.B.start).toBe("2024-01-22");
+  });
+
+  it("手入力の開始日が依存関係の候補日より前でも前倒しはしない（後ろ倒しのみ）", () => {
+    const tasks = [
+      { id: "A", name: "A", parentId: null, order: 0, startDate: "2024-01-09", duration: 5, assigneeId: "r1", predecessors: [] },
+      { id: "B", name: "B", parentId: null, order: 1, startDate: "2024-01-10", duration: 2, assigneeId: "r2", predecessors: [{ id: "A", type: "FS", lag: 0 }] },
+    ];
+    const resources = [
+      { id: "r1", name: "R1", weeklyCapacity: 5, monthlyCapacity: 20 },
+      { id: "r2", name: "R2", weeklyCapacity: 5, monthlyCapacity: 20 },
+    ];
+    const { result: cpmResult } = runCPM(tasks, cal, "2024-01-09", []);
+    const { placed } = levelResources(tasks, cpmResult, resources, cal, []);
+    // Aは1/9〜1/15。Bの手入力開始日1/10は依存関係の候補日より前なので無視され、Aの直後になる
+    expect(placed.B.start).toBe("2024-01-16");
+  });
+
   it("固定マイルストーンの平準化後の日程が期日を超過すると警告を返す", () => {
     const tasks = [
       { id: "T1", name: "T1", parentId: null, order: 0, startDate: "2024-01-09", duration: 10, assigneeId: "r1", predecessors: [] },

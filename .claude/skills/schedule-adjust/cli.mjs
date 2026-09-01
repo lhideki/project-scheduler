@@ -611,8 +611,12 @@ function levelResources(tasks, cpmResult, resources, cal, sprints) {
       const cand = candidateFromDep(cal, dep, g, task.duration);
       if (minStart === null || cand.start > minStart) minStart = cand.start;
     });
+    if (task.startDate) {
+      const manualFloor = cal.snapForward(task.startDate);
+      if (minStart === null || manualFloor > minStart) minStart = manualFloor;
+    }
     if (minStart === null) {
-      minStart = task.startDate ? cal.snapForward(task.startDate) : cpmResult.get(id)?.ES || cal.snapForward(toISO(/* @__PURE__ */ new Date()));
+      minStart = cpmResult.get(id)?.ES || cal.snapForward(toISO(/* @__PURE__ */ new Date()));
     }
     const sprintFloor = earliestSprintFloor(task.sprintIds, sprintById, cal);
     if (sprintFloor && sprintFloor > minStart) minStart = sprintFloor;
