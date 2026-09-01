@@ -490,8 +490,7 @@ export function levelResources(tasks, cpmResult, resources, cal, sprints) {
       remaining.delete(id);
       continue;
     }
-    // 先行タスクがある場合は依存関係の候補日のみを基準にする（CPMのforward passと同じ扱い）。
-    // タスク自身の「開始日」欄は、先行タスクが存在しない／未解決の場合のみフロアとして使う。
+    // まず依存関係から候補日を求める（CPMのforward passと同じ扱い）。
     let minStart = null;
     leafPredsOf[id].forEach(dep => {
       const p = placed[dep.from];
@@ -505,8 +504,15 @@ export function levelResources(tasks, cpmResult, resources, cal, sprints) {
       const cand = candidateFromDep(cal, dep, g, task.duration);
       if (minStart === null || cand.start > minStart) minStart = cand.start;
     });
+    // タスク自身の手入力「開始日」は、先行タスクの有無に関わらず「後ろ倒しのみの下限（フロア）」
+    // として扱う（runCPM の respectManualPins=true と整合させるための扱い。ただし平準化では
+    // 担当者の日次競合を解決する必要があるため、runCPM のような前倒しの固定はせず下限に留める）。
+    if (task.startDate) {
+      const manualFloor = cal.snapForward(task.startDate);
+      if (minStart === null || manualFloor > minStart) minStart = manualFloor;
+    }
     if (minStart === null) {
-      minStart = task.startDate ? cal.snapForward(task.startDate) : (cpmResult.get(id)?.ES || cal.snapForward(toISO(new Date())));
+      minStart = cpmResult.get(id)?.ES || cal.snapForward(toISO(new Date()));
     }
     // CPMと同様、スプリント開始日は依存関係より優先度の低い下限として扱う（後ろ倒しのみ）。
     // 複数スプリントが紐付いている場合は、そのうち最も早い開始日を下限として使う。
