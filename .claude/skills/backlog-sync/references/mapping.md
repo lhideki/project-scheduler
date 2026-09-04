@@ -12,26 +12,27 @@
 
 | 項目 | 値 | 備考 |
 | --- | --- | --- |
-| Backlog スペース | `example.backlog.com` | `bee` の `-s` / `BACKLOG_SPACE` |
-| プロジェクトキー | `PSDEMO` | `bee` の `-p` / `BACKLOG_PROJECT` |
+| Backlog スペース | `example.backlog.com` | **全 `bee` コマンドに `-s <space>` を付ける**（`BACKLOG_SPACE` で export する場合も値の一致を確認） |
+| プロジェクトキー | `PSDEMO` | 全 `bee` コマンドに `-p <key>`（`BACKLOG_PROJECT` でも可） |
 | 認証 | `bee auth login` 済み | `BACKLOG_API_KEY` でも可 |
 
 ## 2. 課題種別（issue type）
 
-`bee issue-type list -p <key> --json` の `id` / `name` を確認して対応づける。
+`bee issue-type list -s <space> -p <key> --json` の `id` / `name` を確認して対応づける。
 
 | Scheduler の種類 | Backlog 課題種別名 | 種別ID |
 | --- | --- | --- |
 | リーフタスク（`task`） | タスク | （実行時に解決） |
 | WBSグループ（`group`） | タスク | （同上） |
-| 固定マイルストーン（`milestone`） | マイルストーン | （同上） |
+| マイルストーン（`milestone: true`・`milestoneMode` 不問） | マイルストーン | （同上） |
 
 - グループを課題化しない場合は `<file>.backlog.json` の `pushGroups: false`。
 - 「マイルストーン」種別が無ければ作るか、`タスク` 種別＋課題名プレフィックスで代替。
+- `milestoneMode`（`fixed` / `flexible`）は Scheduler 側の日程計算の挙動を決めるだけで、Backlog 課題種別には影響しない（どちらもマイルストーン種別）。
 
 ## 3. ステータス ↔ 進捗率
 
-`bee status list -p <key> --json` で ID を確認。
+`bee status list -s <space> -p <key> --json` で ID を確認。
 
 ### push（Scheduler → Backlog）: `progress` → ステータス
 
@@ -57,7 +58,7 @@
 
 ## 4. 担当者（resource ↔ Backlog user）
 
-`bee project users -p <key> --json` の `id` / `name` / `mailAddress` で突き合わせる。
+`bee project users -s <space> -p <key> --json` の `id` / `name` / `mailAddress` で突き合わせる。
 
 | Scheduler `resources[].id` | Scheduler 表示名 | Backlog ユーザーID | Backlog 表示名 |
 | --- | --- | --- | --- |
@@ -65,6 +66,7 @@
 | `r-sato` | 佐藤 | `197201` | Sato |
 
 - 対応が無い担当者のタスクは「担当者未設定」で作成し、レポートに警告を出す。
+- 既存課題の担当者クリアは `bee` 1.1.1 では不可。Scheduler で担当を外しても Backlog 側の担当者は変えず、警告のみ出す。
 
 ## 5. 日程
 
