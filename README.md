@@ -106,6 +106,23 @@ When Claude Code is opened in this repository, `.claude/skills/schedule-adjust/`
 
 If you linked a local JSON file as described in [Link a JSON file from a synced folder](#link-a-json-file-from-a-synced-folder), select `最新版を再読込` (Reload Latest) after the agent edits it. Otherwise, export a JSON file, have the agent edit it, and import the result back into the app.
 
+### Sync with Backlog
+
+The same plugin bundles a second Skill, `backlog-sync`, that keeps an exported plan and a
+[Backlog](https://backlog.com/) project in sync through [`bee`](https://github.com/nulab/bee),
+Nulab's official Backlog CLI. Install `bee` 1.1 or later and authenticate it first
+(`npm i -g @nulab/bee`, then `bee auth login`).
+
+- **Scheduler → Backlog**: create or update issues from the plan. Computed start and due
+  dates come from `schedule-adjust`'s `recalc`, so the JSON format is unchanged.
+- **Backlog → Scheduler**: read issue status back into `progress`, then hand off to
+  `schedule-adjust` to replan and save.
+
+Sync settings and the task-to-issue mapping live in a sidecar file next to the exported
+JSON (`<file>.backlog.json`); the Project Scheduler JSON schema itself is not touched.
+The Skill always shows a diff and asks for approval before writing to Backlog, and never
+deletes issues automatically. See `.claude/skills/backlog-sync/` for the mapping template.
+
 ## JSON format
 
 See the [JSON format reference](docs/json-format.md) for fields, types, and required properties. The reference is generated from the JSON Schema in the source code.
@@ -155,7 +172,7 @@ npm run build
 │   └── storage.js           # window.storage and localStorage integration
 ├── scripts/                 # HTML, JSON documentation, and Skill CLI generators
 ├── docs/                    # JSON reference and README images
-├── .claude/skills/          # Claude Code Skill (schedule-adjust)
+├── .claude/skills/          # Claude Code Skills (schedule-adjust, backlog-sync)
 ├── .claude-plugin/          # Plugin marketplace metadata
 ├── template.html            # Source template for the distributable HTML
 └── project_scheduler.html   # Generated distributable

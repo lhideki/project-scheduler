@@ -8,7 +8,7 @@
     {
       "name": "schedule-adjust",
       "source": "./",
-      "description": "Project Scheduler の保存JSONを読み書きして、依存関係・進捗率・スプリント・リソースを踏まえたスケジュール調整を行う Skill（CPM再計算・リソース平準化・整合性チェック・変更影響レポート）。"
+      "description": "Project Scheduler の保存JSONを扱う Skill 群。schedule-adjust: 依存関係・進捗率・スプリント・リソースを踏まえたスケジュール調整（CPM再計算・リソース平準化・整合性チェック・変更影響レポート）。backlog-sync: bee 経由で保存JSONと Backlog 課題を双方向同期。"
     }
   ]
 }
