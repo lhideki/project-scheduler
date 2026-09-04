@@ -68,6 +68,10 @@ src/
 
 保存JSONを読み書きしてスケジュール調整を行うためのSkill。`SKILL.md` はエージェント向け手順書、`cli.mjs` は `npm run build:agent` の生成物。CLI（`validate`/`recalc`/`plan`/`explain`）はスケジュール計算に `src/lib/` を**そのまま**使う（App.jsx の `cpm`/`schedule` useMemo と同じ手順を `src/agent/cli.js` の `computeSchedule` が再現）。CLIの計算結果がアプリとずれないよう、`src/lib/` のスケジューリング仕様を変えたら `src/agent/cli.test.js` が通ることを必ず確認する。**`src/agent/cli.js` にCPM等の計算ロジックを書かない**（`src/lib/` を呼ぶだけ）。CLIは設計上JSONファイルを書き換えない（保存はエージェントが手順に従って行う）。
 
+### Backlog連携用Skill（`.claude/skills/backlog-sync/`）
+
+bee（`@nulab/bee`、Backlog公式CLI）経由で保存JSONと Backlog 課題を双方向同期する Skill。`SKILL.md` と `references/mapping.md` のみで構成される**プロズだけのSkill**（`npm run build:agent` の生成対象ではない。ランタイムコードを持たない）。スケジュール計算は `schedule-adjust/cli.mjs` の `recalc` に、JSONの編集・保存は `schedule-adjust` の標準ワークフローに、Backlog の課題CRUDは `bee` に委譲する（`backlog-sync` 自体は計算もJSON書き込みもBacklog APIの直叩きもしない）。同期の設定・対応表・IDキャッシュは、保存JSONの隣に置くスキーマ外のサイドカーファイル `<file>.backlog.json` に持つ（**Project Scheduler の JSON スキーマは変更しない**）。この方針により「計算済み終了日をエクスポートJSONへ持たせる」案は不要になっている。
+
 ## アーキテクチャ
 
 ### データモデル（すべてトップレベルReact state、`window.storage` に永続化）
