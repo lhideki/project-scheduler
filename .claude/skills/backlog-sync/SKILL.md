@@ -23,9 +23,13 @@ Project Scheduler（単一HTMLのWBS/ガントツール）の保存JSONと Backl
 
 ## 前提
 
-- **`bee`（`@nulab/bee`）がインストール・認証済みであること。** 未導入なら
-  `npm i -g @nulab/bee`、未認証なら `bee auth login` をユーザーに案内する。
-  `bee auth status` で確認できる。
+- **`bee`（`@nulab/bee`）1.1 以上がインストール・認証済みであること。**
+  このスキルの手順は `bee` 1.1.1 のコマンド体系（`issue create/edit/list/view`・
+  `project users`・`issue-type list`・`status list` の `--json` 出力）を前提にしている。
+  `bee --version` で確認し、未導入なら `npm i -g @nulab/bee`、
+  未認証なら `bee auth login`、認証状態は `bee auth status` で確認する。
+  1.1 未満・メジャーバージョンが上がっている場合は、コマンド差異がないか
+  `bee <command> --help` で確認してから進める。
 - **Node.js 18 以上**（`schedule-adjust` の `cli.mjs` 実行に使う）。
 - 対象ファイルは Project Scheduler の「書き出し」で生成したJSON（`schemaVersion: 1`）。
 - `schedule-adjust` スキルが同じプラグイン内に同梱されている

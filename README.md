@@ -110,8 +110,8 @@ If you linked a local JSON file as described in [Link a JSON file from a synced 
 
 The same plugin bundles a second Skill, `backlog-sync`, that keeps an exported plan and a
 [Backlog](https://backlog.com/) project in sync through [`bee`](https://github.com/nulab/bee),
-Nulab's official Backlog CLI. Install and authenticate `bee` first (`npm i -g @nulab/bee`,
-then `bee auth login`).
+Nulab's official Backlog CLI. Install `bee` 1.1 or later and authenticate it first
+(`npm i -g @nulab/bee`, then `bee auth login`).
 
 - **Scheduler → Backlog**: create or update issues from the plan. Computed start and due
   dates come from `schedule-adjust`'s `recalc`, so the JSON format is unchanged.

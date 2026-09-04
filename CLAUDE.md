@@ -70,7 +70,7 @@ src/
 
 ### Backlog連携用Skill（`.claude/skills/backlog-sync/`）
 
-bee（`@nulab/bee`、Backlog公式CLI）経由で保存JSONと Backlog 課題を双方向同期する Skill。`SKILL.md` と `references/mapping.md` のみで構成される**プロズだけのSkill**（`npm run build:agent` の生成対象ではない。ランタイムコードを持たない）。スケジュール計算は `schedule-adjust/cli.mjs` の `recalc` に、JSONの編集・保存は `schedule-adjust` の標準ワークフローに、Backlog の課題CRUDは `bee` に委譲する（`backlog-sync` 自体は計算もJSON書き込みもBacklog APIの直叩きもしない）。同期の設定・対応表・IDキャッシュは、保存JSONの隣に置くスキーマ外のサイドカーファイル `<file>.backlog.json` に持つ（**Project Scheduler の JSON スキーマは変更しない**）。この方針により「計算済み終了日をエクスポートJSONへ持たせる」案は不要になっている。
+bee（`@nulab/bee` 1.1 以上、Backlog公式CLI）経由で保存JSONと Backlog 課題を双方向同期する Skill。`SKILL.md` と `references/mapping.md` のみで構成される**プロズだけのSkill**（`npm run build:agent` の生成対象ではない。ランタイムコードを持たない）。スケジュール計算は `schedule-adjust/cli.mjs` の `recalc` に、JSONの編集・保存は `schedule-adjust` の標準ワークフローに、Backlog の課題CRUDは `bee` に委譲する（`backlog-sync` 自体は計算もJSON書き込みもBacklog APIの直叩きもしない）。同期の設定・対応表・IDキャッシュは、保存JSONの隣に置くスキーマ外のサイドカーファイル `<file>.backlog.json` に持つ（**Project Scheduler の JSON スキーマは変更しない**）。この方針により「計算済み終了日をエクスポートJSONへ持たせる」案は不要になっている。
 
 ## アーキテクチャ
 
