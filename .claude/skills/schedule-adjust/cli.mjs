@@ -651,6 +651,23 @@ function levelResources(tasks, cpmResult, resources, cal, sprints) {
   });
   return { placed, warnings };
 }
+function autoScheduleStartDates(tasks, cal, projectStart, sprints, resources, opts = {}) {
+  const auto = runCPM(tasks, cal, projectStart, sprints, { respectManualPins: false });
+  const out = /* @__PURE__ */ new Map();
+  tasks.forEach((t) => {
+    if (isGroupId(tasks, t.id)) return;
+    const s = auto.result.get(t.id);
+    if (s && s.schedStart && !s.isSummary) out.set(t.id, s.schedStart);
+  });
+  if (opts.leveling) {
+    const interim = tasks.map((t) => out.has(t.id) ? { ...t, startDate: out.get(t.id) } : t);
+    const { placed } = levelResources(interim, auto.result, resources || [], cal, sprints);
+    Object.entries(placed).forEach(([id, dates]) => {
+      if (dates && dates.start) out.set(id, dates.start);
+    });
+  }
+  return out;
+}
 
 // src/lib/sprints.js
 function detectSprintConflicts(tasks, sprints, schedule) {
@@ -1259,15 +1276,21 @@ function buildVersionSnapshot(data, schedule, name) {
     hasFullSnapshot: true
   };
 }
-function applyAutoSchedule(data, projectStart, cal) {
-  const auto = runCPM(data.tasks, cal, projectStart, data.sprints || [], { respectManualPins: false });
+function applyAutoSchedule(data, projectStart, cal, opts = {}) {
+  const startDates = autoScheduleStartDates(
+    data.tasks,
+    cal,
+    projectStart,
+    data.sprints || [],
+    data.resources || [],
+    { leveling: !!opts.leveling }
+  );
   const changed = [];
   const tasks = data.tasks.map((t) => {
-    if (isGroupId(data.tasks, t.id)) return t;
-    const s = auto.result.get(t.id);
-    if (!s || !s.schedStart || s.isSummary) return t;
-    if (t.startDate !== s.schedStart) changed.push({ id: t.id, from: t.startDate ?? null, to: s.schedStart });
-    return { ...t, startDate: s.schedStart };
+    if (isGroupId(data.tasks, t.id) || !startDates.has(t.id)) return t;
+    const to = startDates.get(t.id);
+    if (t.startDate !== to) changed.push({ id: t.id, from: t.startDate ?? null, to });
+    return { ...t, startDate: to };
   });
   return { tasks, changed };
 }
@@ -1373,7 +1396,7 @@ function cmdPlan(positional, opts) {
   if (reschedule) {
     const editedProjectStart = deriveProjectStart(edited.tasks, toISO(/* @__PURE__ */ new Date()));
     const editedCal = makeProjectCalendar(editedProjectStart, edited.calendarExceptions || []);
-    const applied = applyAutoSchedule(edited, editedProjectStart, editedCal);
+    const applied = applyAutoSchedule(edited, editedProjectStart, editedCal, { leveling: afterLeveling });
     proposedTasks = applied.tasks;
     startDateChanges = applied.changed;
   }

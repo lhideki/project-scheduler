@@ -21,7 +21,7 @@ import { pathToFileURL } from "node:url";
 import {
   toISO, buildHolidayMap, makeCalendar,
   runCPM, levelResources, rollupSummaries, deriveProjectStart,
-  candidateFromDep, earliestSprintFloor,
+  candidateFromDep, earliestSprintFloor, autoScheduleStartDates,
   detectSprintConflicts, computeOverlappingSprintIds,
   normalizeImportedProject,
   buildFlatList, isGroupId, effectivePredecessors,
@@ -476,17 +476,20 @@ export function buildVersionSnapshot(data, schedule, name) {
  *  グループとサマリー以外の全リーフの startDate に、respectManualPins:false の CPM 結果の
  *  schedStart を書き戻す。schedStart は runCPM の選択ロジックにより、固定マイルストーン自身は
  *  LS/LF（＝fixedDate 由来）、それ以外は ES/EF（最短）となる（CLAUDE.md 準拠）。
- *  リソース平準化後の日付は焼き込まない。App のボタンと完全に一致させるため、ここでも
+ *  opts.leveling が true のときは、平準化後の配置日（＝平準化ON時の表示スケジュールと一致する
+ *  日付）を書き戻す（autoScheduleStartDates 参照）。App のボタンと結果を揃えるため、
  *  固定マイルストーンを特別扱いしない（＝アプリと CLI で結果がずれないようにする）。 */
-export function applyAutoSchedule(data, projectStart, cal) {
-  const auto = runCPM(data.tasks, cal, projectStart, data.sprints || [], { respectManualPins: false });
+export function applyAutoSchedule(data, projectStart, cal, opts = {}) {
+  const startDates = autoScheduleStartDates(
+    data.tasks, cal, projectStart, data.sprints || [], data.resources || [],
+    { leveling: !!opts.leveling }
+  );
   const changed = [];
   const tasks = data.tasks.map(t => {
-    if (isGroupId(data.tasks, t.id)) return t;
-    const s = auto.result.get(t.id);
-    if (!s || !s.schedStart || s.isSummary) return t;
-    if (t.startDate !== s.schedStart) changed.push({ id: t.id, from: t.startDate ?? null, to: s.schedStart });
-    return { ...t, startDate: s.schedStart };
+    if (isGroupId(data.tasks, t.id) || !startDates.has(t.id)) return t;
+    const to = startDates.get(t.id);
+    if (t.startDate !== to) changed.push({ id: t.id, from: t.startDate ?? null, to });
+    return { ...t, startDate: to };
   });
   return { tasks, changed };
 }
@@ -599,7 +602,8 @@ function cmdPlan(positional, opts) {
     });
   }
 
-  // --reschedule: 「自動スケジューリング実行」相当で全リーフの startDate を CPM 最短へ書き戻す。
+  // --reschedule: 「自動スケジューリング実行」相当で全リーフの startDate を依存関係ベースの
+  // 日程へ書き戻す（平準化OFFなら CPM 最短、ON なら平準化後の配置日。autoScheduleStartDates 参照）。
   // 既定（なし）: ユーザーの編集内容だけを反映し、既存の startDate ピンはそのまま残す。
   const reschedule = !!opts.reschedule;
   const beforeLeveling = !!original.levelingOn;
@@ -617,7 +621,7 @@ function cmdPlan(positional, opts) {
   if (reschedule) {
     const editedProjectStart = deriveProjectStart(edited.tasks, toISO(new Date()));
     const editedCal = makeProjectCalendar(editedProjectStart, edited.calendarExceptions || []);
-    const applied = applyAutoSchedule(edited, editedProjectStart, editedCal);
+    const applied = applyAutoSchedule(edited, editedProjectStart, editedCal, { leveling: afterLeveling });
     proposedTasks = applied.tasks;
     startDateChanges = applied.changed;
   }

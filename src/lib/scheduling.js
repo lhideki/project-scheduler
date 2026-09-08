@@ -552,3 +552,43 @@ export function levelResources(tasks, cpmResult, resources, cal, sprints) {
 
   return { placed, warnings };
 }
+
+/**
+ * 「自動スケジューリング実行」（App.jsx runScheduling / CLI applyAutoSchedule）で、
+ * 各リーフタスクの startDate に書き戻すべき開始日を求める。
+ *
+ * ベースは respectManualPins:false の CPM 結果の schedStart（固定マイルストーン自身は LS/LF、
+ * それ以外は ES/EF ＝最短）。opts.leveling が true のときは、その CPM 結果を startDate へ
+ * 反映した状態でさらにリソース平準化し、平準化後の配置日を採用する。
+ *
+ * 平準化ONなのに CPM の（資源競合を見ない）日付を書き戻すと、書き戻した startDate が
+ * 平準化ON時の表示スケジュールとずれる。その状態で着手済み（progress > 0）にすると
+ * levelResources がそのタスクを startDate にピン留めするため、表示だけが平準化前の位置へ
+ * 「戻る」ように見える不具合が起きる。それを防ぐため、平準化ON時は表示と一致する日付を書き戻す。
+ *
+ * @param {import("./taskTree.js").Task[]} tasks
+ * @param {import("./calendar.js").Calendar} cal
+ * @param {string} projectStart
+ * @param {import("./taskTree.js").Sprint[]} sprints
+ * @param {import("./taskTree.js").Resource[]} resources
+ * @param {{leveling?: boolean}} [opts]
+ * @returns {Map<string, string>} leafId -> 書き戻す開始日（YYYY-MM-DD）
+ */
+export function autoScheduleStartDates(tasks, cal, projectStart, sprints, resources, opts = {}) {
+  const auto = runCPM(tasks, cal, projectStart, sprints, { respectManualPins: false });
+  const out = new Map();
+  tasks.forEach(t => {
+    if (isGroupId(tasks, t.id)) return;
+    const s = auto.result.get(t.id);
+    if (s && s.schedStart && !s.isSummary) out.set(t.id, s.schedStart);
+  });
+  if (opts.leveling) {
+    // CPM 結果を startDate に反映した状態で平準化する（書き戻し後の表示条件と揃える）。
+    const interim = tasks.map(t => (out.has(t.id) ? { ...t, startDate: out.get(t.id) } : t));
+    const { placed } = levelResources(interim, auto.result, resources || [], cal, sprints);
+    Object.entries(placed).forEach(([id, dates]) => {
+      if (dates && dates.start) out.set(id, dates.start);
+    });
+  }
+  return out;
+}
