@@ -602,7 +602,8 @@ function cmdPlan(positional, opts) {
     });
   }
 
-  // --reschedule: 「自動スケジューリング実行」相当で全リーフの startDate を CPM 最短へ書き戻す。
+  // --reschedule: 「自動スケジューリング実行」相当で全リーフの startDate を依存関係ベースの
+  // 日程へ書き戻す（平準化OFFなら CPM 最短、ON なら平準化後の配置日。autoScheduleStartDates 参照）。
   // 既定（なし）: ユーザーの編集内容だけを反映し、既存の startDate ピンはそのまま残す。
   const reschedule = !!opts.reschedule;
   const beforeLeveling = !!original.levelingOn;
