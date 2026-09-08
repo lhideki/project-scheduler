@@ -7,7 +7,7 @@ import {
 
 import { toISO, parseISO, buildHolidayMap, makeCalendar, fmtJP } from "./lib/calendar.js";
 import { uid, migrateSprintIds, isGroupId, buildFlatList } from "./lib/taskTree.js";
-import { runCPM, rollupSummaries, levelResources, deriveProjectStart } from "./lib/scheduling.js";
+import { runCPM, rollupSummaries, levelResources, deriveProjectStart, autoScheduleStartDates } from "./lib/scheduling.js";
 import { detectSprintConflicts } from "./lib/sprints.js";
 import {
   downloadJSON, downloadTextFile, copyTextToClipboard, generateMermaidGantt,
@@ -354,22 +354,24 @@ export default function App() {
   // 通常表示時（cpm useMemo）は手入力済みの開始日を固定の起点として扱い、依存関係による
   // 自動的な後ろ倒しをしない。このボタンを押したときだけ、開始日の入力有無に関わらず
   // 純粋な依存関係ベースのCPM結果を計算し、全リーフタスクの開始日にその結果を書き戻す。
-  // リソース平準化の結果（placed）はここでは書き戻さない（表示スケジュールのみが毎レンダー
-  // 再計算で平準化を反映する。恒久的に固定したい場合はバージョンスナップショットを使う）。
+  // リソース平準化がONのときは、平準化後の配置日（＝表示スケジュールと一致する日付）を
+  // 書き戻す。CPMの日付を書き戻すと、その後に着手済みにしたタスクが levelResources で
+  // startDate へピン留めされ、表示が平準化前の位置に戻って見えてしまうため。
   function runScheduling() {
-    const auto = runCPM(tasks, cal, projectStart, sprints, { respectManualPins: false });
+    const startDates = autoScheduleStartDates(
+      tasks, cal, projectStart, sprints, resources, { leveling: levelingOn }
+    );
     const changedIds = new Set();
     setTasks(prev => prev.map(t => {
-      if (isGroupId(tasks, t.id)) return t;
-      const s = auto.result.get(t.id);
-      if (!s || !s.schedStart || s.isSummary) return t;
-      if (t.startDate !== s.schedStart) changedIds.add(t.id);
-      return { ...t, startDate: s.schedStart };
+      if (isGroupId(tasks, t.id) || !startDates.has(t.id)) return t;
+      const nextStart = startDates.get(t.id);
+      if (t.startDate !== nextStart) changedIds.add(t.id);
+      return { ...t, startDate: nextStart };
     }));
     skipHighlightClearRef.current = true;
     setAutoScheduleHighlightIds(changedIds);
     showToast(levelingOn
-      ? "依存関係に基づき開始日を再計算しました（表示はリソース平準化を反映）"
+      ? "依存関係とリソース平準化に基づき開始日を再計算しました"
       : "依存関係に基づき再スケジューリングしました");
   }
 

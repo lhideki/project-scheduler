@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { buildHolidayMap, makeCalendar } from "./calendar.js";
 import {
   runCPM, rollupSummaries, levelResources, dailyLoads, topoOrder, earliestSprintFloor,
-  deriveProjectStart,
+  deriveProjectStart, autoScheduleStartDates,
 } from "./scheduling.js";
 
 // 2024-01-09(火)〜2024-02-09の間は土日以外の非稼働日が無い期間なので、
@@ -179,6 +179,48 @@ describe("levelResources", () => {
     const { warnings } = levelResources(tasks, cpmResult, resources, cal, []);
     expect(warnings.length).toBe(1);
     expect(warnings[0]).toContain("固定期日");
+  });
+});
+
+describe("autoScheduleStartDates", () => {
+  const resources = [{ id: "r1", name: "R1", weeklyCapacity: 5, monthlyCapacity: 20 }];
+
+  it("平準化OFFでは respectManualPins:false の CPM 最短日を返す", () => {
+    const tasks = [
+      { id: "A", name: "A", parentId: null, order: 0, startDate: "2024-01-09", duration: 2, predecessors: [] },
+      { id: "B", name: "B", parentId: null, order: 1, startDate: "2024-01-30", duration: 2, predecessors: [{ id: "A", type: "FS", lag: 0 }] },
+    ];
+    const map = autoScheduleStartDates(tasks, cal, "2024-01-09", [], resources, { leveling: false });
+    expect(map.get("A")).toBe("2024-01-09");
+    expect(map.get("B")).toBe("2024-01-11"); // 手入力の1/30を無視しAの直後へ
+  });
+
+  it("平準化ONでは平準化後の配置日を返す（＝書き戻し後に着手済みにしても表示が動かない）", () => {
+    // r1 が T1・T2 を掛け持ち。CPM 上は両方 1/9 開始だが、平準化で T2 は 1/12 へ。
+    const tasks = [
+      { id: "T1", name: "T1", parentId: null, order: 0, startDate: "2024-01-09", duration: 3, assigneeId: "r1", predecessors: [] },
+      { id: "T2", name: "T2", parentId: null, order: 1, startDate: "2024-01-09", duration: 3, assigneeId: "r1", predecessors: [] },
+    ];
+    const map = autoScheduleStartDates(tasks, cal, "2024-01-09", [], resources, { leveling: true });
+    expect(map.get("T1")).toBe("2024-01-09");
+    expect(map.get("T2")).toBe("2024-01-12");
+
+    // 書き戻し後、T2 を着手済み（progress>0）にしても平準化表示は 1/12 のまま
+    const written = tasks.map(t => ({ ...t, startDate: map.get(t.id) }));
+    const progressed = written.map(t => (t.id === "T2" ? { ...t, progress: 20 } : t));
+    const { result: cpmResult } = runCPM(progressed, cal, "2024-01-09", []);
+    const { placed } = levelResources(progressed, cpmResult, resources, cal, []);
+    expect(placed.T2.start).toBe("2024-01-12");
+  });
+
+  it("グループは対象外", () => {
+    const tasks = [
+      { id: "G", name: "G", parentId: null, order: 0, predecessors: [] },
+      { id: "L", name: "L", parentId: "G", order: 0, startDate: "2024-01-09", duration: 2, predecessors: [] },
+    ];
+    const map = autoScheduleStartDates(tasks, cal, "2024-01-09", [], resources, { leveling: false });
+    expect(map.has("G")).toBe(false);
+    expect(map.get("L")).toBe("2024-01-09");
   });
 });
 

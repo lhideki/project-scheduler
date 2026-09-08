@@ -249,6 +249,24 @@ describe("applyAutoSchedule", () => {
     expect(again.changed).toEqual([]);
   });
 
+  it("leveling:true では平準化後の配置日を書き戻す（着手済みにしても表示が戻らない）", () => {
+    const cal = makeCalendar(buildHolidayMap(2023, 2025));
+    const data = {
+      tasks: [
+        { id: "T1", name: "T1", parentId: null, order: 0, startDate: "2024-01-09", duration: 3, assigneeId: "r1", predecessors: [] },
+        { id: "T2", name: "T2", parentId: null, order: 1, startDate: "2024-01-09", duration: 3, assigneeId: "r1", predecessors: [] },
+      ],
+      resources: [{ id: "r1", name: "R1", weeklyCapacity: 5, monthlyCapacity: 20 }],
+      sprints: [], versions: [], levelingOn: true, calendarExceptions: [],
+    };
+    const { tasks } = applyAutoSchedule(data, "2024-01-09", cal, { leveling: true });
+    expect(tasks.find(t => t.id === "T2").startDate).toBe("2024-01-12");
+
+    // leveling を渡さなければ従来通り CPM 最短（1/9）が書き戻る
+    const plain = applyAutoSchedule(data, "2024-01-09", cal);
+    expect(plain.tasks.find(t => t.id === "T2").startDate).toBe("2024-01-09");
+  });
+
   it("固定マイルストーンも App.jsx runScheduling と同じく書き戻す（startDate が fixedDate 由来になる）", () => {
     // App のボタンと結果をずらさないため、CLI 側でも固定マイルストーンを特別扱いしない。
     const data = seedProject();
