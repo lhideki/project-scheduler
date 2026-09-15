@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef, useReducer, useCallback } 
 import {
   Play, X, AlertTriangle, Check, Clock, GitBranch, Users, Table2,
   History, Download, Upload, CalendarRange, CalendarOff, Copy, RefreshCw, Link,
-  Share2, Camera,
+  Share2, Camera, Image as ImageIcon,
 } from "lucide-react";
 
 import { toISO, parseISO, buildHolidayMap, makeCalendar, fmtJP } from "./lib/calendar.js";
@@ -115,6 +115,7 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const fileInputRef = useRef(null);
   const linkedFileInputRef = useRef(null);
+  const ganttViewRef = useRef(null);
   const linkedFileHandleRef = useRef(null);
   const [linkedProjectState, setLinkedProjectState] = useState(() => (
     linkedProjectKey
@@ -456,6 +457,20 @@ export default function App() {
       showToast("クリップボードへのコピーに失敗しました");
     }
   }
+  async function copyGanttPng() {
+    if (!ganttViewRef.current) {
+      showToast("WBS / ガント画面を表示してから実行してください");
+      return;
+    }
+    try {
+      const result = await ganttViewRef.current.copyVisiblePng();
+      showToast(result === "copied"
+        ? "ガントチャート（表示範囲）をPNGとしてクリップボードにコピーしました"
+        : "クリップボードへの画像コピーに対応していないため、PNGファイルをダウンロードしました");
+    } catch (e) {
+      showToast("PNGのコピーに失敗しました: " + e.message);
+    }
+  }
   function triggerImport() { fileInputRef.current && fileInputRef.current.click(); }
   async function handleImportFile(e) {
     const file = e.target.files && e.target.files[0];
@@ -528,6 +543,9 @@ export default function App() {
             { icon: Download, label: "JSON書き出し", onClick: exportProject },
             { icon: Share2, label: "共有用HTML書き出し", onClick: exportSharedHtml },
             { icon: Copy, label: "Mermaidコピー", onClick: copyMermaidGantt },
+            ...(tab === "gantt"
+              ? [{ icon: ImageIcon, label: "PNGとしてコピー（表示範囲）", onClick: copyGanttPng }]
+              : []),
           ]}
         />
         <div className="w-px h-5 bg-slate-200 mx-1" />
@@ -650,6 +668,7 @@ export default function App() {
       <div className="flex-1 min-h-0">
         {tab === "gantt" && (
           <WBSGanttView
+            ref={ganttViewRef}
             tasks={tasks} setTasks={setTasks} resources={resources} sprints={sprints} cal={cal}
             schedule={schedule} projectEnd={projectEnd}
             selectedId={selectedId} setSelectedId={setSelectedId}

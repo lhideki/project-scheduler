@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef, useImperativeHandle } from "react";
 import {
   Plus, Trash2, ChevronRight, ChevronDown, Save, ZoomIn, ZoomOut,
   AlertTriangle, ArrowLeftRight, Info, Diamond, GripVertical, Zap, Flame,
@@ -8,6 +8,7 @@ import { toISO, parseISO, fmtJP, cal_addDaysISO, isWeekend } from "../lib/calend
 import { uid, buildFlatList, allDescendantIds } from "../lib/taskTree.js";
 import { sprintColorForId } from "../lib/sprints.js";
 import { copyTextToClipboard } from "../lib/exportUtils.js";
+import { copyVisibleGanttAsPng, escapeXmlText } from "../dom/ganttPngExport.js";
 import {
   WBS_EDITABLE_COLUMNS, taskCellText, taskCellPatch, taskRowText, taskRowPatch, copiedTaskRowPatch,
 } from "../lib/wbsEditing.js";
@@ -28,7 +29,7 @@ import { TaskDetailModal } from "./TaskDetailModal.jsx";
    8. WBS + ガントチャート ビュー
    ========================================================================================= */
 
-export function WBSGanttView({
+export const WBSGanttView = React.forwardRef(function WBSGanttView({
   tasks, setTasks, resources, sprints, cal, schedule, projectEnd, selectedId, setSelectedId,
   collapsed, setCollapsed, dayWidth, setDayWidth, requestConfirm,
   colWidths, setColWidths,
@@ -40,7 +41,7 @@ export function WBSGanttView({
   onUndo,
   onRedo,
   onNotify,
-}) {
+}, ref) {
   const flat = useMemo(() => buildFlatList(tasks, collapsed), [tasks, collapsed]);
   // WBS表の列幅合計（左ペインの実表示幅）。列幅を変更するとここも連動して再計算される。
   const wbsTotalWidth = useMemo(() => Object.values(colWidths).reduce((a, b) => a + b, 0), [colWidths]);
@@ -116,11 +117,13 @@ export function WBSGanttView({
   const leftRef = useRef(null);
   const rightRef = useRef(null);
   const syncing = useRef(false);
+
   const rowInputRefs = useRef(new Map());
   const cellRefs = useRef(new Map());
   const activeSelectionRef = useRef(null); // { kind: "cell", taskId, column } | { kind: "row", taskId }
   const clipboardRef = useRef(null); // アプリ内コピー時は型付きデータも保持する
   const [hasClipboard, setHasClipboard] = useState(false);
+  const bgSvgRef = useRef(null);
   const barsSvgRef = useRef(null);
   const pendingFocusIdRef = useRef(null);
   function isComposingEvent(e) {
@@ -687,6 +690,61 @@ export function WBSGanttView({
       .filter(Boolean);
   }, [sprints, minDate, dayWidth, chartWidth]);
 
+  // PNGコピー用に日付ヘッダー（スプリント帯・日付軸）をSVGネイティブ要素だけで組み立てる。
+  // 画面上のヘッダーはTailwind CSSクラスのHTML要素で描画しているが、そちらをそのままPNG化に
+  // 使うと（foreignObject経由になるため）Chromeがcanvasを「tainted」として扱いエクスポートを
+  // 拒否してしまうため、見た目を再現する専用の断片をここで作る（src/dom/ganttPngExport.js 参照）。
+  function buildHeaderSvgMarkup() {
+    const bandH = 16, majorH = 20;
+    let clipDefs = "";
+    let clipSeq = 0;
+    // 画面上のヘッダーは overflow-hidden / truncate でラベルを帯・目盛りの幅に収めているため、
+    // PNG側もclipPathで同じ範囲にクリップし、はみ出したテキストが隣へ重ならないようにする。
+    const clipRect = (x, y, w, h) => {
+      const id = `png-hdr-clip-${clipSeq++}`;
+      clipDefs += `<clipPath id="${id}"><rect x="${x}" y="${y}" width="${Math.max(0, w)}" height="${h}" /></clipPath>`;
+      return id;
+    };
+    let s = `<rect x="0" y="0" width="${chartWidth}" height="${GANTT_HEADER_H}" fill="#F8FAFC" />`;
+    sprintBands.forEach(({ sprint, x, w }) => {
+      const c = sprintColorForId(sprint.id);
+      const label = sprint.theme ? `${sprint.name}・${sprint.theme}` : sprint.name;
+      const clipId = clipRect(x, 0, w, bandH);
+      s += `<rect x="${x}" y="0" width="${w}" height="${bandH}" fill="${c.band}" />`;
+      s += `<text clip-path="url(#${clipId})" x="${x + w / 2}" y="${bandH - 5}" font-size="9" font-weight="500" text-anchor="middle" fill="${c.text}">${escapeXmlText(label)}</text>`;
+    });
+    s += `<line x1="0" y1="${bandH}" x2="${chartWidth}" y2="${bandH}" stroke="#E2E8F0" />`;
+    axis.major.forEach(b => {
+      s += `<line x1="${b.x}" y1="${bandH}" x2="${b.x}" y2="${bandH + majorH}" stroke="#E2E8F0" />`;
+      const clipId = clipRect(b.x, bandH, b.w, majorH);
+      s += `<text clip-path="url(#${clipId})" x="${b.x + 4}" y="${bandH + majorH - 6}" font-size="10" fill="#64748B">${escapeXmlText(b.label)}</text>`;
+    });
+    s += `<line x1="0" y1="${bandH + majorH}" x2="${chartWidth}" y2="${bandH + majorH}" stroke="#E2E8F0" />`;
+    axis.minor.forEach(m => {
+      const color = m.muted ? "#F87171" : "#94A3B8";
+      if (tier !== "day" && m.x > 0) {
+        s += `<line x1="${m.x}" y1="${bandH + majorH}" x2="${m.x}" y2="${GANTT_HEADER_H}" stroke="#E2E8F0" />`;
+      }
+      const textX = tier === "day" ? m.x + m.w / 2 : m.x + 4;
+      const anchor = tier === "day" ? "middle" : "start";
+      const clipId = clipRect(m.x, bandH + majorH, m.w, GANTT_HEADER_H - (bandH + majorH));
+      s += `<text clip-path="url(#${clipId})" x="${textX}" y="${bandH + majorH + 10}" font-size="9" text-anchor="${anchor}" fill="${color}">${escapeXmlText(m.label)}</text>`;
+      if (m.sub) s += `<text clip-path="url(#${clipId})" x="${textX}" y="${bandH + majorH + 20}" font-size="9" text-anchor="${anchor}" fill="${color}">${escapeXmlText(m.sub)}</text>`;
+    });
+    return `<defs>${clipDefs}</defs>` + s;
+  }
+
+  useImperativeHandle(ref, () => ({
+    copyVisiblePng: () => copyVisibleGanttAsPng({
+      container: rightRef.current,
+      bgSvg: bgSvgRef.current,
+      barsSvg: barsSvgRef.current,
+      headerMarkup: buildHeaderSvgMarkup(),
+      chartWidth,
+      headerHeight: GANTT_HEADER_H,
+    }),
+  }));
+
   return (
     <div className="flex flex-col h-full" onKeyDown={handleViewKeyDown}>
       <div className="flex items-center gap-2 px-3 py-2 border-b border-slate-200 bg-white flex-wrap">
@@ -1115,7 +1173,7 @@ export function WBSGanttView({
             </div>
             <div className="relative">
               {/* 背景（スプリント帯・週末・祝日） */}
-              <svg width={chartWidth} height={bodyHeight} style={{ position: "absolute", top: 0, left: 0 }}>
+              <svg ref={bgSvgRef} width={chartWidth} height={bodyHeight} style={{ position: "absolute", top: 0, left: 0 }}>
                 {sprintBands.map(({ sprint, x, w }) => (
                   <rect key={sprint.id} x={x} y={0} width={w} height={bodyHeight} fill={sprintColorForId(sprint.id).band} opacity={0.45} />
                 ))}
@@ -1243,4 +1301,4 @@ export function WBSGanttView({
       )}
     </div>
   );
-}
+});
