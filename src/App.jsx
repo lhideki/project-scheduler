@@ -25,6 +25,7 @@ import {
 } from "./dom/linkedProjectFile.js";
 import { DEFAULT_WBS_COLS } from "./constants.js";
 import { IconBtn } from "./components/IconBtn.jsx";
+import { ExportMenu } from "./components/ExportMenu.jsx";
 import { Tab } from "./components/Tab.jsx";
 import { WBSGanttView } from "./components/WBSGanttView.jsx";
 import { NetworkView } from "./components/NetworkView.jsx";
@@ -522,9 +523,13 @@ export default function App() {
           />
         )}
         <IconBtn icon={Upload} label="読み込み" onClick={triggerImport} small />
-        <IconBtn icon={Download} label="書き出し" onClick={exportProject} small />
-        <IconBtn icon={Share2} label="共有用HTML" onClick={exportSharedHtml} small />
-        <IconBtn icon={Copy} label="Mermaidコピー" onClick={copyMermaidGantt} small />
+        <ExportMenu
+          items={[
+            { icon: Download, label: "JSON書き出し", onClick: exportProject },
+            { icon: Share2, label: "共有用HTML書き出し", onClick: exportSharedHtml },
+            { icon: Copy, label: "Mermaidコピー", onClick: copyMermaidGantt },
+          ]}
+        />
         <div className="w-px h-5 bg-slate-200 mx-1" />
         <label className="flex items-center gap-1.5 text-xs text-slate-500 mr-1">
           <input type="checkbox" checked={levelingOn} onChange={e => setLevelingOn(e.target.checked)} />
