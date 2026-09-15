@@ -696,17 +696,28 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
   // 拒否してしまうため、見た目を再現する専用の断片をここで作る（src/dom/ganttPngExport.js 参照）。
   function buildHeaderSvgMarkup() {
     const bandH = 16, majorH = 20;
+    let clipDefs = "";
+    let clipSeq = 0;
+    // 画面上のヘッダーは overflow-hidden / truncate でラベルを帯・目盛りの幅に収めているため、
+    // PNG側もclipPathで同じ範囲にクリップし、はみ出したテキストが隣へ重ならないようにする。
+    const clipRect = (x, y, w, h) => {
+      const id = `png-hdr-clip-${clipSeq++}`;
+      clipDefs += `<clipPath id="${id}"><rect x="${x}" y="${y}" width="${Math.max(0, w)}" height="${h}" /></clipPath>`;
+      return id;
+    };
     let s = `<rect x="0" y="0" width="${chartWidth}" height="${GANTT_HEADER_H}" fill="#F8FAFC" />`;
     sprintBands.forEach(({ sprint, x, w }) => {
       const c = sprintColorForId(sprint.id);
       const label = sprint.theme ? `${sprint.name}・${sprint.theme}` : sprint.name;
+      const clipId = clipRect(x, 0, w, bandH);
       s += `<rect x="${x}" y="0" width="${w}" height="${bandH}" fill="${c.band}" />`;
-      s += `<text x="${x + w / 2}" y="${bandH - 5}" font-size="9" font-weight="500" text-anchor="middle" fill="${c.text}">${escapeXmlText(label)}</text>`;
+      s += `<text clip-path="url(#${clipId})" x="${x + w / 2}" y="${bandH - 5}" font-size="9" font-weight="500" text-anchor="middle" fill="${c.text}">${escapeXmlText(label)}</text>`;
     });
     s += `<line x1="0" y1="${bandH}" x2="${chartWidth}" y2="${bandH}" stroke="#E2E8F0" />`;
     axis.major.forEach(b => {
       s += `<line x1="${b.x}" y1="${bandH}" x2="${b.x}" y2="${bandH + majorH}" stroke="#E2E8F0" />`;
-      s += `<text x="${b.x + 4}" y="${bandH + majorH - 6}" font-size="10" fill="#64748B">${escapeXmlText(b.label)}</text>`;
+      const clipId = clipRect(b.x, bandH, b.w, majorH);
+      s += `<text clip-path="url(#${clipId})" x="${b.x + 4}" y="${bandH + majorH - 6}" font-size="10" fill="#64748B">${escapeXmlText(b.label)}</text>`;
     });
     s += `<line x1="0" y1="${bandH + majorH}" x2="${chartWidth}" y2="${bandH + majorH}" stroke="#E2E8F0" />`;
     axis.minor.forEach(m => {
@@ -716,10 +727,11 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
       }
       const textX = tier === "day" ? m.x + m.w / 2 : m.x + 4;
       const anchor = tier === "day" ? "middle" : "start";
-      s += `<text x="${textX}" y="${bandH + majorH + 10}" font-size="9" text-anchor="${anchor}" fill="${color}">${escapeXmlText(m.label)}</text>`;
-      if (m.sub) s += `<text x="${textX}" y="${bandH + majorH + 20}" font-size="9" text-anchor="${anchor}" fill="${color}">${escapeXmlText(m.sub)}</text>`;
+      const clipId = clipRect(m.x, bandH + majorH, m.w, GANTT_HEADER_H - (bandH + majorH));
+      s += `<text clip-path="url(#${clipId})" x="${textX}" y="${bandH + majorH + 10}" font-size="9" text-anchor="${anchor}" fill="${color}">${escapeXmlText(m.label)}</text>`;
+      if (m.sub) s += `<text clip-path="url(#${clipId})" x="${textX}" y="${bandH + majorH + 20}" font-size="9" text-anchor="${anchor}" fill="${color}">${escapeXmlText(m.sub)}</text>`;
     });
-    return s;
+    return `<defs>${clipDefs}</defs>` + s;
   }
 
   useImperativeHandle(ref, () => ({

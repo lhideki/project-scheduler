@@ -87,8 +87,12 @@ export async function copyVisibleGanttAsPng({ container, bgSvg, barsSvg, headerM
     });
 
     if (window.isSecureContext && navigator.clipboard?.write && typeof window.ClipboardItem === "function") {
-      await navigator.clipboard.write([new window.ClipboardItem({ "image/png": pngBlob })]);
-      return "copied";
+      try {
+        await navigator.clipboard.write([new window.ClipboardItem({ "image/png": pngBlob })]);
+        return "copied";
+      } catch {
+        // 権限拒否等、APIが存在していてもwrite()自体が失敗するケースはダウンロードへフォールスルーする。
+      }
     }
 
     downloadBlob(`gantt_${new Date().toISOString().slice(0, 10)}.png`, pngBlob);
