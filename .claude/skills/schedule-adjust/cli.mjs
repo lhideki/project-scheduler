@@ -633,8 +633,14 @@ function levelResources(tasks, cpmResult, resources, cal, sprints) {
         start = cal.shift(start, 1);
       }
       if (!placed[id]) {
-        const finish = cal.endFromStart(start, task.duration);
-        placed[id] = { start, finish };
+        start = cal.snapForward(minStart);
+        placed[id] = { start, finish: cal.endFromStart(start, task.duration) };
+        commit(task.assigneeId, start, task.duration);
+        const resource = resById[task.assigneeId];
+        const limits = ["\u65E5\u6B211\u4EBA\u65E5"];
+        if (resource.weeklyCapacity) limits.push(`\u9031\u6B21${resource.weeklyCapacity}\u4EBA\u65E5`);
+        if (resource.monthlyCapacity) limits.push(`\u6708\u6B21${resource.monthlyCapacity}\u4EBA\u65E5`);
+        warnings.push(`\u300C${task.name}\u300D\uFF08\u62C5\u5F53\u8005: ${resource.name}\u3001\u5DE5\u6570: ${task.duration}\u4EBA\u65E5\uFF09\u306F\u3001${limits.join("\u30FB")}\u306E\u7A3C\u50CD\u4E0A\u9650\u5185\u3067\u914D\u7F6E\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F\uFF08\u63A2\u7D22\u4E0A\u9650: 2,000\u7A3C\u50CD\u65E5\uFF09\u3002\u958B\u59CB\u65E5\u3092${fmtJP(start)}\u3068\u3057\u3066\u3044\u307E\u3059\u304C\u3001\u7A3C\u50CD\u4E0A\u9650\u3092\u8D85\u904E\u3057\u3066\u3044\u307E\u3059\u3002\u30BF\u30B9\u30AF\u306E\u5206\u5272\u307E\u305F\u306F\u7A3C\u50CD\u4E0A\u9650\u306E\u898B\u76F4\u3057\u304C\u5FC5\u8981\u3067\u3059\u3002`);
       }
     } else {
       const finish = task.duration <= 0 ? start : cal.endFromStart(start, task.duration);
