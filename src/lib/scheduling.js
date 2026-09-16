@@ -363,6 +363,8 @@ export function rollupSummaries(tasks, result) {
  *  タスクに手入力の開始日（startDate）がある場合は、依存関係の有無に関わらず
  *  「後ろ倒しのみの下限（フロア）」として適用する（前倒しはしない）。
  *  進捗率が入力済み（着手済み）のタスクは平準化の対象外とし、現在の開始日に固定する。
+ *  探索範囲内に配置できない場合は、依存関係等から求めた最短開始日に戻して負荷を登録し、
+ *  稼働上限を満たしていないことを警告する（探索終端の日付を確定しない）。
  * @param {import("./taskTree.js").Task[]} tasks
  * @param {Map<string, ScheduleEntry>} cpmResult - runCPM の計算結果（フロートの優先度付けに使う）
  * @param {import("./taskTree.js").Resource[]} resources
@@ -533,7 +535,19 @@ export function levelResources(tasks, cpmResult, resources, cal, sprints) {
         }
         start = cal.shift(start, 1);
       }
-      if (!placed[id]) { const finish = cal.endFromStart(start, task.duration); placed[id] = { start, finish }; }
+      if (!placed[id]) {
+        // 探索失敗は遠い未来への配置成功ではない。探索前の候補日に戻すことで、
+        // 自動実行の書き戻し・表示の再計算のたびにさらに先送りされることも防ぐ。
+        start = cal.snapForward(minStart);
+        placed[id] = { start, finish: cal.endFromStart(start, task.duration) };
+        // 上限超過のままでも実際に表示する負荷を登録し、他タスクの計算から消さない。
+        commit(task.assigneeId, start, task.duration);
+        const resource = resById[task.assigneeId];
+        const limits = ["日次1人日"];
+        if (resource.weeklyCapacity) limits.push(`週次${resource.weeklyCapacity}人日`);
+        if (resource.monthlyCapacity) limits.push(`月次${resource.monthlyCapacity}人日`);
+        warnings.push(`「${task.name}」（担当者: ${resource.name}、工数: ${task.duration}人日）は、${limits.join("・")}の稼働上限内で配置できませんでした（探索上限: 2,000稼働日）。開始日を${fmtJP(start)}としていますが、稼働上限を超過しています。タスクの分割または稼働上限の見直しが必要です。`);
+      }
     } else {
       const finish = task.duration <= 0 ? start : cal.endFromStart(start, task.duration);
       placed[id] = { start, finish };

@@ -234,6 +234,24 @@ describe("buildVersionSnapshot", () => {
 });
 
 describe("applyAutoSchedule", () => {
+  it.each([[2, 20], [5, 3]])("配置失敗後の書き戻しと表示再計算で日付が先送りされ続けない（週%s・月%s）", (weeklyCapacity, monthlyCapacity) => {
+    let data = {
+      tasks: [{ id: "T", name: "大きなタスク", parentId: null, order: 0, startDate: "2026-09-16", duration: 10, assigneeId: "r1", progress: 0, predecessors: [] }],
+      resources: [{ id: "r1", name: "担当者1", weeklyCapacity, monthlyCapacity }],
+      sprints: [], calendarExceptions: [], levelingOn: true,
+    };
+    for (let i = 0; i < 3; i++) {
+      const before = computeSchedule(data, { leveling: true });
+      const applied = applyAutoSchedule(data, before.projectStart, before.cal, { leveling: true });
+      expect(applied.tasks[0].startDate).toBe("2026-09-16");
+      data = { ...data, tasks: applied.tasks };
+      const after = computeSchedule(data, { leveling: true });
+      expect(after.schedule.get("T").schedStart).toBe("2026-09-16");
+      expect(after.levelWarnings).toHaveLength(1);
+      expect(after.levelWarnings[0]).toContain("稼働上限を超過");
+    }
+  });
+
   it("固定マイルストーン以外のリーフの startDate を CPM 最短へ書き戻す（グループは対象外）", () => {
     const data = seedProject();
     const projectStart = data.tasks.filter(t => t.startDate).map(t => t.startDate).reduce((a, b) => (a < b ? a : b));

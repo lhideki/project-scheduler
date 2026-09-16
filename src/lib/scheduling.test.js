@@ -113,6 +113,63 @@ describe("rollupSummaries", () => {
 });
 
 describe("levelResources", () => {
+  it.each([
+    ["週次", 2, 20],
+    ["月次", 5, 3],
+  ])("%s上限内に配置できない場合は探索開始日に戻して警告する", (label, weeklyCapacity, monthlyCapacity) => {
+    const tasks = [
+      { id: "T", name: "大きなタスク", parentId: null, order: 0, startDate: "2024-01-09", duration: 10, assigneeId: "r1", predecessors: [] },
+    ];
+    const resources = [{ id: "r1", name: "担当者1", weeklyCapacity, monthlyCapacity }];
+    const { result } = runCPM(tasks, cal, "2024-01-09", []);
+    const { placed, warnings } = levelResources(tasks, result, resources, cal, []);
+    expect(placed.T).toEqual({ start: "2024-01-09", finish: "2024-01-22" });
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("大きなタスク");
+    expect(warnings[0]).toContain("担当者1");
+    expect(warnings[0]).toContain(label);
+    expect(warnings[0]).toContain("稼働上限を超過");
+  });
+
+  it("配置失敗したタスクの負荷と終了日を、他タスクの平準化・依存関係に反映する", () => {
+    const tasks = [
+      { id: "A", name: "A", parentId: null, order: 0, startDate: "2024-01-09", duration: 10, assigneeId: "r1", predecessors: [] },
+      { id: "B", name: "B", parentId: null, order: 1, startDate: "2024-01-09", duration: 1, assigneeId: "r1", predecessors: [] },
+      { id: "C", name: "C", parentId: null, order: 2, duration: 1, predecessors: [{ id: "A", type: "FS", lag: 0 }] },
+    ];
+    const resources = [{ id: "r1", name: "R1", weeklyCapacity: 2, monthlyCapacity: 20 }];
+    const { result } = runCPM(tasks, cal, "2024-01-09", []);
+    const { placed, warnings } = levelResources(tasks, result, resources, cal, []);
+    expect(placed.A.finish).toBe("2024-01-22");
+    expect(placed.B.start).toBe("2024-01-23");
+    expect(placed.C.start).toBe("2024-01-23");
+    expect(warnings).toHaveLength(1);
+  });
+
+  it("配置失敗時も依存関係・手入力開始日・スプリントの下限を守る", () => {
+    const tasks = [
+      { id: "A", name: "A", parentId: null, order: 0, startDate: "2024-01-09", duration: 5, predecessors: [] },
+      { id: "B", name: "B", parentId: null, order: 1, startDate: "2024-01-18", duration: 10, assigneeId: "r1", sprintIds: ["s"], predecessors: [{ id: "A", type: "FS", lag: 0 }] },
+    ];
+    const resources = [{ id: "r1", name: "R1", weeklyCapacity: 2, monthlyCapacity: 20 }];
+    const sprints = [{ id: "s", startDate: "2024-01-22", endDate: "2024-02-09" }];
+    const { result } = runCPM(tasks, cal, "2024-01-09", sprints);
+    const { placed, warnings } = levelResources(tasks, result, resources, cal, sprints);
+    expect(placed.B.start).toBe("2024-01-22");
+    expect(warnings).toHaveLength(1);
+  });
+
+  it("総工数が週次上限を超えていても週をまたいで収まるタスクは配置できる", () => {
+    const tasks = [
+      { id: "T", name: "T", parentId: null, order: 0, startDate: "2024-01-09", duration: 4, assigneeId: "r1", predecessors: [] },
+    ];
+    const resources = [{ id: "r1", name: "R1", weeklyCapacity: 2, monthlyCapacity: 20 }];
+    const { result } = runCPM(tasks, cal, "2024-01-09", []);
+    const { placed, warnings } = levelResources(tasks, result, resources, cal, []);
+    expect(placed.T).toEqual({ start: "2024-01-11", finish: "2024-01-16" });
+    expect(warnings).toEqual([]);
+  });
+
   it("同じ担当者・同じ希望日のタスクは1日1件までに直列化される", () => {
     const tasks = [
       { id: "T1", name: "T1", parentId: null, order: 0, startDate: "2024-01-09", duration: 3, assigneeId: "r1", predecessors: [] },
