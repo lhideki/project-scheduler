@@ -407,6 +407,9 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
     if (!clipboardRef.current) return;
     applyClipboardPayload(clipboardRef.current, currentClipboardSelection());
   }
+  // WBS表のセルやタスク詳細モーダルなど、タスク編集用の入力欄にフォーカスがある間のUndo/Redo。
+  // stopPropagationでApp.jsx側のwindowレベルハンドラへは伝播させない（App.jsx側は逆に、
+  // タスク編集用ではない入力欄＝isEditableTargetの場合は素通りしてネイティブUndoに譲る）。
   function handleViewKeyDown(e) {
     if (isComposingEvent(e)) return;
     const modifier = e.metaKey || e.ctrlKey;
@@ -414,12 +417,15 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
     const key = e.key.toLowerCase();
     if (key === "z" && e.shiftKey && canRedo) {
       e.preventDefault();
+      e.stopPropagation();
       onRedo?.();
     } else if (key === "z" && canUndo) {
       e.preventDefault();
+      e.stopPropagation();
       onUndo?.();
     } else if (key === "y" && canRedo) {
       e.preventDefault();
+      e.stopPropagation();
       onRedo?.();
     }
   }
