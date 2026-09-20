@@ -94,6 +94,32 @@ export default function App() {
   const resetTasks = useCallback(value => dispatchTasks({ type: "reset", value }), []);
   const undoTasks = useCallback(() => dispatchTasks({ type: "undo" }), []);
   const redoTasks = useCallback(() => dispatchTasks({ type: "redo" }), []);
+  // Undo/RedoのキーボードショートカットはWBS/ガント画面内の要素にフォーカスがある場合しか
+  // 効かないとヘッダーの「自動スケジューリング実行」ボタン操作直後などに機能しないため、
+  // window全体で受け付ける（IME変換中は無視する）。
+  useEffect(() => {
+    function handleUndoRedoKeyDown(e) {
+      if (e.isComposing || e.keyCode === 229) return;
+      const modifier = e.metaKey || e.ctrlKey;
+      if (!modifier || e.altKey) return;
+      const key = e.key.toLowerCase();
+      if (key === "z" && e.shiftKey) {
+        if (!taskHistory.future.length) return;
+        e.preventDefault();
+        redoTasks();
+      } else if (key === "z") {
+        if (!taskHistory.past.length) return;
+        e.preventDefault();
+        undoTasks();
+      } else if (key === "y") {
+        if (!taskHistory.future.length) return;
+        e.preventDefault();
+        redoTasks();
+      }
+    }
+    window.addEventListener("keydown", handleUndoRedoKeyDown);
+    return () => window.removeEventListener("keydown", handleUndoRedoKeyDown);
+  }, [taskHistory.past.length, taskHistory.future.length, undoTasks, redoTasks]);
   const [resources, setResources] = useState(initialProject.resources);
   const [sprints, setSprints] = useState(initialProject.sprints);
   const [calendarExceptions, setCalendarExceptions] = useState(initialProject.calendarExceptions);

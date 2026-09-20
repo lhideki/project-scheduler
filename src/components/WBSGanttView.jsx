@@ -407,23 +407,6 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
     if (!clipboardRef.current) return;
     applyClipboardPayload(clipboardRef.current, currentClipboardSelection());
   }
-  function handleViewKeyDown(e) {
-    if (isComposingEvent(e)) return;
-    const modifier = e.metaKey || e.ctrlKey;
-    if (!modifier || e.altKey) return;
-    const key = e.key.toLowerCase();
-    if (key === "z" && e.shiftKey && canRedo) {
-      e.preventDefault();
-      onRedo?.();
-    } else if (key === "z" && canUndo) {
-      e.preventDefault();
-      onUndo?.();
-    } else if (key === "y" && canRedo) {
-      e.preventDefault();
-      onRedo?.();
-    }
-  }
-
   // ドラッグ&ドロップによる行の入れ替え。order/parentId のみを変更し、predecessors（依存関係）は
   // タスクIDで参照されているため一切変更しない＝どの位置に移動しても依存関係は自動的に維持される。
   const [rowDrag, setRowDrag] = useState(null); // { dragId, insertIndex }
@@ -746,7 +729,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
   }));
 
   return (
-    <div className="flex flex-col h-full" onKeyDown={handleViewKeyDown}>
+    <div className="flex flex-col h-full">
       <div className="flex items-center gap-2 px-3 py-2 border-b border-slate-200 bg-white flex-wrap">
         <IconBtn icon={Plus} label="タスク" onClick={() => addTask(false)} small />
         <IconBtn icon={Diamond} label="マイルストーン" onClick={() => addTask(true)} small />
