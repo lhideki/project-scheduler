@@ -96,12 +96,22 @@ export default function App() {
   const redoTasks = useCallback(() => dispatchTasks({ type: "redo" }), []);
   // Undo/RedoのキーボードショートカットはWBS/ガント画面内の要素にフォーカスがある場合しか
   // 効かないとヘッダーの「自動スケジューリング実行」ボタン操作直後などに機能しないため、
-  // window全体で受け付ける（IME変換中は無視する）。
+  // window全体で受け付ける（IME変換中は無視する）。ただし、タスク編集用（WBS表のセル・
+  // タスク詳細モーダル）以外のテキスト入力（リソース名・スプリント名・カレンダー例外・
+  // バージョン名等、taskHistoryの対象外の state を編集するフォーム）にフォーカスがある間は
+  // ブラウザのネイティブUndoを奪わないよう素通りする。タスク編集用の入力欄側は
+  // WBSGanttView側のローカルハンドラ（stopPropagationあり）が先に処理する。
   useEffect(() => {
+    function isEditableTarget(el) {
+      if (!el) return false;
+      const tag = el.tagName;
+      return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable;
+    }
     function handleUndoRedoKeyDown(e) {
       if (e.isComposing || e.keyCode === 229) return;
       const modifier = e.metaKey || e.ctrlKey;
       if (!modifier || e.altKey) return;
+      if (isEditableTarget(e.target)) return;
       const key = e.key.toLowerCase();
       if (key === "z" && e.shiftKey) {
         if (!taskHistory.future.length) return;
