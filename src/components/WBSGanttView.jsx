@@ -301,8 +301,20 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
     return () => { cancelAnimationFrame(raf); ro.disconnect(); };
   }, []);
 
-  const onScrollLeft = () => { if (syncing.current) return; syncing.current = true; rightRef.current.scrollTop = leftRef.current.scrollTop; syncing.current = false; };
-  const onScrollRight = () => { if (syncing.current) return; syncing.current = true; leftRef.current.scrollTop = rightRef.current.scrollTop; syncing.current = false; };
+  const onScrollLeft = () => {
+    hideBarTooltip();
+    if (syncing.current) return;
+    syncing.current = true;
+    rightRef.current.scrollTop = leftRef.current.scrollTop;
+    syncing.current = false;
+  };
+  const onScrollRight = () => {
+    hideBarTooltip();
+    if (syncing.current) return;
+    syncing.current = true;
+    leftRef.current.scrollTop = rightRef.current.scrollTop;
+    syncing.current = false;
+  };
 
   // ガントチャートのバー右端のハンドルをドラッグして依存関係(FS)を作成する。
   // ネットワーク図のノードドラッグと同じくポインタキャプチャ＋windowフォールバックで、
