@@ -220,3 +220,34 @@ export function fmtMD(dateStr) {
   return `${m}/${d}`;
 }
 export function cal_addDaysISO(iso, n) { const d = parseISO(iso); d.setUTCDate(d.getUTCDate() + n); return toISO(d); }
+
+/**
+ * 稼働日カレンダー cal 上で、[startISO, finishISO]（両端含む）の範囲に含まれる非稼働日を、
+ * 連続する日単位でまとめたセグメント配列として返す。ガントチャートのタスクバー内の
+ * 非稼働日網掛け表示で使う（土日・祝日・休日指定・稼働日指定はすべて cal.isWorkdayStr に委譲）。
+ * @param {Calendar} cal
+ * @param {string} startISO
+ * @param {string} finishISO
+ * @returns {{start: string, end: string}[]} - 各セグメントは非稼働日が連続する範囲（両端含む）
+ */
+export function nonWorkdaySegments(cal, startISO, finishISO) {
+  const segments = [];
+  if (!startISO || !finishISO || startISO > finishISO) return segments;
+  let segStart = null;
+  let prevIso = null;
+  let d = parseISO(startISO);
+  const end = parseISO(finishISO);
+  while (d <= end) {
+    const iso = toISO(d);
+    if (!cal.isWorkdayStr(iso)) {
+      if (segStart === null) segStart = iso;
+    } else if (segStart !== null) {
+      segments.push({ start: segStart, end: prevIso });
+      segStart = null;
+    }
+    prevIso = iso;
+    d = new Date(d.getTime() + 86400000);
+  }
+  if (segStart !== null) segments.push({ start: segStart, end: prevIso });
+  return segments;
+}

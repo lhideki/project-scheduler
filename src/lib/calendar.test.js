@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   buildHolidayMap, makeCalendar, weekKey, monthKey, fmtJP, fmtMD, cal_addDaysISO,
-  isWeekend, isWeekendStr, normalizeCalendarExceptions, parseISO,
+  isWeekend, isWeekendStr, normalizeCalendarExceptions, parseISO, nonWorkdaySegments,
 } from "./calendar.js";
 
 describe("isWeekend / isWeekendStr", () => {
@@ -182,5 +182,45 @@ describe("日付フォーマット・週/月キー", () => {
   it("cal_addDaysISOは暦日ベースでn日シフトする（稼働日は考慮しない）", () => {
     expect(cal_addDaysISO("2024-01-09", 5)).toBe("2024-01-14");
     expect(cal_addDaysISO("2024-01-09", -5)).toBe("2024-01-04");
+  });
+});
+
+describe("nonWorkdaySegments", () => {
+  const cal = makeCalendar(buildHolidayMap(2024, 2026));
+
+  it("範囲内の週末・祝日を連続区間へまとめる", () => {
+    // 2024-01-05(金)〜01-09(火): 01-06(土)〜01-08(月・成人の日)が連続する非稼働日
+    expect(nonWorkdaySegments(cal, "2024-01-05", "2024-01-09")).toEqual([
+      { start: "2024-01-06", end: "2024-01-08" },
+    ]);
+  });
+
+  it("非稼働日を含まない範囲は空配列を返す", () => {
+    expect(nonWorkdaySegments(cal, "2024-01-09", "2024-01-11")).toEqual([]);
+  });
+
+  it("開始日・終了日がともに非稼働日の場合も範囲端として含める", () => {
+    // 2024-01-06(土)〜01-14(日): 土日祝(土,日,成人の日,次の土,日)がそれぞれ区間になる
+    expect(nonWorkdaySegments(cal, "2024-01-06", "2024-01-14")).toEqual([
+      { start: "2024-01-06", end: "2024-01-08" },
+      { start: "2024-01-13", end: "2024-01-14" },
+    ]);
+  });
+
+  it("休日指定・稼働日指定を反映する", () => {
+    const calWithExceptions = makeCalendar(buildHolidayMap(2024, 2026), [
+      { date: "2024-01-10", type: "holiday", name: "創立記念日" }, // 水を休日化
+      { date: "2024-01-06", type: "workday", name: "休日出勤" }, // 土を稼働日化
+    ]);
+    expect(nonWorkdaySegments(calWithExceptions, "2024-01-06", "2024-01-10")).toEqual([
+      { start: "2024-01-07", end: "2024-01-08" }, // 土(稼働日化で除外)を挟まず日・成人の日のみ
+      { start: "2024-01-10", end: "2024-01-10" }, // 休日指定
+    ]);
+  });
+
+  it("開始日が終了日より後、または未指定の場合は空配列を返す", () => {
+    expect(nonWorkdaySegments(cal, "2024-01-11", "2024-01-09")).toEqual([]);
+    expect(nonWorkdaySegments(cal, "", "2024-01-09")).toEqual([]);
+    expect(nonWorkdaySegments(cal, "2024-01-09", "")).toEqual([]);
   });
 });
