@@ -1273,7 +1273,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                           const hx1 = xOf(seg.start), hx2 = xOf(seg.end) + dayWidth;
                           return (
                             <rect key={`nw-${seg.start}`} x={hx1} y={y + 6} width={Math.max(0, hx2 - hx1)} height={ROW_H - 12}
-                              clipPath={`url(#${clipId})`} fill="url(#ganttNonWorkdayHatch)" opacity={0.55}><title>非稼働日</title></rect>
+                              clipPath={`url(#${clipId})`} fill="url(#ganttNonWorkdayHatch)" opacity={0.4}><title>非稼働日</title></rect>
                           );
                         })}
                         <text x={x2 + 6} y={y + ROW_H / 2 + 4} fontSize={10} fill="#475569">{t.name}{t.assigneeId ? ` · ${resourceNameById.get(t.assigneeId) || ""}` : ""}{prog > 0 ? ` (${prog}%)` : ""}</text>
