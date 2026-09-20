@@ -1273,7 +1273,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                           const hx1 = xOf(seg.start), hx2 = xOf(seg.end) + dayWidth;
                           return (
                             <rect key={`nw-${seg.start}`} x={hx1} y={y + 6} width={Math.max(0, hx2 - hx1)} height={ROW_H - 12}
-                              clipPath={`url(#${clipId})`} fill="url(#ganttNonWorkdayHatch)"><title>非稼働日</title></rect>
+                              clipPath={`url(#${clipId})`} fill="url(#ganttNonWorkdayHatch)" opacity={0.55}><title>非稼働日</title></rect>
                           );
                         })}
                         <text x={x2 + 6} y={y + ROW_H / 2 + 4} fontSize={10} fill="#475569">{t.name}{t.assigneeId ? ` · ${resourceNameById.get(t.assigneeId) || ""}` : ""}{prog > 0 ? ` (${prog}%)` : ""}</text>
@@ -1293,9 +1293,9 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                     <path d="M0,0 L7,3.5 L0,7 Z" fill="#4F46E5" />
                   </marker>
                   {/* 非稼働日の網掛け模様。斜めの白線を重ねることで、バーの色（通常/クリティカル/サマリー）が
-                      変わっても一貫して視認できるようにする。 */}
+                      変わっても一貫して視認できるようにする。透明度は模様を使う側（<rect opacity>）で調整する。 */}
                   <pattern id="ganttNonWorkdayHatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-                    <line x1="0" y1="0" x2="0" y2="6" stroke="#FFFFFF" strokeOpacity="0.6" strokeWidth="3" />
+                    <line x1="0" y1="0" x2="0" y2="6" stroke="#FFFFFF" strokeWidth="3" />
                   </pattern>
                 </defs>
               </svg>
