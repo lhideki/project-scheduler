@@ -122,6 +122,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
   const barTooltipPosRef = useRef({ x: 0, y: 0 });
   const barTooltipRef = useRef(null);
   function showBarTooltipAfterDelay(taskId, clientX, clientY) {
+    if (linkDrag || rowDrag) return; // リンク作成・行の並べ替えドラッグ中はポインタがバー上を横切りうるため出さない
     barTooltipPosRef.current = { x: clientX, y: clientY };
     if (barTooltipTimerRef.current) clearTimeout(barTooltipTimerRef.current);
     barTooltipTimerRef.current = setTimeout(() => {
@@ -130,6 +131,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
     }, 100);
   }
   function moveBarTooltip(taskId, clientX, clientY) {
+    if (linkDrag || rowDrag) return;
     barTooltipPosRef.current = { x: clientX, y: clientY };
     setBarTooltip(prev => (prev && prev.taskId === taskId ? { ...prev, x: clientX, y: clientY } : prev));
   }
@@ -158,6 +160,8 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
     lines.push(`${fmtJP(s.schedStart)} 〜 ${fmtJP(s.schedFinish)}`);
     if (t.milestone) {
       lines.push(t.milestoneMode === "fixed" ? `固定マイルストーン（期日 ${fmtJP(t.fixedDate)}）` : "柔軟マイルストーン");
+      lines.push((t.progress || 0) >= 100 ? "完了済み" : "未完了");
+      if (t.assigneeId) lines.push(`担当: ${resourceNameById.get(t.assigneeId) || ""}`);
     } else {
       lines.push(`工数 ${t.duration ?? 0}人日 ・ 進捗 ${Math.max(0, Math.min(100, t.progress || 0))}%`);
       if (t.assigneeId) lines.push(`担当: ${resourceNameById.get(t.assigneeId) || ""}`);
@@ -1298,7 +1302,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                     return (
                       <React.Fragment key={t.id}>
                         <g
-                          onPointerEnter={e => { if (linkDrag) return; showBarTooltipAfterDelay(t.id, e.clientX, e.clientY); }}
+                          onPointerEnter={e => showBarTooltipAfterDelay(t.id, e.clientX, e.clientY)}
                           onPointerMove={e => moveBarTooltip(t.id, e.clientX, e.clientY)}
                           onPointerLeave={hideBarTooltip}
                         >
@@ -1334,7 +1338,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                   return (
                     <React.Fragment key={t.id}>
                       <g
-                        onPointerEnter={e => { if (linkDrag) return; showBarTooltipAfterDelay(t.id, e.clientX, e.clientY); }}
+                        onPointerEnter={e => showBarTooltipAfterDelay(t.id, e.clientX, e.clientY)}
                         onPointerMove={e => moveBarTooltip(t.id, e.clientX, e.clientY)}
                         onPointerLeave={hideBarTooltip}
                       >
