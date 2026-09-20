@@ -108,11 +108,50 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
   const noToId = useMemo(() => Object.fromEntries(flat.map(t => [t.wbsNo, t.id])), [flat]);
   // 行ごとの担当者名表示（バー・基準行）で resources.find() を毎回線形探索しないよう、事前にMap化しておく。
   const resourceNameById = useMemo(() => new Map(resources.map(r => [r.id, r.name])), [resources]);
+  const sprintNameById = useMemo(() => new Map(sprints.map(sp => [sp.id, sp.name])), [sprints]);
   // 末尾の「新規タスク追加」行（常にROW_H）の分だけ余分に確保し、左右ペインの高さを揃える。
   // 比較モード時は各タスクが rowStride（現在行+基準行）の高さを占有する。
   const bodyHeight = flat.length * rowStride + ROW_H;
   const [detailId, setDetailId] = useState(null);
   const [linkDrag, setLinkDrag] = useState(null); // ガントチャート上でのドラッグによる依存関係作成
+  // 通常タスクバー・マイルストーンのホバー時ツールチップ（サマリー・比較用基準バーは対象外）。
+  // 0.1秒の表示ディレイでちらつきを防ぎ、離脱時は即座に消す。
+  const [barTooltip, setBarTooltip] = useState(null); // { taskId, x, y }
+  const barTooltipTimerRef = useRef(null);
+  function showBarTooltipAfterDelay(taskId, clientX, clientY) {
+    if (barTooltipTimerRef.current) clearTimeout(barTooltipTimerRef.current);
+    barTooltipTimerRef.current = setTimeout(() => {
+      barTooltipTimerRef.current = null;
+      setBarTooltip({ taskId, x: clientX, y: clientY });
+    }, 100);
+  }
+  function moveBarTooltip(taskId, clientX, clientY) {
+    setBarTooltip(prev => (prev && prev.taskId === taskId ? { ...prev, x: clientX, y: clientY } : prev));
+  }
+  function hideBarTooltip() {
+    if (barTooltipTimerRef.current) { clearTimeout(barTooltipTimerRef.current); barTooltipTimerRef.current = null; }
+    setBarTooltip(null);
+  }
+  useEffect(() => () => { if (barTooltipTimerRef.current) clearTimeout(barTooltipTimerRef.current); }, []);
+  // 依存関係リンクドラッグ中はバーの上をポインタが横切るため、ツールチップを出さない（行ドラッグ用のガードは rowDrag 宣言後に別途設置）。
+  useEffect(() => { if (linkDrag) hideBarTooltip(); }, [linkDrag]);
+  // バー本体のホバー情報（開始日・期日・担当者・進捗率等）を、TaskDetailModalの要約としてテキスト化する。
+  function buildBarTooltipLines(t, s) {
+    const lines = [`${t.wbsNo ? `${t.wbsNo} ` : ""}${t.name}`];
+    lines.push(`${fmtJP(s.schedStart)} 〜 ${fmtJP(s.schedFinish)}`);
+    if (t.milestone) {
+      lines.push(t.milestoneMode === "fixed" ? `固定マイルストーン（期日 ${fmtJP(t.fixedDate)}）` : "柔軟マイルストーン");
+    } else {
+      lines.push(`工数 ${t.duration ?? 0}人日 ・ 進捗 ${Math.max(0, Math.min(100, t.progress || 0))}%`);
+      if (t.assigneeId) lines.push(`担当: ${resourceNameById.get(t.assigneeId) || ""}`);
+      if (nonWorkdaySegments(cal, s.schedStart, s.schedFinish).length > 0) lines.push("この期間に非稼働日を含みます");
+    }
+    if (t.sprintIds && t.sprintIds.length > 0) {
+      lines.push(`スプリント: ${t.sprintIds.map(id => sprintNameById.get(id)).filter(Boolean).join("・")}`);
+    }
+    lines.push(`余裕 ${s.float}日${s.critical ? "（クリティカル）" : ""}`);
+    return lines;
+  }
 
   const leftRef = useRef(null);
   const rightRef = useRef(null);
@@ -433,6 +472,8 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
   // ドラッグ&ドロップによる行の入れ替え。order/parentId のみを変更し、predecessors（依存関係）は
   // タスクIDで参照されているため一切変更しない＝どの位置に移動しても依存関係は自動的に維持される。
   const [rowDrag, setRowDrag] = useState(null); // { dragId, insertIndex }
+  // 行ドラッグ中はバーの上をポインタが横切りうるため、ツールチップを出さない。
+  useEffect(() => { if (rowDrag) hideBarTooltip(); }, [rowDrag]);
 
   // insertIndex（flat配列上で「この位置に挿入」を表すインデックス、0〜flat.length）から、
   // 実際に採用すべき親タスクIDと、その兄弟内での挿入位置を求める。
@@ -1239,7 +1280,11 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                     const cx = x1 + dayWidth / 2, cy = y + ROW_H / 2;
                     return (
                       <React.Fragment key={t.id}>
-                        <g>
+                        <g
+                          onPointerEnter={e => { if (linkDrag) return; showBarTooltipAfterDelay(t.id, e.clientX, e.clientY); }}
+                          onPointerMove={e => moveBarTooltip(t.id, e.clientX, e.clientY)}
+                          onPointerLeave={hideBarTooltip}
+                        >
                           <rect x={cx - 6} y={cy - 6} width={12} height={12} fill={color} transform={`rotate(45 ${cx} ${cy})`} stroke="white" strokeWidth={1} />
                           <text x={cx + 12} y={cy + 4} fontSize={10} fill="#475569">{t.name}{t.milestoneMode === "fixed" ? ` (固定 ${fmtJP(t.fixedDate)})` : ""}</text>
                           {handle(cx + 9, cy)}
@@ -1271,7 +1316,11 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                   const nonWorkdaySegs = tier !== "month" ? nonWorkdaySegments(cal, s.schedStart, s.schedFinish) : [];
                   return (
                     <React.Fragment key={t.id}>
-                      <g>
+                      <g
+                        onPointerEnter={e => { if (linkDrag) return; showBarTooltipAfterDelay(t.id, e.clientX, e.clientY); }}
+                        onPointerMove={e => moveBarTooltip(t.id, e.clientX, e.clientY)}
+                        onPointerLeave={hideBarTooltip}
+                      >
                         {nonWorkdaySegs.length > 0 && (
                           <clipPath id={clipId}><rect x={x1} y={y + 6} width={barW} height={ROW_H - 12} rx={4} /></clipPath>
                         )}
@@ -1281,7 +1330,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                           const hx1 = xOf(seg.start), hx2 = xOf(seg.end) + dayWidth;
                           return (
                             <rect key={`nw-${seg.start}`} x={hx1} y={y + 6} width={Math.max(0, hx2 - hx1)} height={ROW_H - 12}
-                              clipPath={`url(#${clipId})`} fill="url(#ganttNonWorkdayHatch)" opacity={0.4}><title>非稼働日</title></rect>
+                              clipPath={`url(#${clipId})`} fill="url(#ganttNonWorkdayHatch)" opacity={0.4} />
                           );
                         })}
                         <text x={x2 + 6} y={y + ROW_H / 2 + 4} fontSize={10} fill="#475569">{t.name}{t.assigneeId ? ` · ${resourceNameById.get(t.assigneeId) || ""}` : ""}{prog > 0 ? ` (${prog}%)` : ""}</text>
@@ -1311,6 +1360,22 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
           </div>
         </div>
       </div>
+      {barTooltip && (() => {
+        const tt = flat.find(f => f.id === barTooltip.taskId);
+        const ts = tt && schedule.get(tt.id);
+        if (!tt || !ts) return null;
+        const lines = buildBarTooltipLines(tt, ts);
+        const left = Math.min(barTooltip.x + 14, Math.max(8, window.innerWidth - 280));
+        const top = Math.min(barTooltip.y + 14, Math.max(8, window.innerHeight - 160));
+        return (
+          <div
+            style={{ position: "fixed", left, top, zIndex: 50, pointerEvents: "none", maxWidth: 260 }}
+            className="bg-slate-800 text-white text-[11px] leading-relaxed rounded-md shadow-lg px-3 py-2"
+          >
+            {lines.map((line, idx) => <div key={idx} className={idx === 0 ? "font-semibold mb-0.5" : ""}>{line}</div>)}
+          </div>
+        );
+      })()}
       {detailId && (
         <TaskDetailModal
           task={flat.find(f => f.id === detailId)}
