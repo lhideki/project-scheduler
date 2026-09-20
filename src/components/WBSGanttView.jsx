@@ -4,7 +4,7 @@ import {
   AlertTriangle, ArrowLeftRight, Info, Diamond, GripVertical, Zap, Flame,
   Undo2, Redo2, Copy, ClipboardPaste,
 } from "lucide-react";
-import { toISO, parseISO, fmtJP, cal_addDaysISO, isWeekend } from "../lib/calendar.js";
+import { toISO, parseISO, fmtJP, cal_addDaysISO, isWeekend, nonWorkdaySegments } from "../lib/calendar.js";
 import { uid, buildFlatList, allDescendantIds } from "../lib/taskTree.js";
 import { sprintColorForId } from "../lib/sprints.js";
 import { copyTextToClipboard } from "../lib/exportUtils.js";
@@ -1257,11 +1257,27 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                   const barW = Math.max(2, x2 - x1);
                   const prog = Math.max(0, Math.min(100, t.progress || 0));
                   const progW = (barW * prog) / 100;
+                  // 非稼働日の網掛け（バーの外形を保つため、バーと同形のclipPathでクリップする）。
+                  // month tier では日単位の背景網掛け自体を出していないため、ここでも合わせて省略する。
+                  // タスクIDはインポートしたJSON由来の任意文字列（空白・)・#等を含みうる）なので、
+                  // SVGのid/url(#...)参照としてそのまま使わず、行インデックス（常にURL安全）を使う。
+                  const clipId = `taskbar-clip-${i}`;
+                  const nonWorkdaySegs = tier !== "month" ? nonWorkdaySegments(cal, s.schedStart, s.schedFinish) : [];
                   return (
                     <React.Fragment key={t.id}>
                       <g>
+                        {nonWorkdaySegs.length > 0 && (
+                          <clipPath id={clipId}><rect x={x1} y={y + 6} width={barW} height={ROW_H - 12} rx={4} /></clipPath>
+                        )}
                         <rect x={x1} y={y + 6} width={barW} height={ROW_H - 12} rx={4} fill={color} opacity={0.35} />
                         {progW > 0 && <rect x={x1} y={y + 6} width={progW} height={ROW_H - 12} rx={4} fill={color} opacity={0.95} />}
+                        {nonWorkdaySegs.map(seg => {
+                          const hx1 = xOf(seg.start), hx2 = xOf(seg.end) + dayWidth;
+                          return (
+                            <rect key={`nw-${seg.start}`} x={hx1} y={y + 6} width={Math.max(0, hx2 - hx1)} height={ROW_H - 12}
+                              clipPath={`url(#${clipId})`} fill="url(#ganttNonWorkdayHatch)" opacity={0.4}><title>非稼働日</title></rect>
+                          );
+                        })}
                         <text x={x2 + 6} y={y + ROW_H / 2 + 4} fontSize={10} fill="#475569">{t.name}{t.assigneeId ? ` · ${resourceNameById.get(t.assigneeId) || ""}` : ""}{prog > 0 ? ` (${prog}%)` : ""}</text>
                         {handle(x2, y + ROW_H / 2)}
                       </g>
@@ -1278,6 +1294,11 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                   <marker id="ganttLinkArrow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
                     <path d="M0,0 L7,3.5 L0,7 Z" fill="#4F46E5" />
                   </marker>
+                  {/* 非稼働日の網掛け模様。斜めの白線を重ねることで、バーの色（通常/クリティカル/サマリー）が
+                      変わっても一貫して視認できるようにする。透明度は模様を使う側（<rect opacity>）で調整する。 */}
+                  <pattern id="ganttNonWorkdayHatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                    <line x1="0" y1="0" x2="0" y2="6" stroke="#FFFFFF" strokeWidth="3" />
+                  </pattern>
                 </defs>
               </svg>
             </div>
