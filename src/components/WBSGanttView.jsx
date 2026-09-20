@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef, useImperativeHandle } from "react";
+import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useImperativeHandle } from "react";
 import {
   Plus, Trash2, ChevronRight, ChevronDown, Save, ZoomIn, ZoomOut,
   AlertTriangle, ArrowLeftRight, Info, Diamond, GripVertical, Zap, Flame,
@@ -118,14 +118,19 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
   // 0.1秒の表示ディレイでちらつきを防ぎ、離脱時は即座に消す。
   const [barTooltip, setBarTooltip] = useState(null); // { taskId, x, y }
   const barTooltipTimerRef = useRef(null);
+  // ディレイ待ち中も含め、直近のポインタ位置を常に保持する（表示前に位置更新が捨てられないように）。
+  const barTooltipPosRef = useRef({ x: 0, y: 0 });
+  const barTooltipRef = useRef(null);
   function showBarTooltipAfterDelay(taskId, clientX, clientY) {
+    barTooltipPosRef.current = { x: clientX, y: clientY };
     if (barTooltipTimerRef.current) clearTimeout(barTooltipTimerRef.current);
     barTooltipTimerRef.current = setTimeout(() => {
       barTooltipTimerRef.current = null;
-      setBarTooltip({ taskId, x: clientX, y: clientY });
+      setBarTooltip({ taskId, x: barTooltipPosRef.current.x, y: barTooltipPosRef.current.y });
     }, 100);
   }
   function moveBarTooltip(taskId, clientX, clientY) {
+    barTooltipPosRef.current = { x: clientX, y: clientY };
     setBarTooltip(prev => (prev && prev.taskId === taskId ? { ...prev, x: clientX, y: clientY } : prev));
   }
   function hideBarTooltip() {
@@ -133,6 +138,18 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
     setBarTooltip(null);
   }
   useEffect(() => () => { if (barTooltipTimerRef.current) clearTimeout(barTooltipTimerRef.current); }, []);
+  // 実際にレンダリングされたツールチップのサイズを測ってから位置を確定する（内容量に応じて高さ・幅が変わるため、
+  // 固定値での画面端クランプでは長い内容のときにはみ出すことがある）。
+  useLayoutEffect(() => {
+    if (!barTooltip || !barTooltipRef.current) return;
+    const el = barTooltipRef.current;
+    const margin = 8;
+    const rect = el.getBoundingClientRect();
+    const left = Math.min(barTooltip.x + 14, Math.max(margin, window.innerWidth - rect.width - margin));
+    const top = Math.min(barTooltip.y + 14, Math.max(margin, window.innerHeight - rect.height - margin));
+    el.style.left = `${left}px`;
+    el.style.top = `${top}px`;
+  }, [barTooltip]);
   // 依存関係リンクドラッグ中はバーの上をポインタが横切るため、ツールチップを出さない（行ドラッグ用のガードは rowDrag 宣言後に別途設置）。
   useEffect(() => { if (linkDrag) hideBarTooltip(); }, [linkDrag]);
   // バー本体のホバー情報（開始日・期日・担当者・進捗率等）を、TaskDetailModalの要約としてテキスト化する。
@@ -1365,11 +1382,11 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
         const ts = tt && schedule.get(tt.id);
         if (!tt || !ts) return null;
         const lines = buildBarTooltipLines(tt, ts);
-        const left = Math.min(barTooltip.x + 14, Math.max(8, window.innerWidth - 280));
-        const top = Math.min(barTooltip.y + 14, Math.max(8, window.innerHeight - 160));
+        // 初期位置はポインタ位置基準の仮置き。実サイズ確定後に useLayoutEffect が画面内へクランプし直す。
         return (
           <div
-            style={{ position: "fixed", left, top, zIndex: 50, pointerEvents: "none", maxWidth: 260 }}
+            ref={barTooltipRef}
+            style={{ position: "fixed", left: barTooltip.x + 14, top: barTooltip.y + 14, zIndex: 50, pointerEvents: "none", maxWidth: 260 }}
             className="bg-slate-800 text-white text-[11px] leading-relaxed rounded-md shadow-lg px-3 py-2"
           >
             {lines.map((line, idx) => <div key={idx} className={idx === 0 ? "font-semibold mb-0.5" : ""}>{line}</div>)}
