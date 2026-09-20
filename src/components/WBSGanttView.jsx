@@ -1259,7 +1259,9 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                   const progW = (barW * prog) / 100;
                   // 非稼働日の網掛け（バーの外形を保つため、バーと同形のclipPathでクリップする）。
                   // month tier では日単位の背景網掛け自体を出していないため、ここでも合わせて省略する。
-                  const clipId = `taskbar-clip-${t.id}`;
+                  // タスクIDはインポートしたJSON由来の任意文字列（空白・)・#等を含みうる）なので、
+                  // SVGのid/url(#...)参照としてそのまま使わず、行インデックス（常にURL安全）を使う。
+                  const clipId = `taskbar-clip-${i}`;
                   const nonWorkdaySegs = tier !== "month" ? nonWorkdaySegments(cal, s.schedStart, s.schedFinish) : [];
                   return (
                     <React.Fragment key={t.id}>
