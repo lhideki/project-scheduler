@@ -734,12 +734,14 @@ function formatDepLabel(dep) {
 // src/lib/dependencyIssues.js
 var DEPENDENCY_ISSUE_CODES = Object.freeze({
   cycle: "dependency-cycle",
+  self: "self-dependency",
   missing: "predecessor-missing",
   violation: "dependency-violation",
   overrun: "fixed-milestone-overrun"
 });
 var DEPENDENCY_ISSUE_LABELS = Object.freeze({
   [DEPENDENCY_ISSUE_CODES.cycle]: "\u5FAA\u74B0\u53C2\u7167",
+  [DEPENDENCY_ISSUE_CODES.self]: "\u5FAA\u74B0\u53C2\u7167\uFF08\u81EA\u5DF1\u4F9D\u5B58\uFF09",
   [DEPENDENCY_ISSUE_CODES.missing]: "\u5B58\u5728\u3057\u306A\u3044\u5148\u884C\u30BF\u30B9\u30AF",
   [DEPENDENCY_ISSUE_CODES.violation]: "\u958B\u59CB\u65E5\u3068\u306E\u77DB\u76FE",
   [DEPENDENCY_ISSUE_CODES.overrun]: "\u56FA\u5B9A\u671F\u65E5\u306E\u8D85\u904E"
@@ -750,6 +752,7 @@ var SCHEDULE_DEPENDENCY_ISSUE_CODES = Object.freeze([
 ]);
 var CODE_ORDER = [
   DEPENDENCY_ISSUE_CODES.cycle,
+  DEPENDENCY_ISSUE_CODES.self,
   DEPENDENCY_ISSUE_CODES.missing,
   DEPENDENCY_ISSUE_CODES.violation,
   DEPENDENCY_ISSUE_CODES.overrun
@@ -775,6 +778,13 @@ function wbsRankOf(tasks) {
     if (!rank.has(t.id)) rank.set(t.id, tasks.length + i);
   });
   return rank;
+}
+function findSelfDependencies(tasks) {
+  const out = [];
+  tasks.forEach((t) => {
+    if ((t.predecessors || []).some((p) => p && p.id === t.id)) out.push({ taskId: t.id });
+  });
+  return out;
 }
 function findMissingPredecessors(tasks) {
   const ids = new Set(tasks.map((t) => t.id));
@@ -989,6 +999,15 @@ function detectDependencyIssues(tasks, schedule = null, cal = null) {
       ids: cycle.ids,
       path: cycle.path,
       message: cycleMessage(cycle, byId)
+    });
+  });
+  findSelfDependencies(list).forEach(({ taskId }) => {
+    issues.push({
+      code: DEPENDENCY_ISSUE_CODES.self,
+      severity: "error",
+      ids: [taskId],
+      predecessorId: taskId,
+      message: "\u81EA\u5206\u81EA\u8EAB\u3092\u5148\u884C\u30BF\u30B9\u30AF\u306B\u3057\u3066\u3044\u307E\u3059\uFF08\u3053\u306E\u4F9D\u5B58\u95A2\u4FC2\u306F\u8A08\u7B97\u306B\u4F7F\u308F\u308C\u3066\u3044\u307E\u305B\u3093\uFF09"
     });
   });
   findMissingPredecessors(list).forEach(({ taskId, predecessorId }) => {
@@ -1474,11 +1493,6 @@ function analyzeIntegrity(data) {
     for (const sid of t.sprintIds || []) {
       if (!sprintIds.has(sid)) {
         issues.push({ severity: "warning", code: "sprint-missing", ids: [t.id], message: `\u300C${t.name}\u300D\u306E\u30B9\u30D7\u30EA\u30F3\u30C8\u53C2\u7167\u300C${sid}\u300D\u304C\u5B58\u5728\u3057\u307E\u305B\u3093` });
-      }
-    }
-    for (const p of t.predecessors || []) {
-      if (p.id === t.id) {
-        issues.push({ severity: "error", code: "self-dependency", ids: [t.id], message: `\u300C${t.name}\u300D\u304C\u81EA\u5206\u81EA\u8EAB\u306B\u4F9D\u5B58\u3057\u3066\u3044\u307E\u3059` });
       }
     }
     if ((t.predecessors || []).length && isGroupId(tasks, t.id)) {

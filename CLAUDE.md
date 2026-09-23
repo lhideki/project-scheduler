@@ -101,8 +101,9 @@ bee（`@nulab/bee` 1.1 以上、Backlog公式CLI）経由で保存JSONと Backlo
 - `float = workdaysBetween(ES, LS)`、`critical = float <= 0`。
   - 注意: スプリント開始日を実際の計算済み開始日に近づけて設定すると、そのタスクのESが押し上げられてfloatが縮小し、`critical` 判定が変わることがある（表示上のschedStart/schedFinish自体は変わらない）。これは仕様上の既知の挙動であり、バグではない。
 - スプリント矛盾検出（`sprintConflicts` useMemo）: 最終的な表示スケジュールがタスクの所属スプリント期間からはみ出していないかを判定し、はみ出していればヘッダーのアラートアイコン（`AlertTriangle`）経由でダイアログに一覧表示する。複数スプリントが紐付く場合は、それらの期間の和集合（最も早い開始日〜最も遅い終了日）を基準に判定する。リソース平準化警告（`levelWarnings`、稼働上限内での配置失敗）とは別建てのUI。
-- 依存関係の矛盾検出（`dependencyIssues` useMemo → `detectDependencyIssues(tasks, schedule, cal)`、`src/lib/dependencyIssues.js`）: 次の4種を判定する。日程の自動修正はしない（開始日の矛盾は「自動スケジューリング実行」で解消する）。CLI の `validate`/`recalc`/`plan`/`explain` も同じ関数を使う（`src/agent/cli.test.js` でアプリと結果が一致することを確認している）。
+- 依存関係の矛盾検出（`dependencyIssues` useMemo → `detectDependencyIssues(tasks, schedule, cal)`、`src/lib/dependencyIssues.js`）: 次の4種（循環参照は自己依存を含む）を判定する。日程の自動修正はしない（開始日の矛盾は「自動スケジューリング実行」で解消する）。CLI の `validate`/`recalc`/`plan`/`explain` も同じ関数を使う（`src/agent/cli.test.js` でアプリと結果が一致することを確認している）。
   - `dependency-cycle`（error）: 循環参照。`runCPM` と同じ解釈（リーフへの依存辺は `effectivePredecessors`、グループには「子→親」の所属辺）でグラフを作り、依存辺を含む強連結成分を1件とする。グループを介した循環（AがグループGに依存し、G配下のBがAに依存）も検出する。循環に含まれるタスクは日程が確定しないため、下の2種の判定から除外する。
+  - `self-dependency`（error）: 自分自身を先行タスクにしている（循環参照の最小形。`effectivePredecessors` が自己参照を除くため `findDependencyCycles` では検出できず、エンジンも無視するので別途 `findSelfDependencies` で検出する。UIのラベルは「循環参照（自己依存）」）。
   - `predecessor-missing`（error）: 存在しないIDを先行タスクにしている（エンジンは無視するため、依存関係が効いていない）。
   - `dependency-violation`（warning）: **表示スケジュール**上で、各依存関係の条件を `candidateFromDep`（フォワードパスと同じ計算）で評価し直し、表示中の開始日が必要な日付より前なら矛盾とする。先行がグループなら、そのロールアップ済みの表示日程を使う。着手済み（`progress > 0`）は対象外。平準化ONでは手入力の開始日が下限扱いになるため、原則として出ない。
   - `fixed-milestone-overrun`（warning）: 固定マイルストーンについて、先行タスクから求めた最早日（または表示中の日程）が `fixedDate` より後。平準化ON/OFFに関わらず判定する。

@@ -107,11 +107,14 @@ describe("analyzeIntegrity", () => {
     expect(codes).toContain("sprint-missing");
   });
 
-  it("自己依存を検出する", () => {
+  it("自己依存を検出する（src/lib/dependencyIssues.js と共通。code は従来どおり self-dependency）", () => {
     const data = seedProject();
     const leaf = data.tasks.find(t => !data.tasks.some(x => x.parentId === t.id));
     leaf.predecessors = [{ id: leaf.id, type: "FS", lag: 0 }];
-    expect(analyzeIntegrity(data).some(i => i.code === "self-dependency")).toBe(true);
+    const self = analyzeIntegrity(data).filter(i => i.code === "self-dependency");
+    expect(self).toHaveLength(1);
+    expect(self[0]).toMatchObject({ severity: "error", ids: [leaf.id] });
+    expect(self[0].message).toBe(`「${leaf.name}」: 自分自身を先行タスクにしています（この依存関係は計算に使われていません）`);
   });
 });
 
@@ -157,7 +160,7 @@ function appDependencyIssues(data, leveling) {
   return detectDependencyIssues(data.tasks, schedule, cal);
 }
 
-/** 4種類の依存関係の矛盾をすべて含むプロジェクト。 */
+/** 4種類の依存関係の矛盾（＋自己依存）をすべて含むプロジェクト。 */
 function conflictingProject() {
   const t = (o) => ({ parentId: null, duration: 1, predecessors: [], ...o });
   const fs = (id) => [{ id, type: "FS", lag: 0 }];
@@ -175,6 +178,8 @@ function conflictingProject() {
     t({ id: "test", name: "テスト", parentId: "qa", order: 0, startDate: "2026-09-11", predecessors: fs("review") }),
     // 存在しない先行タスク
     t({ id: "deploy", name: "デプロイ", order: 6, startDate: "2026-09-20", predecessors: fs("deleted-task") }),
+    // 自己依存
+    t({ id: "ops", name: "運用設計", order: 7, startDate: "2026-09-21", predecessors: fs("ops") }),
   ];
   const resources = [{ id: "r1", name: "佐藤", weeklyCapacity: 5, monthlyCapacity: 20 }];
   return buildProjectExport(tasks, resources, [], [], false);
@@ -196,6 +201,7 @@ describe("validateProject（validate コマンドの本体）", () => {
     expect(codes).toEqual(expect.arrayContaining([
       "dependency-cycle:review,qa,test",
       "predecessor-missing:deploy",
+      "self-dependency:ops",
       "dependency-violation:impl",
       "fixed-milestone-overrun:ms",
     ]));
@@ -212,7 +218,7 @@ describe("validateProject（validate コマンドの本体）", () => {
       // validate は参照整合性（循環・存在しない先行）を先に、日程の検査を後に並べるため、順序は問わず比較する。
       const key = i => `${i.code}:${i.ids.join(",")}`;
       const app = appDependencyIssues(data, leveling).map(i => ({ code: i.code, ids: i.ids, severity: i.severity })).sort((a, b) => key(a).localeCompare(key(b)));
-      const cliCodes = new Set(["dependency-cycle", "predecessor-missing", "dependency-violation", "fixed-milestone-overrun"]);
+      const cliCodes = new Set(["dependency-cycle", "self-dependency", "predecessor-missing", "dependency-violation", "fixed-milestone-overrun"]);
       const cli = validateProject(data, { leveling }).issues
         .filter(i => cliCodes.has(i.code))
         .map(i => ({ code: i.code, ids: i.ids, severity: i.severity }))
@@ -241,7 +247,7 @@ describe("validateProject（validate コマンドの本体）", () => {
 
   it("「自動スケジューリング実行」（applyAutoSchedule）後は、開始日との矛盾が出ない", () => {
     const data = conflictingProject();
-    data.tasks = data.tasks.filter(t => !["review", "qa", "test", "deploy"].includes(t.id)); // 循環・存在しない先行を除く
+    data.tasks = data.tasks.filter(t => !["review", "qa", "test", "deploy", "ops"].includes(t.id)); // 循環・存在しない先行・自己依存を除く
     for (const leveling of [false, true]) {
       const projectStart = deriveProjectStart(data.tasks);
       const y = parseISO(projectStart).getUTCFullYear();

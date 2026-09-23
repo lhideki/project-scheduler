@@ -375,19 +375,15 @@ export function analyzeIntegrity(data) {
         issues.push({ severity: "warning", code: "sprint-missing", ids: [t.id], message: `「${t.name}」のスプリント参照「${sid}」が存在しません` });
       }
     }
-    for (const p of t.predecessors || []) {
-      if (p.id === t.id) {
-        issues.push({ severity: "error", code: "self-dependency", ids: [t.id], message: `「${t.name}」が自分自身に依存しています` });
-      }
-    }
     if ((t.predecessors || []).length && isGroupId(tasks, t.id)) {
       issues.push({ severity: "warning", code: "group-has-predecessors", ids: [t.id], message: `グループ「${t.name}」に先行タスクが設定されています（依存はリーフタスクに付けてください）` });
     }
   }
 
-  // 存在しない先行タスク（predecessor-missing）・循環参照（dependency-cycle、グループを介した循環を含む）は
-  // アプリと同じ判定（src/lib/dependencyIssues.js）を使う。スケジュールを使う判定（開始日との矛盾・
-  // 固定マイルストーンの期日超過）は validateProject がスケジュール計算後に追加する。
+  // 自己依存（self-dependency）・存在しない先行タスク（predecessor-missing）・循環参照（dependency-cycle、
+  // グループを介した循環を含む）は、アプリと同じ判定（src/lib/dependencyIssues.js）を使う。
+  // スケジュールを使う判定（開始日との矛盾・固定マイルストーンの期日超過）は validateProject が
+  // スケジュール計算後に追加する。
   for (const issue of detectDependencyIssues(tasks)) {
     issues.push(formatDependencyIssue(issue, tasks));
   }

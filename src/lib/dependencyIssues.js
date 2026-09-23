@@ -17,6 +17,7 @@ import { candidateFromDep } from "./scheduling.js";
 /** 依存関係の矛盾の種別。 */
 export const DEPENDENCY_ISSUE_CODES = Object.freeze({
   cycle: "dependency-cycle",
+  self: "self-dependency",
   missing: "predecessor-missing",
   violation: "dependency-violation",
   overrun: "fixed-milestone-overrun",
@@ -25,6 +26,7 @@ export const DEPENDENCY_ISSUE_CODES = Object.freeze({
 /** 種別の表示ラベル（WBS表のツールチップ・ヘッダーの一覧ダイアログ用）。 */
 export const DEPENDENCY_ISSUE_LABELS = Object.freeze({
   [DEPENDENCY_ISSUE_CODES.cycle]: "循環参照",
+  [DEPENDENCY_ISSUE_CODES.self]: "循環参照（自己依存）",
   [DEPENDENCY_ISSUE_CODES.missing]: "存在しない先行タスク",
   [DEPENDENCY_ISSUE_CODES.violation]: "開始日との矛盾",
   [DEPENDENCY_ISSUE_CODES.overrun]: "固定期日の超過",
@@ -38,6 +40,7 @@ export const SCHEDULE_DEPENDENCY_ISSUE_CODES = Object.freeze([
 
 const CODE_ORDER = [
   DEPENDENCY_ISSUE_CODES.cycle,
+  DEPENDENCY_ISSUE_CODES.self,
   DEPENDENCY_ISSUE_CODES.missing,
   DEPENDENCY_ISSUE_CODES.violation,
   DEPENDENCY_ISSUE_CODES.overrun,
@@ -45,8 +48,8 @@ const CODE_ORDER = [
 
 /**
  * @typedef {Object} DependencyIssue
- * @property {"dependency-cycle"|"predecessor-missing"|"dependency-violation"|"fixed-milestone-overrun"} code
- * @property {"error"|"warning"} severity - 循環・存在しない先行は error、日程の矛盾は warning
+ * @property {"dependency-cycle"|"self-dependency"|"predecessor-missing"|"dependency-violation"|"fixed-milestone-overrun"} code
+ * @property {"error"|"warning"} severity - 循環（自己依存を含む）・存在しない先行は error、日程の矛盾は warning
  * @property {string[]} ids - 警告を表示するタスクのID（循環はその循環に含まれる全タスク、それ以外は1件）
  * @property {string} message - 表示用メッセージ（循環以外は、対象タスク自身の名前を含まない）
  * @property {string} [predecessorId] - 原因となった先行タスクのID（循環以外）
@@ -81,8 +84,23 @@ function wbsRankOf(tasks) {
 }
 
 /**
+ * 自分自身を先行タスクにしているタスク（グループを含む）を列挙する。循環参照の最小の形だが、
+ * effectivePredecessors が自分自身への参照を除くため findDependencyCycles では検出できず、
+ * スケジューリング・エンジンも黙って無視する（＝依存関係が効いていない）ため、別途検出する。
+ * @param {import("./taskTree.js").Task[]} tasks
+ * @returns {{taskId: string}[]}
+ */
+export function findSelfDependencies(tasks) {
+  const out = [];
+  tasks.forEach(t => {
+    if ((t.predecessors || []).some(p => p && p.id === t.id)) out.push({ taskId: t.id });
+  });
+  return out;
+}
+
+/**
  * 存在しないIDを先行タスクとして参照している依存関係を列挙する（グループに設定された先行タスクも対象）。
- * 自分自身への依存は対象外（CLI の self-dependency で扱う）。
+ * 自分自身への依存は対象外（findSelfDependencies で扱う）。
  * @param {import("./taskTree.js").Task[]} tasks
  * @returns {{taskId: string, predecessorId: string}[]}
  */
@@ -316,9 +334,9 @@ export function detectScheduleDependencyIssues(tasks, schedule, cal, opts = {}) 
 }
 
 /**
- * 依存関係の矛盾（循環参照・存在しない先行タスク・開始日との矛盾・固定マイルストーンの期日超過）をまとめて判定する。
+ * 依存関係の矛盾（循環参照〔自己依存を含む〕・存在しない先行タスク・開始日との矛盾・固定マイルストーンの期日超過）をまとめて判定する。
  * App（WBS表・ガントチャート・ヘッダーの一覧）と CLI（validate / recalc / plan）の共通の入口。
- * schedule・cal を省略した場合は、スケジュールを使わない判定（循環参照・存在しない先行タスク）だけを行う。
+ * schedule・cal を省略した場合は、スケジュールを使わない判定（循環参照・自己依存・存在しない先行タスク）だけを行う。
  *
  * @param {import("./taskTree.js").Task[]} tasks
  * @param {Map<string, import("./scheduling.js").ScheduleEntry>|null} [schedule]
@@ -341,6 +359,16 @@ export function detectDependencyIssues(tasks, schedule = null, cal = null) {
       ids: cycle.ids,
       path: cycle.path,
       message: cycleMessage(cycle, byId),
+    });
+  });
+
+  findSelfDependencies(list).forEach(({ taskId }) => {
+    issues.push({
+      code: DEPENDENCY_ISSUE_CODES.self,
+      severity: "error",
+      ids: [taskId],
+      predecessorId: taskId,
+      message: "自分自身を先行タスクにしています（この依存関係は計算に使われていません）",
     });
   });
 

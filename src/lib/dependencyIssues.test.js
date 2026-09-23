@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { buildHolidayMap, makeCalendar } from "./calendar.js";
 import { runCPM, levelResources, rollupSummaries, autoScheduleStartDates } from "./scheduling.js";
 import {
-  findMissingPredecessors, findDependencyCycles, detectDependencyIssues, detectScheduleDependencyIssues,
+  findMissingPredecessors, findSelfDependencies, findDependencyCycles, detectDependencyIssues, detectScheduleDependencyIssues,
   groupDependencyIssuesByTask, DEPENDENCY_ISSUE_CODES,
 } from "./dependencyIssues.js";
 
@@ -42,8 +42,23 @@ describe("findMissingPredecessors", () => {
     ]);
   });
 
-  it("自分自身への依存は対象外（CLI の self-dependency で扱う）", () => {
+  it("自分自身への依存は対象外（findSelfDependencies で扱う）", () => {
     expect(findMissingPredecessors([task({ id: "A", predecessors: [fs("A")] })])).toEqual([]);
+  });
+});
+
+describe("findSelfDependencies", () => {
+  it("自分自身を先行タスクにしているタスク・グループを列挙する", () => {
+    const tasks = [
+      task({ id: "G", predecessors: [fs("G")] }),
+      task({ id: "A", parentId: "G", predecessors: [fs("B"), fs("A")] }),
+      task({ id: "B" }),
+    ];
+    expect(findSelfDependencies(tasks)).toEqual([{ taskId: "G" }, { taskId: "A" }]);
+  });
+
+  it("エンジンが無視するため findDependencyCycles では検出されない（別途検出が必要）", () => {
+    expect(findDependencyCycles([task({ id: "A", predecessors: [fs("A")] })])).toEqual([]);
   });
 });
 
@@ -245,6 +260,14 @@ describe("detectDependencyIssues: 循環・存在しない先行タスク", () =
     ];
     const [issue] = detectDependencyIssues(tasks);
     expect(issue.message).toBe("循環参照: 「A」→「B」→「G」→「A」（「B」はグループ「G」の配下）");
+  });
+
+  it("自分自身への依存（WBS表の先行欄に自分のWBS番号を入力した場合等）を error として報告する", () => {
+    const tasks = [task({ id: "A", name: "A", startDate: "2024-01-09", predecessors: [fs("A")] })];
+    const issues = detect(tasks);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toMatchObject({ code: DEPENDENCY_ISSUE_CODES.self, severity: "error", ids: ["A"], predecessorId: "A" });
+    expect(issues[0].message).toBe("自分自身を先行タスクにしています（この依存関係は計算に使われていません）");
   });
 
   it("存在しない先行タスクを error として報告する（スケジュール無しでも判定できる）", () => {

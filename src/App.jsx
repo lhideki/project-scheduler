@@ -852,13 +852,19 @@ export default function App() {
       )}
       {dependencyIssuesOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onClick={() => setDependencyIssuesOpen(false)}>
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="dependency-issues-dialog-title"
+            className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col"
+            onClick={e => e.stopPropagation()}
+          >
             <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 flex-shrink-0">
-              <div className={"flex items-center gap-2 text-sm font-semibold " + (dependencyIssueErrorCount > 0 ? "text-red-700" : "text-amber-700")}>
+              <div id="dependency-issues-dialog-title" className={"flex items-center gap-2 text-sm font-semibold " + (dependencyIssueErrorCount > 0 ? "text-red-700" : "text-amber-700")}>
                 <AlertTriangle size={15} />
                 依存関係の矛盾（{dependencyIssues.length}件）
               </div>
-              <button onClick={() => setDependencyIssuesOpen(false)} className="text-slate-400 hover:text-slate-700">
+              <button onClick={() => setDependencyIssuesOpen(false)} aria-label="閉じる" className="text-slate-400 hover:text-slate-700">
                 <X size={16} />
               </button>
             </div>
