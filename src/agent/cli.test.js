@@ -3,10 +3,11 @@ import { describe, it, expect } from "vitest";
 import { seedData } from "../lib/seedData.js";
 import { buildProjectExport } from "../lib/exportUtils.js";
 import { buildHolidayMap, makeCalendar, parseISO } from "../lib/calendar.js";
-import { runCPM } from "../lib/scheduling.js";
+import { runCPM, levelResources, rollupSummaries, deriveProjectStart } from "../lib/scheduling.js";
+import { detectDependencyIssues } from "../lib/dependencyIssues.js";
 import {
-  computeSchedule, scheduleRows, analyzeIntegrity, findDependencyCycles, findParentCycles,
-  checkFieldShapes, buildVersionSnapshot, applyAutoSchedule,
+  computeSchedule, scheduleRows, analyzeIntegrity, findParentCycles,
+  checkFieldShapes, buildVersionSnapshot, applyAutoSchedule, validateProject,
 } from "./cli.js";
 
 function seedProject() {
@@ -114,19 +115,141 @@ describe("analyzeIntegrity", () => {
   });
 });
 
-describe("findDependencyCycles", () => {
-  it("循環が無ければ空", () => {
-    expect(findDependencyCycles(seedProject().tasks)).toEqual([]);
+describe("analyzeIntegrity: 循環参照（src/lib/dependencyIssues.js と共通）", () => {
+  it("相互依存を1件の循環として error で返す", () => {
+    const data = seedProject();
+    data.tasks.push(
+      { id: "a", name: "A", parentId: null, order: 90, duration: 1, predecessors: [{ id: "b", type: "FS", lag: 0 }] },
+      { id: "b", name: "B", parentId: null, order: 91, duration: 1, predecessors: [{ id: "a", type: "FS", lag: 0 }] },
+    );
+    const cycles = analyzeIntegrity(data).filter(i => i.code === "dependency-cycle");
+    expect(cycles).toHaveLength(1);
+    expect(cycles[0]).toMatchObject({ severity: "error", ids: ["a", "b"], path: ["a", "b", "a"], message: "循環参照: 「A」→「B」→「A」" });
   });
 
-  it("相互依存を1件の循環として返す", () => {
-    const tasks = [
-      { id: "a", predecessors: [{ id: "b", type: "FS", lag: 0 }] },
-      { id: "b", predecessors: [{ id: "a", type: "FS", lag: 0 }] },
-    ];
-    const cycles = findDependencyCycles(tasks);
-    expect(cycles.length).toBeGreaterThan(0);
-    expect(new Set(cycles[0])).toEqual(new Set(["a", "b"]));
+  it("グループを介した循環（AがグループGに依存し、G配下のBがAに依存）を検出する", () => {
+    const data = seedProject();
+    data.tasks.push(
+      { id: "A", name: "A", parentId: null, order: 90, duration: 1, predecessors: [{ id: "G", type: "FS", lag: 0 }] },
+      { id: "G", name: "G", parentId: null, order: 91 },
+      { id: "B", name: "B", parentId: "G", order: 0, duration: 1, predecessors: [{ id: "A", type: "FS", lag: 0 }] },
+    );
+    const cycles = analyzeIntegrity(data).filter(i => i.code === "dependency-cycle");
+    expect(cycles).toHaveLength(1);
+    expect(new Set(cycles[0].ids)).toEqual(new Set(["A", "G", "B"]));
+    expect(cycles[0].message).toContain("「B」はグループ「G」の配下");
+  });
+});
+
+/** App.jsx の cpm / schedule useMemo と dependencyIssues useMemo を忠実に再現した参照実装。 */
+function appDependencyIssues(data, leveling) {
+  const projectStart = deriveProjectStart(data.tasks, "2026-01-01");
+  const y = parseISO(projectStart).getUTCFullYear();
+  const cal = makeCalendar(buildHolidayMap(y - 1, y + 6), data.calendarExceptions || []);
+  const cpm = runCPM(data.tasks, cal, projectStart, data.sprints);
+  let schedule = cpm.result;
+  if (leveling) {
+    const { placed } = levelResources(data.tasks, cpm.result, data.resources, cal, data.sprints);
+    schedule = new Map(cpm.result);
+    for (const [id, dates] of Object.entries(placed)) schedule.set(id, { ...schedule.get(id), schedStart: dates.start, schedFinish: dates.finish });
+    rollupSummaries(data.tasks, schedule);
+  }
+  return detectDependencyIssues(data.tasks, schedule, cal);
+}
+
+/** 4種類の依存関係の矛盾をすべて含むプロジェクト。 */
+function conflictingProject() {
+  const t = (o) => ({ parentId: null, duration: 1, predecessors: [], ...o });
+  const fs = (id) => [{ id, type: "FS", lag: 0 }];
+  const tasks = [
+    t({ id: "design", name: "基本設計", order: 0, startDate: "2026-09-01", duration: 5, assigneeId: "r1" }),
+    // 開始日との矛盾: 基本設計（〜9/7）の終了前に開始している
+    t({ id: "impl", name: "実装", order: 1, startDate: "2026-09-03", duration: 3, assigneeId: "r1", predecessors: fs("design") }),
+    // 着手済みなので開始日との矛盾としては警告しない
+    t({ id: "doc", name: "マニュアル作成", order: 2, startDate: "2026-09-02", duration: 2, progress: 50, predecessors: fs("design") }),
+    // 固定マイルストーンの期日超過: 実装の終了より前の期日
+    t({ id: "ms", name: "リリース判定", order: 3, duration: 0, milestone: true, milestoneMode: "fixed", fixedDate: "2026-09-04", startDate: "2026-09-04", predecessors: fs("impl") }),
+    // グループを介した循環: review がグループ qa に依存し、qa 配下の test が review に依存
+    t({ id: "review", name: "レビュー", order: 4, startDate: "2026-09-10", predecessors: fs("qa") }),
+    t({ id: "qa", name: "品質保証", order: 5 }),
+    t({ id: "test", name: "テスト", parentId: "qa", order: 0, startDate: "2026-09-11", predecessors: fs("review") }),
+    // 存在しない先行タスク
+    t({ id: "deploy", name: "デプロイ", order: 6, startDate: "2026-09-20", predecessors: fs("deleted-task") }),
+  ];
+  const resources = [{ id: "r1", name: "佐藤", weeklyCapacity: 5, monthlyCapacity: 20 }];
+  return buildProjectExport(tasks, resources, [], [], false);
+}
+
+describe("validateProject（validate コマンドの本体）", () => {
+  it("正常な seed データでは、平準化 ON/OFF のどちらでも issue を返さない", () => {
+    for (const leveling of [false, true]) {
+      const r = validateProject(seedProject(), { leveling });
+      expect(r.issues, `leveling=${leveling}`).toEqual([]);
+      expect(r.valid).toBe(true);
+      expect(r.scheduleChecks).toEqual({ performed: true, leveling });
+    }
+  });
+
+  it("4種類の依存関係の矛盾を検出し、開始日との矛盾・期日超過は warning として valid を妨げない", () => {
+    const r = validateProject(conflictingProject(), { leveling: false });
+    const codes = r.issues.map(i => `${i.code}:${i.ids.join(",")}`);
+    expect(codes).toEqual(expect.arrayContaining([
+      "dependency-cycle:review,qa,test",
+      "predecessor-missing:deploy",
+      "dependency-violation:impl",
+      "fixed-milestone-overrun:ms",
+    ]));
+    expect(codes.some(c => c.endsWith(":doc"))).toBe(false); // 着手済み
+    const violation = r.issues.find(i => i.code === "dependency-violation");
+    expect(violation.severity).toBe("warning");
+    expect(violation.message).toBe("「実装」: 先行「基本設計」（FS）の条件では 2026/09/08 以降に開始する必要がありますが、2026/09/03 に開始しています");
+    expect(r.valid).toBe(false); // 循環参照・存在しない先行タスクは error
+  });
+
+  for (const leveling of [false, true]) {
+    it(`アプリ（App.jsx）と同じ判定結果になる（平準化${leveling ? "ON" : "OFF"}）`, () => {
+      const data = conflictingProject();
+      // validate は参照整合性（循環・存在しない先行）を先に、日程の検査を後に並べるため、順序は問わず比較する。
+      const key = i => `${i.code}:${i.ids.join(",")}`;
+      const app = appDependencyIssues(data, leveling).map(i => ({ code: i.code, ids: i.ids, severity: i.severity })).sort((a, b) => key(a).localeCompare(key(b)));
+      const cliCodes = new Set(["dependency-cycle", "predecessor-missing", "dependency-violation", "fixed-milestone-overrun"]);
+      const cli = validateProject(data, { leveling }).issues
+        .filter(i => cliCodes.has(i.code))
+        .map(i => ({ code: i.code, ids: i.ids, severity: i.severity }))
+        .sort((a, b) => key(a).localeCompare(key(b)));
+      expect(cli).toEqual(app);
+      // 期日超過は平準化 ON/OFF に関わらず出る
+      expect(cli.some(i => i.code === "fixed-milestone-overrun")).toBe(true);
+    });
+  }
+
+  it("computeSchedule（recalc / plan / explain）もアプリと同じ一覧を dependencyIssues として返す", () => {
+    const data = conflictingProject();
+    const r = computeSchedule(data, { leveling: false });
+    expect(r.dependencyIssues.map(i => i.code)).toEqual(appDependencyIssues(data, false).map(i => i.code));
+    expect(r.levelWarnings).toEqual([]);
+  });
+
+  it("親子関係の循環があるときは、日程に関する検査を行わず理由を返す", () => {
+    const data = seedProject();
+    data.tasks.push({ id: "p1", name: "P1", parentId: "p2", order: 0 }, { id: "p2", name: "P2", parentId: "p1", order: 0 });
+    const r = validateProject(data, { leveling: false });
+    expect(r.issues.some(i => i.code === "parent-cycle")).toBe(true);
+    expect(r.scheduleChecks.performed).toBe(false);
+    expect(r.scheduleChecks.reason).toContain("parent-cycle");
+  });
+
+  it("「自動スケジューリング実行」（applyAutoSchedule）後は、開始日との矛盾が出ない", () => {
+    const data = conflictingProject();
+    data.tasks = data.tasks.filter(t => !["review", "qa", "test", "deploy"].includes(t.id)); // 循環・存在しない先行を除く
+    for (const leveling of [false, true]) {
+      const projectStart = deriveProjectStart(data.tasks);
+      const y = parseISO(projectStart).getUTCFullYear();
+      const cal = makeCalendar(buildHolidayMap(y - 1, y + 6));
+      const { tasks } = applyAutoSchedule(data, projectStart, cal, { leveling });
+      const r = validateProject({ ...data, tasks }, { leveling });
+      expect(r.issues.map(i => i.code), `leveling=${leveling}`).toEqual(["fixed-milestone-overrun"]);
+    }
   });
 });
 

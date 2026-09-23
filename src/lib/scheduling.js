@@ -365,6 +365,9 @@ export function rollupSummaries(tasks, result) {
  *  進捗率が入力済み（着手済み）のタスクは平準化の対象外とし、現在の開始日に固定する。
  *  探索範囲内に配置できない場合は、依存関係等から求めた最短開始日に戻して負荷を登録し、
  *  稼働上限を満たしていないことを警告する（探索終端の日付を確定しない）。
+ *  warnings は稼働上限内での配置失敗だけを返す（固定マイルストーンの期日超過は dependencyIssues.js が扱う）。
+ *  resources に空配列を渡すと稼働上限を一切見ないため、「依存関係・手入力開始日・スプリントの下限を
+ *  すべて満たす最短の配置」を求める用途にも使える（autoScheduleStartDates の平準化OFF時）。
  * @param {import("./taskTree.js").Task[]} tasks
  * @param {Map<string, ScheduleEntry>} cpmResult - runCPM の計算結果（フロートの優先度付けに使う）
  * @param {import("./taskTree.js").Resource[]} resources
@@ -555,15 +558,8 @@ export function levelResources(tasks, cpmResult, resources, cal, sprints) {
     remaining.delete(id);
   }
 
-  // 固定マイルストーンの期日超過チェック
-  leaves.forEach(t => {
-    if (t.milestone && t.milestoneMode === "fixed" && t.fixedDate && placed[t.id]) {
-      if (placed[t.id].finish > t.fixedDate) {
-        warnings.push(`「${t.name}」の平準化後の日程（${fmtJP(placed[t.id].finish)}）が固定期日（${fmtJP(t.fixedDate)}）を超過しています`);
-      }
-    }
-  });
-
+  // 固定マイルストーンの期日超過は、平準化の ON/OFF に関わらず detectDependencyIssues
+  // （src/lib/dependencyIssues.js）が表示スケジュールから判定する。ここで重ねて警告しない。
   return { placed, warnings };
 }
 
@@ -572,13 +568,21 @@ export function levelResources(tasks, cpmResult, resources, cal, sprints) {
  * 各リーフタスクの startDate に書き戻すべき開始日を求める。
  *
  * ベースは respectManualPins:false の CPM 結果の schedStart（固定マイルストーン自身は LS/LF、
- * それ以外は ES/EF ＝最短）。opts.leveling が true のときは、その CPM 結果を startDate へ
- * 反映した状態でさらにリソース平準化し、平準化後の配置日を採用する。
+ * それ以外は ES/EF ＝最短）。その CPM 結果を startDate へ反映した状態で levelResources を通し、
+ * 配置日を採用する。opts.leveling が true のときは担当者の稼働上限を考慮して平準化し、
+ * false のときはリソースを空にして（＝稼働上限を見ずに）依存関係だけを満たす配置に揃える。
  *
  * 平準化ONなのに CPM の（資源競合を見ない）日付を書き戻すと、書き戻した startDate が
  * 平準化ON時の表示スケジュールとずれる。その状態で着手済み（progress > 0）にすると
  * levelResources がそのタスクを startDate にピン留めするため、表示だけが平準化前の位置へ
  * 「戻る」ように見える不具合が起きる。それを防ぐため、平準化ON時は表示と一致する日付を書き戻す。
+ *
+ * 平準化OFFでも levelResources を通すのは、固定マイルストーンの後続タスクのため。CPM のフォワードパスは
+ * 固定マイルストーンの ES（依存関係から求めた最早日）から後続タスクの日程を求めるが、書き戻す
+ * 固定マイルストーン自身の日付（＝表示日）は LS（期日由来）なので、余裕のある固定マイルストーンの
+ * 後続タスクが、表示上そのマイルストーンより前に開始してしまう（依存関係の矛盾として警告される）。
+ * 書き戻す日付を下限にした配置をやり直すことで、後続タスクを表示中のマイルストーンの後ろに揃える。
+ * 固定マイルストーン自身は、平準化OFFの表示が常に LS/LF を使うため、従来どおり CPM の LS を書き戻す。
  *
  * @param {import("./taskTree.js").Task[]} tasks
  * @param {import("./calendar.js").Calendar} cal
@@ -596,13 +600,14 @@ export function autoScheduleStartDates(tasks, cal, projectStart, sprints, resour
     const s = auto.result.get(t.id);
     if (s && s.schedStart && !s.isSummary) out.set(t.id, s.schedStart);
   });
-  if (opts.leveling) {
-    // CPM 結果を startDate に反映した状態で平準化する（書き戻し後の表示条件と揃える）。
-    const interim = tasks.map(t => (out.has(t.id) ? { ...t, startDate: out.get(t.id) } : t));
-    const { placed } = levelResources(interim, auto.result, resources || [], cal, sprints);
-    Object.entries(placed).forEach(([id, dates]) => {
-      if (dates && dates.start) out.set(id, dates.start);
-    });
-  }
+  // CPM 結果を startDate に反映した状態で配置し直す（書き戻し後の表示条件と揃える）。
+  const interim = tasks.map(t => (out.has(t.id) ? { ...t, startDate: out.get(t.id) } : t));
+  const { placed } = levelResources(interim, auto.result, opts.leveling ? (resources || []) : [], cal, sprints);
+  const byId = {}; tasks.forEach(t => (byId[t.id] = t));
+  Object.entries(placed).forEach(([id, dates]) => {
+    const t = byId[id];
+    if (!opts.leveling && t && t.milestone && t.milestoneMode === "fixed") return;
+    if (dates && dates.start) out.set(id, dates.start);
+  });
   return out;
 }

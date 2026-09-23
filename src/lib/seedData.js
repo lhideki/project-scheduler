@@ -14,6 +14,8 @@ import { runCPM, levelResources, deriveProjectStart } from "./scheduling.js";
    その実日程を包含するようにスプリント期間と固定マイルストーンの期日を逆算する
    （＝どの月に開いても矛盾・警告が出ない自己整合なサンプルになる）。スプリント開始日は各グループの
    先頭タスクの開始日に合わせるので、スプリント開始日がフロアとして効いても実日程は動かない。
+   各タスクの開始日（startDate）にもこの実日程を入れておく。仮置きの開始日（base）のままだと、
+   平準化OFFの表示では開始日が依存関係の条件を満たさず、依存関係の矛盾として警告されてしまうため。
    ========================================================================================= */
 export function seedData() {
   const today = new Date();
@@ -83,8 +85,16 @@ export function seedData() {
   ];
 
   // 固定マイルストーン「リリース」の期日は、結合テストの実日程の後ろに数稼働日の余裕を持たせて置く
-  // （平準化ONでも期日超過警告が出ないように）。
-  tasks.find(t => t.id === m2).fixedDate = cal.shift(maxFinish([t7]), 3);
+  // （平準化ON/OFFのどちらでも期日超過の警告が出ないように）。
+  const release = tasks.find(t => t.id === m2);
+  release.fixedDate = cal.shift(maxFinish([t7]), 3);
+
+  // 仮置きの開始日（base）を実日程で置き換える（依存関係の条件を満たす開始日にする）。
+  // 固定マイルストーンは、WBS表で期日を編集したときと同じく開始日＝期日にそろえる。
+  tasks.forEach(t => {
+    if (t.id === m2) t.startDate = release.fixedDate;
+    else if (placed[t.id]) t.startDate = placed[t.id].start;
+  });
 
   // 非稼働日カレンダーの例外（休日・稼働日の上書き）。サンプルでは未設定。
   const calendarExceptions = [];

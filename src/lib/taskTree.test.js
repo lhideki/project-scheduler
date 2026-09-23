@@ -80,6 +80,15 @@ describe("ancestorChain", () => {
     const byId = Object.fromEntries(tasks.map(t => [t.id, t]));
     expect(ancestorChain(byId, "g1")).toEqual([]);
   });
+  it("親子関係が循環していても無限ループせず、一巡した時点で打ち切る", () => {
+    const byId = {
+      a: { id: "a", parentId: "b" },
+      b: { id: "b", parentId: "a" },
+      leaf: { id: "leaf", parentId: "a" },
+    };
+    expect(ancestorChain(byId, "leaf").map(t => t.id)).toEqual(["a", "b"]);
+    expect(ancestorChain(byId, "a").map(t => t.id)).toEqual(["b"]);
+  });
 });
 
 describe("effectivePredecessors", () => {

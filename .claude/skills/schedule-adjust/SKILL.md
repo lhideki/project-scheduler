@@ -57,7 +57,7 @@ CLI（`cli.mjs`）が担当する。**CLIはJSONファイルを一切書き換�
 出力は常に構造化JSON（stdout）。`ok: false` はCLI自体のエラー（ファイル未読込・JSON壊れ等）。
 
 ```
-node <CLI> validate <file>
+node <CLI> validate <file> [--leveling on|off|auto]
 node <CLI> recalc   <file> [--leveling on|off|auto]
 node <CLI> plan     <original.json> <edited.json> [--reschedule] [--leveling on|off|auto]
 node <CLI> explain  <file> --task <taskId> [--leveling on|off|auto]
@@ -65,13 +65,29 @@ node <CLI> explain  <file> --task <taskId> [--leveling on|off|auto]
 
 ### `validate <file>`
 スキーマ検証＋参照整合性（存在しない親/担当者/スプリント/先行タスク、自己依存、循環依存、
-スプリント期間重複、`calendarExceptions` の日付書式・type、同一日の休日＋稼働日の競合）。
-`valid`（error が無いか）、`issues[]`（`severity: error|warning`）を返す。
+スプリント期間重複、`calendarExceptions` の日付書式・type、同一日の休日＋稼働日の競合）に加え、
+アプリの「依存関係の矛盾」と同じ判定（`src/lib/dependencyIssues.js`）を行う。
+`valid`（error が無いか）、`issues[]`（`severity: error|warning`）、`scheduleChecks` を返す。
+- 依存関係の矛盾の `code`:
+  - `dependency-cycle`（error）… 循環参照。グループを介した循環（タスクAがグループGに依存し、
+    G配下のタスクBがAに依存）も含む。`ids` は循環に含まれる全タスク、`path` は循環の経路。
+  - `predecessor-missing`（error）… 存在しないタスク（削除済み等）を先行タスクにしている。
+  - `dependency-violation`（warning）… 表示中の開始日が依存関係（FS/SS/FF/SF・ラグ）の条件を
+    満たしていない。着手済み（`progress > 0`）のタスクは対象外。`plan --reschedule`
+    （＝「自動スケジューリング実行」）で解消する。`requiredDate`（必要な日付）・`actualDate` 付き。
+  - `fixed-milestone-overrun`（warning）… 依存関係から求めた最早日（または表示中の日程）が固定
+    マイルストーンの `fixedDate` を超えている。平準化 ON/OFF に関わらず判定する。
+- `dependency-violation` / `fixed-milestone-overrun` は表示スケジュールで判定するため、`--leveling`
+  （既定 `auto` = JSON の `levelingOn`）の条件で計算する。平準化 ON では手入力の開始日が下限扱いに
+  なるため、`dependency-violation` は原則出ない。型エラー・ID重複・親子循環があるときはこの2種の
+  判定を行わず、`scheduleChecks.performed: false` と `reason` を返す。
 
 ### `recalc <file>`
 非破壊。現在のファイルの実効スケジュールを返す（アプリを開いた状態と一致）。
 `tasks[]`（`schedStart`/`schedFinish`/`critical`/`float`/`progress`）、`projectEnd`、
-`sprintConflicts`、`levelWarnings`、`integrityIssues`。**現状把握・what-if 確認に使う。**
+`sprintConflicts`、`levelWarnings`（稼働上限内に配置できなかった警告）、`dependencyIssues`
+（アプリのヘッダー「依存関係の矛盾」と同じ一覧。形式は `validate` の issue と同じ）、`integrityIssues`。
+**現状把握・what-if 確認に使う。**
 
 ### `plan <original.json> <edited.json>`
 **変更影響レポート＋提案JSONを返す。ファイルは書き換えない。**
@@ -87,13 +103,13 @@ node <CLI> explain  <file> --task <taskId> [--leveling on|off|auto]
     `newlyCritical`/`noLongerCritical`、`snapshotName`
   - `scheduleChanges[]` … タスクごとの before→after（`schedStart`/`schedFinish`/`critical`/`shiftWorkdays`）
   - `startDateChanges[]` … `--reschedule` 時の `startDate` 書き戻し一覧
-  - `sprintConflicts` / `levelWarnings` … before/after
+  - `sprintConflicts` / `levelWarnings` / `dependencyIssues` … before/after
   - `proposed` … 保存すべき完全なプロジェクトJSON。`versions[]` の先頭に「調整前」スナップショットを
     追加済み、`tasks[]` はモードに応じて書き戻し済み、`levelingOn` は指定値。
 
 ### `explain <file> --task <taskId>`
 1タスクの ES/EF/LS/LF・フロート・クリティカル、拘束している先行タスク、スプリントフロア、
-ピン留めの有無と理由を返す。「なぜこの日程になるのか」の説明に使う。
+ピン留めの有無と理由、そのタスクに関する `dependencyIssues` を返す。「なぜこの日程になるのか」の説明に使う。
 
 ## 標準ワークフロー（保存を伴う調整）
 
@@ -103,13 +119,13 @@ node <CLI> explain  <file> --task <taskId> [--leveling on|off|auto]
    - 元ファイルは変更しない。
 4. **プラン生成**: `node <CLI> plan <元ファイル> <editedファイル> [--reschedule] [--leveling …]`
    - `blocked` なら `integrityIssues` を提示して 3 に戻る。
-5. **レポート提示**: `summary` / `scheduleChanges` / `sprintConflicts` / `levelWarnings` を
+5. **レポート提示**: `summary` / `scheduleChanges` / `sprintConflicts` / `levelWarnings` / `dependencyIssues` を
    日本語の表・箇条書きに整形してユーザーに見せる。最低限、次を必ず含める:
    - 依頼した編集の内容
    - 完了予定日（`projectEnd`）の before → after
    - 開始日・終了日が動くタスク（WBS番号／名前／before→after／増減日数）
    - クリティカルパスに入った／外れたタスク
-   - 新たに発生するスプリント矛盾・平準化警告
+   - 新たに発生するスプリント矛盾・平準化警告・依存関係の矛盾（`dependencyIssues.after` にあって `before` に無いもの）
    - 「`versions[]` に『調整前』スナップショット（名前）を1件追加する」旨
 6. **保存可否の確認**: `AskUserQuestion` で「この内容で保存しますか？」と尋ねる。
 7. **保存**:
@@ -144,7 +160,8 @@ node <CLI> explain  <file> --task <taskId> [--leveling on|off|auto]
   「もっと前倒しで詰めてよいか」を確認してから `--reschedule` を検討する。
 
 ### 「担当者の割り当てが重ならないように」
-- `--leveling on` で `plan`。`levelWarnings`（固定マイルストーン期日超過）と
+- `--leveling on` で `plan`。`levelWarnings`（稼働上限内に配置できなかったタスク）、
+  `dependencyIssues.after` の `fixed-milestone-overrun`（固定マイルストーン期日超過）と
   `after` の `projectEnd` を必ず提示。必要なら担当者（`assigneeId`）の再割り当ても提案。
 
 ### 「着手済みの遅れを踏まえてスケジュールを引き直して」

@@ -91,11 +91,18 @@ export function allDescendantIds(tasks, rootId) {
   return out;
 }
 
-/** タスクの祖先グループ（親・祖父母…）を配列で返す。 */
+/** タスクの祖先グループ（親・祖父母…）を配列で返す。
+ *  インポートしたJSON等で親子関係が循環している場合も無限ループしないよう、一度辿ったIDで打ち切る
+ *  （親子関係の循環自体は CLI の validate が parent-cycle として報告する）。 */
 export function ancestorChain(byId, id) {
   const out = [];
+  const seen = new Set([id]);
   let cur = byId[id];
-  while (cur && cur.parentId) { cur = byId[cur.parentId]; if (cur) out.push(cur); }
+  while (cur && cur.parentId && !seen.has(cur.parentId)) {
+    seen.add(cur.parentId);
+    cur = byId[cur.parentId];
+    if (cur) out.push(cur);
+  }
   return out;
 }
 /** リーフタスクの「実効的な先行タスク」一覧を返す：自分自身の先行タスクに加え、

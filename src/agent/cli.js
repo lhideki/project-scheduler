@@ -6,7 +6,7 @@
    エージェントが行う（＝レポートをユーザーに提示し、保存可否の判断を仰いだうえで書き込む）。
 
    使い方:
-     node cli.mjs validate <file>
+     node cli.mjs validate <file> [--leveling on|off|auto]
      node cli.mjs recalc   <file> [--leveling on|off|auto]
      node cli.mjs plan     <original.json> <edited.json> [--leveling on|off|auto]
      node cli.mjs explain  <file> --task <taskId> [--leveling on|off|auto]
@@ -23,6 +23,7 @@ import {
   runCPM, levelResources, rollupSummaries, deriveProjectStart,
   candidateFromDep, earliestSprintFloor, autoScheduleStartDates,
   detectSprintConflicts, computeOverlappingSprintIds,
+  detectDependencyIssues, SCHEDULE_DEPENDENCY_ISSUE_CODES,
   normalizeImportedProject,
   buildFlatList, isGroupId, effectivePredecessors,
 } from "./engine.js";
@@ -144,8 +145,10 @@ export function computeSchedule(data, opts = {}) {
   schedule.forEach(v => { if (v.schedFinish && v.schedFinish > projectEnd) projectEnd = v.schedFinish; });
 
   const sprintConflicts = detectSprintConflicts(tasks, sprints, schedule);
+  // アプリのヘッダー「依存関係の矛盾」・WBS表・ガントチャートと同じ判定（src/lib/dependencyIssues.js）。
+  const dependencyIssues = detectDependencyIssues(tasks, schedule, cal).map(issue => formatDependencyIssue(issue, tasks));
 
-  return { projectStart, cal, cpm, schedule, projectEnd, leveling, levelWarnings, sprintConflicts };
+  return { projectStart, cal, cpm, schedule, projectEnd, leveling, levelWarnings, sprintConflicts, dependencyIssues };
 }
 
 /** buildFlatList 順（WBS表示順）でスケジュール行を整形する。 */
@@ -179,6 +182,14 @@ export function scheduleRows(data, schedule) {
 function nameOf(tasks, id) {
   const t = tasks.find(x => x.id === id);
   return t ? t.name : id;
+}
+
+/** src/lib/dependencyIssues.js の判定結果を、CLI の issue 形式（severity/code/ids/message）へ整形する。
+ *  lib のメッセージはアプリの行ツールチップ用に対象タスク自身の名前を含まないため、循環以外は先頭に付ける。 */
+function formatDependencyIssue(issue, tasks) {
+  const { code, severity, ids, message, ...detail } = issue;
+  const subject = code === "dependency-cycle" ? "" : `「${nameOf(tasks, ids[0])}」: `;
+  return { severity, code, ids, message: `${subject}${message}`, ...detail };
 }
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -318,41 +329,12 @@ export function findParentCycles(tasks) {
   return cycles;
 }
 
-export function findDependencyCycles(tasks) {
-  const adj = new Map(tasks.map(t => [t.id, []]));
-  for (const t of tasks) {
-    for (const p of t.predecessors || []) {
-      if (adj.has(p.id)) adj.get(p.id).push(t.id);
-    }
-  }
-  const WHITE = 0, GRAY = 1, BLACK = 2;
-  const color = new Map(tasks.map(t => [t.id, WHITE]));
-  const stack = [];
-  const cycles = [];
-  const dfs = (u) => {
-    color.set(u, GRAY);
-    stack.push(u);
-    for (const v of adj.get(u) || []) {
-      if (color.get(v) === GRAY) {
-        const i = stack.indexOf(v);
-        if (i >= 0) cycles.push(stack.slice(i).concat(v));
-      } else if (color.get(v) === WHITE) {
-        dfs(v);
-      }
-    }
-    stack.pop();
-    color.set(u, BLACK);
-  };
-  for (const t of tasks) if (color.get(t.id) === WHITE) dfs(t.id);
-  return cycles;
-}
-
 /** フィールド型・参照整合性・循環依存（依存関係／親子）・スプリント重複を検査して issue 配列を返す。 */
 export function analyzeIntegrity(data) {
   const tasks = data.tasks || [];
 
   // 型・書式の検査を先に行う。ここで error が出た場合、以降の参照チェックや
-  // findDependencyCycles は不正な値で誤動作しうるため、フィールド検査の結果だけ返す。
+  // 依存関係の判定（detectDependencyIssues）は不正な値で誤動作しうるため、フィールド検査の結果だけ返す。
   const shapeIssues = checkFieldShapes(data);
   if (shapeIssues.some(i => i.severity === "error")) return shapeIssues;
 
@@ -396,8 +378,6 @@ export function analyzeIntegrity(data) {
     for (const p of t.predecessors || []) {
       if (p.id === t.id) {
         issues.push({ severity: "error", code: "self-dependency", ids: [t.id], message: `「${t.name}」が自分自身に依存しています` });
-      } else if (!taskIds.has(p.id)) {
-        issues.push({ severity: "error", code: "predecessor-missing", ids: [t.id], message: `「${t.name}」の先行タスク「${p.id}」が存在しません` });
       }
     }
     if ((t.predecessors || []).length && isGroupId(tasks, t.id)) {
@@ -405,13 +385,11 @@ export function analyzeIntegrity(data) {
     }
   }
 
-  for (const cyc of findDependencyCycles(tasks)) {
-    issues.push({
-      severity: "error",
-      code: "dependency-cycle",
-      ids: cyc,
-      message: `循環依存: ${cyc.map(id => nameOf(tasks, id)).join(" → ")}`,
-    });
+  // 存在しない先行タスク（predecessor-missing）・循環参照（dependency-cycle、グループを介した循環を含む）は
+  // アプリと同じ判定（src/lib/dependencyIssues.js）を使う。スケジュールを使う判定（開始日との矛盾・
+  // 固定マイルストーンの期日超過）は validateProject がスケジュール計算後に追加する。
+  for (const issue of detectDependencyIssues(tasks)) {
+    issues.push(formatDependencyIssue(issue, tasks));
   }
 
   const overlaps = computeOverlappingSprintIds(data.sprints || []);
@@ -508,9 +486,40 @@ function tryComputeSchedule(data, opts) {
   }
 }
 
-function cmdValidate(positional) {
+/** ID重複・親子関係の循環など、スケジュールを計算しても意味のある結果にならない整合性エラー（型エラーは別途判定）。 */
+const SCHEDULE_BLOCKING_CODES = new Set(["duplicate-task-id", "parent-cycle"]);
+
+/**
+ * validate の本体（ファイル入出力を除いた純粋な処理）。参照整合性（analyzeIntegrity）に加え、表示スケジュールを
+ * 計算して開始日との矛盾・固定マイルストーンの期日超過（アプリと同じ判定）を issues に追加する。
+ * 型エラー・ID重複・親子関係の循環がある場合はスケジュールを使う判定を行わない（scheduleChecks.performed=false）。
+ * @param {object} data - 正規化済みプロジェクトデータ
+ * @param {{leveling?: boolean}} [opts] - 表示スケジュールの平準化条件（既定はデータの levelingOn）
+ */
+export function validateProject(data, opts = {}) {
+  const leveling = opts.leveling === undefined ? !!data.levelingOn : !!opts.leveling;
+  const issues = analyzeIntegrity(data);
+  let scheduleChecks;
+  const blocking = checkFieldShapes(data).find(i => i.severity === "error")
+    || issues.find(i => i.severity === "error" && SCHEDULE_BLOCKING_CODES.has(i.code));
+  if (blocking) {
+    scheduleChecks = { performed: false, leveling, reason: `整合性エラー（${blocking.code}）があるため、日程に関する依存関係の検査を行いませんでした` };
+  } else {
+    const computed = tryComputeSchedule(data, { respectManualPins: true, leveling });
+    if (computed.ok) {
+      const scheduleCodes = new Set(SCHEDULE_DEPENDENCY_ISSUE_CODES);
+      issues.push(...computed.result.dependencyIssues.filter(i => scheduleCodes.has(i.code)));
+      scheduleChecks = { performed: true, leveling };
+    } else {
+      scheduleChecks = { performed: false, leveling, reason: computed.error };
+    }
+  }
+  return { valid: !issues.some(i => i.severity === "error"), issues, scheduleChecks };
+}
+
+function cmdValidate(positional, opts) {
   const [path] = positional;
-  if (!path) fail("使い方: validate <file>");
+  if (!path) fail("使い方: validate <file> [--leveling on|off|auto]");
   const raw = readProjectFile(path);
 
   let data;
@@ -533,13 +542,14 @@ function cmdValidate(positional) {
     });
   }
 
-  const issues = analyzeIntegrity(data);
-  const hasError = issues.some(i => i.severity === "error");
+  const leveling = resolveLeveling(opts.leveling, data);
+  const { valid, issues, scheduleChecks } = validateProject(data, { leveling });
   emit({
     command: "validate",
     file: path,
-    valid: !hasError,
+    valid,
     schemaValid: true,
+    scheduleChecks,
     counts: {
       tasks: data.tasks.length,
       resources: data.resources.length,
@@ -576,6 +586,7 @@ function cmdRecalc(positional, opts) {
     tasks: scheduleRows(data, r.schedule),
     sprintConflicts: r.sprintConflicts,
     levelWarnings: r.levelWarnings,
+    dependencyIssues: r.dependencyIssues,
     integrityIssues: integrity,
   });
 }
@@ -703,6 +714,7 @@ function cmdPlan(positional, opts) {
     scheduleChanges,
     sprintConflicts: { before: before.sprintConflicts, after: after.sprintConflicts },
     levelWarnings: { before: before.levelWarnings, after: after.levelWarnings },
+    dependencyIssues: { before: before.dependencyIssues, after: after.dependencyIssues },
     integrityIssues: integrity,
     proposed,
   });
@@ -795,6 +807,7 @@ function cmdExplain(positional, opts) {
       fixedMilestoneBackward: !!(task.milestone && task.milestoneMode === "fixed"),
     },
     predecessors,
+    dependencyIssues: r.dependencyIssues.filter(i => i.ids.includes(taskId)),
   });
 }
 
@@ -817,7 +830,7 @@ function main() {
       process.stdout.write([
         "Project Scheduler — スケジュール調整CLI",
         "",
-        "  validate <file>",
+        "  validate <file> [--leveling on|off|auto]",
         "  recalc   <file> [--leveling on|off|auto]",
         "  plan     <original.json> <edited.json> [--reschedule] [--leveling on|off|auto]",
         "  explain  <file> --task <taskId> [--leveling on|off|auto]",

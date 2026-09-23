@@ -6,9 +6,10 @@ import {
 } from "lucide-react";
 
 import { toISO, parseISO, buildHolidayMap, makeCalendar, fmtJP } from "./lib/calendar.js";
-import { uid, migrateSprintIds, isGroupId, buildFlatList } from "./lib/taskTree.js";
+import { uid, migrateSprintIds, isGroupId, buildFlatList, ancestorChain } from "./lib/taskTree.js";
 import { runCPM, rollupSummaries, levelResources, deriveProjectStart, autoScheduleStartDates } from "./lib/scheduling.js";
 import { detectSprintConflicts } from "./lib/sprints.js";
+import { detectDependencyIssues, groupDependencyIssuesByTask, DEPENDENCY_ISSUE_LABELS } from "./lib/dependencyIssues.js";
 import {
   downloadJSON, downloadTextFile, copyTextToClipboard, generateMermaidGantt,
   buildProjectExport, normalizeImportedProject, normalizeProjectVersions,
@@ -160,6 +161,11 @@ export default function App() {
   ));
   const [confirmState, setConfirmState] = useState(null); // { message, confirmLabel, danger, onConfirm }
   const [sprintConflictOpen, setSprintConflictOpen] = useState(false);
+  const [dependencyIssuesOpen, setDependencyIssuesOpen] = useState(false);
+  // 依存関係の矛盾の一覧から選んだタスクを WBS/ガント画面で表示させる要求（seq は同じタスクの再選択用）。
+  // WBS/ガント画面がスクロールし終えたら null に戻す（タブを切り替えて戻ったときに再スクロールしないように）。
+  const [revealTaskRequest, setRevealTaskRequest] = useState(null);
+  const revealTaskSeqRef = useRef(0);
   // window.confirm はアーティファクトのサンドボックス化された iframe 内では許可されず
   // 常に false を返す（＝何も起きない）ことがあるため、自前の確認モーダルを使う。
   function requestConfirm(message, onConfirm, confirmLabel = "実行する", danger = true) {
@@ -553,6 +559,31 @@ export default function App() {
     [tasks, sprints, schedule]
   );
 
+  // 依存関係の矛盾（循環参照・存在しない先行タスク・開始日との矛盾・固定マイルストーンの期日超過）。
+  // 表示スケジュール（平準化ON時は平準化後）の上で判定するため、画面に見えている日程と一致する。
+  // 日程の自動修正はしない（開始日の矛盾は「自動スケジューリング実行」で解消する）。CLI の validate と同じ判定。
+  const dependencyIssues = useMemo(
+    () => detectDependencyIssues(tasks, schedule, cal),
+    [tasks, schedule, cal]
+  );
+  const dependencyIssuesByTask = useMemo(() => groupDependencyIssuesByTask(dependencyIssues), [dependencyIssues]);
+  const dependencyIssueErrorCount = dependencyIssues.filter(i => i.severity === "error").length;
+  const wbsNoById = useMemo(() => new Map(buildFlatList(tasks, new Set()).map(t => [t.id, t.wbsNo])), [tasks]);
+
+  // 一覧から選んだタスクを WBS/ガント画面で選択し、折りたたまれた祖先グループを展開して行を表示する。
+  function revealTask(taskId) {
+    const byId = {}; tasks.forEach(t => (byId[t.id] = t));
+    const ancestorIds = ancestorChain(byId, taskId).map(t => t.id);
+    if (ancestorIds.some(id => collapsed.has(id))) {
+      setCollapsed(prev => { const n = new Set(prev); ancestorIds.forEach(id => n.delete(id)); return n; });
+    }
+    setTab("gantt");
+    setSelectedId(taskId);
+    revealTaskSeqRef.current += 1;
+    setRevealTaskRequest({ taskId, seq: revealTaskSeqRef.current });
+    setDependencyIssuesOpen(false);
+  }
+
   return (
     <div className="flex flex-col bg-slate-50 text-slate-800 ps-app-root" style={{ fontFamily: "ui-sans-serif, system-ui, sans-serif" }}>
       <style>{`.ps-app-root { height: 100vh; height: 100dvh; width: 100%; }`}</style>
@@ -597,6 +628,21 @@ export default function App() {
             className="w-6 h-6 -ml-1.5 flex items-center justify-center rounded-md text-amber-600 hover:bg-amber-50"
           >
             <AlertTriangle size={15} />
+          </button>
+        )}
+        {dependencyIssues.length > 0 && (
+          <button
+            onClick={() => setDependencyIssuesOpen(true)}
+            title={`依存関係に矛盾があります（${dependencyIssues.length}件。クリックで詳細を表示）`}
+            className={
+              "h-6 px-1.5 flex items-center gap-1 rounded-md text-[11px] font-medium border " +
+              (dependencyIssueErrorCount > 0
+                ? "text-red-700 bg-red-50 border-red-200 hover:bg-red-100"
+                : "text-amber-700 bg-amber-50 border-amber-200 hover:bg-amber-100")
+            }
+          >
+            <AlertTriangle size={13} />
+            依存関係の矛盾 {dependencyIssues.length}
           </button>
         )}
         <div className="text-xs font-mono text-slate-500 flex items-center gap-1 border-l border-slate-200 pl-3 ml-1">
@@ -714,6 +760,9 @@ export default function App() {
             versions={versions} baselineVersionId={baselineVersionId} setBaselineVersionId={setBaselineVersionId}
             requestConfirm={requestConfirm}
             autoScheduleHighlightIds={autoScheduleHighlightIds}
+            dependencyIssuesByTask={dependencyIssuesByTask}
+            revealTaskRequest={revealTaskRequest}
+            onRevealTaskHandled={() => setRevealTaskRequest(null)}
             onSaveVersion={saveVersion}
             canUndo={taskHistory.past.length > 0}
             canRedo={taskHistory.future.length > 0}
@@ -797,6 +846,59 @@ export default function App() {
             </div>
             <div className="flex justify-end gap-2 px-4 py-3 border-t border-slate-100 flex-shrink-0">
               <IconBtn label="閉じる" onClick={() => setSprintConflictOpen(false)} small />
+            </div>
+          </div>
+        </div>
+      )}
+      {dependencyIssuesOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onClick={() => setDependencyIssuesOpen(false)}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 flex-shrink-0">
+              <div className={"flex items-center gap-2 text-sm font-semibold " + (dependencyIssueErrorCount > 0 ? "text-red-700" : "text-amber-700")}>
+                <AlertTriangle size={15} />
+                依存関係の矛盾（{dependencyIssues.length}件）
+              </div>
+              <button onClick={() => setDependencyIssuesOpen(false)} className="text-slate-400 hover:text-slate-700">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="p-4 space-y-3 overflow-y-auto">
+              <p className="text-xs text-slate-500">
+                {"日程は自動では修正されません。開始日との矛盾は「自動スケジューリング実行」で解消できます。"
+                  + "循環参照・存在しない先行タスクは、先行タスク欄を修正してください。項目をクリックすると該当タスクを表示します。"}
+              </p>
+              {dependencyIssues.map((issue, idx) => {
+                const isError = issue.severity === "error";
+                const kind = DEPENDENCY_ISSUE_LABELS[issue.code] || issue.code;
+                const target = issue.ids.map(id => tasks.find(t => t.id === id)).filter(Boolean);
+                return (
+                  <button
+                    key={`${issue.code}-${issue.ids.join(",")}-${idx}`}
+                    type="button"
+                    onClick={() => revealTask(issue.ids[0])}
+                    className={
+                      "w-full text-left border rounded-lg px-3 py-2 hover:shadow-sm " +
+                      (isError ? "border-red-200 bg-red-50 hover:bg-red-100/60" : "border-amber-200 bg-amber-50 hover:bg-amber-100/60")
+                    }
+                  >
+                    <div className="text-xs font-medium text-slate-700 flex items-center gap-1.5 flex-wrap">
+                      <span className={"text-[10px] leading-none px-1.5 py-0.5 rounded border " + (isError ? "bg-white text-red-700 border-red-200" : "bg-white text-amber-700 border-amber-200")}>{kind}</span>
+                      {issue.code === "dependency-cycle"
+                        ? <span>{target.length}件のタスク・グループ</span>
+                        : target.map(t => (
+                          <span key={t.id}>
+                            {wbsNoById.get(t.id) && <span className="font-mono text-slate-400 mr-1">{wbsNoById.get(t.id)}</span>}
+                            {t.name}
+                          </span>
+                        ))}
+                    </div>
+                    <div className={"mt-1 text-[11px] " + (isError ? "text-red-700" : "text-amber-700")}>{issue.message}</div>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="flex justify-end gap-2 px-4 py-3 border-t border-slate-100 flex-shrink-0">
+              <IconBtn label="閉じる" onClick={() => setDependencyIssuesOpen(false)} small />
             </div>
           </div>
         </div>

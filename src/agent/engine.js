@@ -13,6 +13,10 @@ export {
 } from "../lib/scheduling.js";
 export { detectSprintConflicts, computeOverlappingSprintIds } from "../lib/sprints.js";
 export {
+  detectDependencyIssues, findDependencyCycles, findMissingPredecessors,
+  DEPENDENCY_ISSUE_CODES, SCHEDULE_DEPENDENCY_ISSUE_CODES,
+} from "../lib/dependencyIssues.js";
+export {
   normalizeImportedProject, buildProjectExport,
   PROJECT_JSON_SCHEMA, PROJECT_SCHEMA_VERSION,
 } from "../lib/exportUtils.js";

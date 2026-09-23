@@ -223,7 +223,7 @@ describe("levelResources", () => {
     expect(placed.B.start).toBe("2024-01-16");
   });
 
-  it("固定マイルストーンの平準化後の日程が期日を超過すると警告を返す", () => {
+  it("固定マイルストーンの期日超過は警告に含めない（dependencyIssues.js の fixed-milestone-overrun に一本化）", () => {
     const tasks = [
       { id: "T1", name: "T1", parentId: null, order: 0, startDate: "2024-01-09", duration: 10, assigneeId: "r1", predecessors: [] },
       {
@@ -233,9 +233,9 @@ describe("levelResources", () => {
     ];
     const resources = [{ id: "r1", name: "R1", weeklyCapacity: 5, monthlyCapacity: 20 }];
     const { result: cpmResult } = runCPM(tasks, cal, "2024-01-09", []);
-    const { warnings } = levelResources(tasks, cpmResult, resources, cal, []);
-    expect(warnings.length).toBe(1);
-    expect(warnings[0]).toContain("固定期日");
+    const { placed, warnings } = levelResources(tasks, cpmResult, resources, cal, []);
+    expect(placed.M.finish > "2024-01-10").toBe(true);
+    expect(warnings).toEqual([]);
   });
 });
 
@@ -278,6 +278,38 @@ describe("autoScheduleStartDates", () => {
     const map = autoScheduleStartDates(tasks, cal, "2024-01-09", [], resources, { leveling: false });
     expect(map.has("G")).toBe(false);
     expect(map.get("L")).toBe("2024-01-09");
+  });
+
+  it("平準化OFFでも、余裕のある固定マイルストーンの後続タスクはマイルストーンの表示日（期日）より後に書き戻す", () => {
+    // C が長いため M（期日 1/31）には余裕があり、M の ES は 1/12・表示日（LS）は 1/31 になる。
+    // CPM の ES だけで書き戻すと B が 1/15 になり、表示上 M より前に開始してしまう。
+    const tasks = [
+      { id: "C", name: "C", parentId: null, order: 0, startDate: "2024-01-09", duration: 30, predecessors: [] },
+      { id: "A", name: "A", parentId: null, order: 1, startDate: "2024-01-09", duration: 3, predecessors: [] },
+      {
+        id: "M", name: "M", parentId: null, order: 2, duration: 0, milestone: true, milestoneMode: "fixed",
+        fixedDate: "2024-01-31", predecessors: [{ id: "A", type: "FS", lag: 0 }],
+      },
+      { id: "B", name: "B", parentId: null, order: 3, duration: 2, predecessors: [{ id: "M", type: "FS", lag: 0 }] },
+    ];
+    const map = autoScheduleStartDates(tasks, cal, "2024-01-09", [], resources, { leveling: false });
+    expect(map.get("M")).toBe("2024-01-31"); // 固定マイルストーン自身は従来どおり LS
+    expect(map.get("B")).toBe("2024-02-01");
+    expect(map.get("A")).toBe("2024-01-09"); // それ以外は従来どおり最短
+  });
+
+  it("平準化OFFでは固定マイルストーンの期日超過時も、書き戻す自身の日付は LS（期日）のまま", () => {
+    const tasks = [
+      { id: "T1", name: "T1", parentId: null, order: 0, startDate: "2024-01-09", duration: 10, predecessors: [] },
+      {
+        id: "M", name: "M", parentId: null, order: 1, duration: 0, milestone: true, milestoneMode: "fixed",
+        fixedDate: "2024-01-10", predecessors: [{ id: "T1", type: "FS", lag: 0 }],
+      },
+      { id: "B", name: "B", parentId: null, order: 2, duration: 1, predecessors: [{ id: "M", type: "FS", lag: 0 }] },
+    ];
+    const map = autoScheduleStartDates(tasks, cal, "2024-01-09", [], resources, { leveling: false });
+    expect(map.get("M")).toBe("2024-01-10");
+    expect(map.get("B")).toBe("2024-01-24"); // T1 終了（1/22）→ M 最早日 1/23 → B は 1/24
   });
 });
 
