@@ -187,7 +187,7 @@ bee issue comment   -s <space> <issueKey> -b <text> -y         # 変更理由を
    - 衝突（両側が `baseline` から変化）したタスク（フィールド・`baseline`・Scheduler 現在値・Backlog 現在値）※今回は push しない旨も明記
    - 孤児課題（課題キー・件名）※削除はしない旨も明記
    - `projectEnd`（＝Backlog上の最終期限になる想定日）
-   - `recalc` の `sprintConflicts` / `levelWarnings` に該当があれば併記
+   - `recalc` の `sprintConflicts` / `levelWarnings` / `dependencyIssues` に該当があれば併記
 7. **承認**: `AskUserQuestion` で「この内容で Backlog に反映しますか？」。
 8. **実行**（承認後のみ）:
    - 親を持つ課題より先に、親になるグループ課題を作成する（トポロジカル順）。

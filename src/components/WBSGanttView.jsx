@@ -7,6 +7,7 @@ import {
 import { toISO, parseISO, fmtJP, cal_addDaysISO, isWeekend, nonWorkdaySegments } from "../lib/calendar.js";
 import { uid, buildFlatList, allDescendantIds } from "../lib/taskTree.js";
 import { sprintColorForId } from "../lib/sprints.js";
+import { DEPENDENCY_ISSUE_LABELS } from "../lib/dependencyIssues.js";
 import { copyTextToClipboard } from "../lib/exportUtils.js";
 import { copyVisibleGanttAsPng, escapeXmlText } from "../dom/ganttPngExport.js";
 import {
@@ -29,12 +30,24 @@ import { TaskDetailModal } from "./TaskDetailModal.jsx";
    8. WBS + ガントチャート ビュー
    ========================================================================================= */
 
+const EMPTY_ISSUES_BY_TASK = new Map();
+// 依存関係の矛盾があるガントバーの枠線色（error: 循環参照・存在しない先行、warning: 日程の矛盾）。
+// 塗り色（通常/クリティカル/マイルストーン）は変えず、破線の枠線で区別する。
+const ISSUE_OUTLINE_COLOR = { error: "#DC2626", warning: "#EA580C" };
+function issueSeverityOf(issues) {
+  if (!issues || !issues.length) return null;
+  return issues.some(i => i.severity === "error") ? "error" : "warning";
+}
+
 export const WBSGanttView = React.forwardRef(function WBSGanttView({
   tasks, setTasks, resources, sprints, cal, schedule, projectEnd, selectedId, setSelectedId,
   collapsed, setCollapsed, dayWidth, setDayWidth, requestConfirm,
   colWidths, setColWidths,
   versions, baselineVersionId, setBaselineVersionId,
   autoScheduleHighlightIds,
+  dependencyIssuesByTask,
+  revealTaskRequest,
+  onRevealTaskHandled,
   onSaveVersion,
   canUndo,
   canRedo,
@@ -109,25 +122,41 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
   // 行ごとの担当者名表示（バー・基準行）で resources.find() を毎回線形探索しないよう、事前にMap化しておく。
   const resourceNameById = useMemo(() => new Map(resources.map(r => [r.id, r.name])), [resources]);
   const sprintNameById = useMemo(() => new Map(sprints.map(sp => [sp.id, sp.name])), [sprints]);
+  // 依存関係の矛盾（App.jsx で detectDependencyIssues した結果をタスクIDで引けるようにしたもの）。
+  const issuesByTask = dependencyIssuesByTask || EMPTY_ISSUES_BY_TASK;
+  // 折りたたまれたグループの配下に隠れている矛盾（グループ行のアイコンで知らせる）。
+  const hiddenIssuesByGroup = useMemo(() => {
+    const out = new Map();
+    if (!issuesByTask.size) return out;
+    flat.forEach(t => {
+      if (!t.hasChildren || !collapsed.has(t.id)) return;
+      const own = new Set(issuesByTask.get(t.id) || []);
+      const hidden = new Set();
+      allDescendantIds(tasks, t.id).forEach(id => (issuesByTask.get(id) || []).forEach(issue => { if (!own.has(issue)) hidden.add(issue); }));
+      if (hidden.size) out.set(t.id, [...hidden]);
+    });
+    return out;
+  }, [flat, collapsed, tasks, issuesByTask]);
   // 末尾の「新規タスク追加」行（常にROW_H）の分だけ余分に確保し、左右ペインの高さを揃える。
   // 比較モード時は各タスクが rowStride（現在行+基準行）の高さを占有する。
   const bodyHeight = flat.length * rowStride + ROW_H;
   const [detailId, setDetailId] = useState(null);
   const [linkDrag, setLinkDrag] = useState(null); // ガントチャート上でのドラッグによる依存関係作成
   // 通常タスクバー・マイルストーンのホバー時ツールチップ（サマリー・比較用基準バーは対象外）。
+  // WBS表の「依存関係の矛盾」アイコンのホバー（kind: "issues"、矛盾の内容だけを表示）にも同じ仕組みを使う。
   // 0.1秒の表示ディレイでちらつきを防ぎ、離脱時は即座に消す。
-  const [barTooltip, setBarTooltip] = useState(null); // { taskId, x, y }
+  const [barTooltip, setBarTooltip] = useState(null); // { taskId, kind: "bar"|"issues", x, y }
   const barTooltipTimerRef = useRef(null);
   // ディレイ待ち中も含め、直近のポインタ位置を常に保持する（表示前に位置更新が捨てられないように）。
   const barTooltipPosRef = useRef({ x: 0, y: 0 });
   const barTooltipRef = useRef(null);
-  function showBarTooltipAfterDelay(taskId, clientX, clientY) {
+  function showBarTooltipAfterDelay(taskId, clientX, clientY, kind = "bar") {
     if (linkDrag || rowDrag) return; // リンク作成・行の並べ替えドラッグ中はポインタがバー上を横切りうるため出さない
     barTooltipPosRef.current = { x: clientX, y: clientY };
     if (barTooltipTimerRef.current) clearTimeout(barTooltipTimerRef.current);
     barTooltipTimerRef.current = setTimeout(() => {
       barTooltipTimerRef.current = null;
-      setBarTooltip({ taskId, x: barTooltipPosRef.current.x, y: barTooltipPosRef.current.y });
+      setBarTooltip({ taskId, kind, x: barTooltipPosRef.current.x, y: barTooltipPosRef.current.y });
     }, 100);
   }
   function moveBarTooltip(taskId, clientX, clientY) {
@@ -275,6 +304,18 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
       pendingFocusIdRef.current = null;
     }
   }, [tasks]);
+  // ヘッダーの「依存関係の矛盾」一覧から選んだタスクの行までスクロールする。祖先グループの展開
+  // （App 側で collapsed を更新）が反映された後の描画で行を探すため、flat の変化でも再試行する。
+  const handledRevealSeqRef = useRef(0);
+  useEffect(() => {
+    if (!revealTaskRequest || revealTaskRequest.seq === handledRevealSeqRef.current || !leftRef.current) return;
+    const el = [...leftRef.current.querySelectorAll("[data-wbs-row-id]")]
+      .find(node => node.getAttribute("data-wbs-row-id") === revealTaskRequest.taskId);
+    if (!el) return;
+    handledRevealSeqRef.current = revealTaskRequest.seq;
+    el.scrollIntoView && el.scrollIntoView({ block: "center", inline: "nearest" });
+    onRevealTaskHandled && onRevealTaskHandled();
+  }, [revealTaskRequest, flat]);
   useEffect(() => {
     if (selectedId && !tasks.some(task => task.id === selectedId)) {
       activeSelectionRef.current = null;
@@ -1017,6 +1058,26 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                       className={"bg-transparent outline-none truncate w-full rounded focus:bg-indigo-100 focus:ring-1 focus:ring-indigo-300 " + (isSummary ? "font-semibold" : "")}
                     />
                   </span>
+                  {(() => {
+                    // 依存関係の矛盾アイコン。折りたたみ中のグループは、配下に隠れている矛盾も知らせる。
+                    const rowIssues = issuesByTask.get(t.id) || [];
+                    const hiddenIssues = hiddenIssuesByGroup.get(t.id) || [];
+                    if (!rowIssues.length && !hiddenIssues.length) return null;
+                    const severity = issueSeverityOf([...rowIssues, ...hiddenIssues]);
+                    return (
+                      <span
+                        data-dependency-issue={severity}
+                        role="img"
+                        aria-label={`依存関係の矛盾（${rowIssues.length + hiddenIssues.length}件）`}
+                        onPointerEnter={e => showBarTooltipAfterDelay(t.id, e.clientX, e.clientY, "issues")}
+                        onPointerMove={e => moveBarTooltip(t.id, e.clientX, e.clientY)}
+                        onPointerLeave={hideBarTooltip}
+                        className={"flex-shrink-0 flex items-center " + (severity === "error" ? "text-red-500" : "text-amber-500")}
+                      >
+                        <AlertTriangle size={12} />
+                      </span>
+                    );
+                  })()}
                   {compareOn && !baselineRow && (
                     <span className="flex-shrink-0 text-[9px] leading-none px-1 py-0.5 rounded bg-emerald-50 text-emerald-600 border border-emerald-200" title="基準バージョンには存在しないタスクです">新規</span>
                   )}
@@ -1304,6 +1365,12 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                   const x1 = xOf(s.schedStart);
                   const x2 = xOf(s.schedFinish) + dayWidth;
                   const color = t.milestone ? "#F59E0B" : (showCritical && s.critical) ? "#DC2626" : s.isSummary ? "#334155" : "#6366F1";
+                  // 依存関係の矛盾があるタスクは、塗り色を変えずに破線の枠線で囲む（クリティカル・マイルストーンと区別するため）。
+                  // 折りたたみ中のグループは、配下に隠れている矛盾も含めて示す。
+                  const issueSeverity = issueSeverityOf([...(issuesByTask.get(t.id) || []), ...(hiddenIssuesByGroup.get(t.id) || [])]);
+                  const issueOutline = issueSeverity
+                    ? { fill: "none", stroke: ISSUE_OUTLINE_COLOR[issueSeverity], strokeWidth: 1.5, strokeDasharray: "4,2", "data-dependency-issue": issueSeverity }
+                    : null;
                   const handle = (hx, hy) => (
                     <circle cx={hx} cy={hy} r={4} fill="white" stroke="#4F46E5" strokeWidth={1.5}
                       style={{ cursor: "crosshair" }}
@@ -1319,6 +1386,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                           onPointerLeave={hideBarTooltip}
                         >
                           <rect x={cx - 6} y={cy - 6} width={12} height={12} fill={color} transform={`rotate(45 ${cx} ${cy})`} stroke="white" strokeWidth={1} />
+                          {issueOutline && <rect x={cx - 9.5} y={cy - 9.5} width={19} height={19} transform={`rotate(45 ${cx} ${cy})`} {...issueOutline} />}
                           <text x={cx + 12} y={cy + 4} fontSize={10} fill="#475569">{t.name}{t.milestoneMode === "fixed" ? ` (固定 ${fmtJP(t.fixedDate)})` : ""}</text>
                           {handle(cx + 9, cy)}
                         </g>
@@ -1332,6 +1400,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                       <React.Fragment key={t.id}>
                         <g>
                           <path d={`M${x1},${y2 - 5} L${x1},${y2 + 5} L${x2},${y2 + 5} L${x2},${y2 - 5}`} stroke={color} strokeWidth={3} fill="none" />
+                          {issueOutline && <rect x={x1 - 4} y={y2 - 9} width={Math.max(2, x2 - x1) + 8} height={18} rx={3} {...issueOutline} />}
                           <text x={x2 + 6} y={y2 + 4} fontSize={10} fontWeight={600} fill="#334155">{t.name}</text>
                         </g>
                         {baselineEl}
@@ -1367,6 +1436,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                           );
                         })}
                         <text x={x2 + 6} y={y + ROW_H / 2 + 4} fontSize={10} fill="#475569">{t.name}{t.assigneeId ? ` · ${resourceNameById.get(t.assigneeId) || ""}` : ""}{prog > 0 ? ` (${prog}%)` : ""}</text>
+                        {issueOutline && <rect x={x1 - 3} y={y + 3} width={barW + 6} height={ROW_H - 6} rx={6} {...issueOutline} />}
                         {handle(x2, y + ROW_H / 2)}
                       </g>
                       {baselineEl}
@@ -1396,16 +1466,35 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
       {barTooltip && (() => {
         const tt = flat.find(f => f.id === barTooltip.taskId);
         const ts = tt && schedule.get(tt.id);
-        if (!tt || !ts) return null;
-        const lines = buildBarTooltipLines(tt, ts);
+        const issuesOnly = barTooltip.kind === "issues";
+        if (!tt || (!ts && !issuesOnly)) return null;
+        const lines = issuesOnly ? [`${tt.wbsNo ? `${tt.wbsNo} ` : ""}${tt.name}`] : buildBarTooltipLines(tt, ts);
+        const issueLines = (issuesByTask.get(tt.id) || []).map(issue => ({
+          severity: issue.severity,
+          text: `${DEPENDENCY_ISSUE_LABELS[issue.code] || issue.code}: ${issue.message}`,
+        }));
+        const hiddenIssues = issuesOnly ? (hiddenIssuesByGroup.get(tt.id) || []) : [];
+        if (hiddenIssues.length) {
+          issueLines.push({ severity: issueSeverityOf(hiddenIssues), text: `配下のタスクに依存関係の矛盾が${hiddenIssues.length}件あります（グループを展開すると確認できます）` });
+        }
         // 初期位置はポインタ位置基準の仮置き。実サイズ確定後に useLayoutEffect が画面内へクランプし直す。
         return (
           <div
             ref={barTooltipRef}
-            style={{ position: "fixed", left: barTooltip.x + 14, top: barTooltip.y + 14, zIndex: 50, pointerEvents: "none", maxWidth: 260 }}
+            style={{ position: "fixed", left: barTooltip.x + 14, top: barTooltip.y + 14, zIndex: 50, pointerEvents: "none", maxWidth: issueLines.length ? 340 : 260 }}
             className="bg-slate-800 text-white text-[11px] leading-relaxed rounded-md shadow-lg px-3 py-2"
           >
             {lines.map((line, idx) => <div key={idx} className={idx === 0 ? "font-semibold mb-0.5" : ""}>{line}</div>)}
+            {issueLines.length > 0 && (
+              <div className={(issuesOnly ? "" : "mt-1 pt-1 border-t border-slate-600 ") + "space-y-0.5"}>
+                {issueLines.map((line, idx) => (
+                  <div key={`issue-${idx}`} className={"flex gap-1 " + (line.severity === "error" ? "text-red-300" : "text-amber-300")}>
+                    <AlertTriangle size={11} className="flex-shrink-0 mt-[3px]" />
+                    <span>{line.text}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         );
       })()}

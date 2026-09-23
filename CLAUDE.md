@@ -44,6 +44,7 @@ src/
     taskTree.js               # WBSツリー・ヘルパー（isGroupId/buildFlatList等）
     scheduling.js              # CPMエンジン（runCPM）・リソース平準化（levelResources）
     sprints.js                  # スプリント配色・期間重複検出
+    dependencyIssues.js         # 依存関係の矛盾検出（循環参照・存在しない先行・開始日との矛盾・固定期日超過。App と CLI で共通）
     exportUtils.js               # JSON/Mermaidエクスポート
     linkedProject.js              # ?schedule= クエリのパース
     embeddedProject.js             # 共有用HTMLの埋め込みJSONのシリアライズ/パース（"<" のユニコードエスケープ）
@@ -93,11 +94,20 @@ bee（`@nulab/bee` 1.1 以上、Backlog公式CLI）経由で保存JSONと Backlo
   - `float`/`critical` はES/LSの差から計算するため、上記の表示方式の変更後も従来通り機能する（＝表示日程が動かなくても、クリティカルパスや余裕日数の情報は維持される）。
   - 「自動スケジューリング実行」（`opts.respectManualPins: false` で呼び出す再計算・書き戻し専用パス）も同じ選択ロジックを使うため、固定マイルストーン自身以外は常にES/EF（最短）で書き戻される。「マイルストーンに合わせて後ろ倒しにする」のではなく「条件を満たす直近の日程に詰める」形になる。
   - 書き戻す開始日は共通ヘルパー `autoScheduleStartDates()`（`src/lib/scheduling.js`。App.jsx `runScheduling` と CLI `applyAutoSchedule` の両方から使う）で求める。**リソース平準化がONのときは、CPMの日付ではなく平準化後の配置日を書き戻す**（＝書き戻した `startDate` と平準化ON時の表示スケジュールを一致させる）。平準化ON時にCPMの日付を書き戻すと、その後に着手済み（`progress > 0`）にしたタスクが `levelResources` で `startDate` にピン留めされ、表示だけが平準化前の位置に戻って見える不具合が起きるため（意図的な設計。元に戻さないこと）。
+  - **平準化OFFのときも、CPMの結果を `startDate` に反映した状態で `levelResources` をリソース無し（`resources=[]`、稼働上限を見ない）で通し、その配置日を書き戻す**（固定マイルストーン自身だけは従来どおりCPMのLSを書き戻す）。CPMのフォワードパスは固定マイルストーンのES（依存関係から求めた最早日）から後続の日程を求めるが、表示・書き戻しされる固定マイルストーン自身の日付はLS（期日由来）なので、余裕のある固定マイルストーン（やそれを含むグループ）の後続タスクが表示上そのマイルストーンより前に開始してしまい、「自動スケジューリング実行」後も依存関係の矛盾が残るため（意図的な設計。元に戻さないこと）。
 - `levelResources(tasks, cpmResult, resources, cal, sprints)`: Serial SGS方式のリソース平準化。`minStart` にCPMと同じスプリントフロアを適用している。進捗率が入力済みのタスクは平準化の対象外とし、現在の開始日に固定する（依存関係・スプリント・リソース競合による調整を行わない）。
   - タスクは連続する稼働日に配置し、週次・月次上限に合わせたタスク内の作業分割は行わない。2,000候補日の探索で配置できない場合は、依存関係・手入力開始日・スプリントの下限から求めた探索開始日に戻し、稼働上限超過を `levelWarnings` に通知する。探索終端の日付を確定しない。失敗したタスクも負荷に登録し、他タスクの平準化に反映する。
+  - `levelWarnings` は稼働上限内での配置失敗だけを返す。固定マイルストーンの期日超過は、平準化のON/OFFに関わらず下記の依存関係の矛盾検出（`fixed-milestone-overrun`）で扱う（二重に警告しない）。
 - `float = workdaysBetween(ES, LS)`、`critical = float <= 0`。
   - 注意: スプリント開始日を実際の計算済み開始日に近づけて設定すると、そのタスクのESが押し上げられてfloatが縮小し、`critical` 判定が変わることがある（表示上のschedStart/schedFinish自体は変わらない）。これは仕様上の既知の挙動であり、バグではない。
-- スプリント矛盾検出（`sprintConflicts` useMemo）: 最終的な表示スケジュールがタスクの所属スプリント期間からはみ出していないかを判定し、はみ出していればヘッダーのアラートアイコン（`AlertTriangle`）経由でダイアログに一覧表示する。複数スプリントが紐付く場合は、それらの期間の和集合（最も早い開始日〜最も遅い終了日）を基準に判定する。リソース平準化警告（`levelWarnings`、固定マイルストーンの期日超過・稼働上限内での配置失敗）とは別建てのUI。
+- スプリント矛盾検出（`sprintConflicts` useMemo）: 最終的な表示スケジュールがタスクの所属スプリント期間からはみ出していないかを判定し、はみ出していればヘッダーのアラートアイコン（`AlertTriangle`）経由でダイアログに一覧表示する。複数スプリントが紐付く場合は、それらの期間の和集合（最も早い開始日〜最も遅い終了日）を基準に判定する。リソース平準化警告（`levelWarnings`、稼働上限内での配置失敗）とは別建てのUI。
+- 依存関係の矛盾検出（`dependencyIssues` useMemo → `detectDependencyIssues(tasks, schedule, cal)`、`src/lib/dependencyIssues.js`）: 次の4種（循環参照は自己依存を含む）を判定する。日程の自動修正はしない（開始日の矛盾は「自動スケジューリング実行」で解消する）。CLI の `validate`/`recalc`/`plan`/`explain` も同じ関数を使う（`src/agent/cli.test.js` でアプリと結果が一致することを確認している）。
+  - `dependency-cycle`（error）: 循環参照。`runCPM` と同じ解釈（リーフへの依存辺は `effectivePredecessors`、グループには「子→親」の所属辺）でグラフを作り、依存辺を含む強連結成分を1件とする。グループを介した循環（AがグループGに依存し、G配下のBがAに依存）も検出する。循環に含まれるタスクは日程が確定しないため、下の2種の判定から除外する。
+  - `self-dependency`（error）: 自分自身を先行タスクにしている（循環参照の最小形。`effectivePredecessors` が自己参照を除くため `findDependencyCycles` では検出できず、エンジンも無視するので別途 `findSelfDependencies` で検出する。UIのラベルは「循環参照（自己依存）」）。
+  - `predecessor-missing`（error）: 存在しないIDを先行タスクにしている（エンジンは無視するため、依存関係が効いていない）。
+  - `dependency-violation`（warning）: **表示スケジュール**上で、各依存関係の条件を `candidateFromDep`（フォワードパスと同じ計算）で評価し直し、表示中の開始日が必要な日付より前なら矛盾とする。先行がグループなら、そのロールアップ済みの表示日程を使う。着手済み（`progress > 0`）は対象外。平準化ONでは手入力の開始日が下限扱いになるため、原則として出ない。
+  - `fixed-milestone-overrun`（warning）: 固定マイルストーンについて、先行タスクから求めた最早日（または表示中の日程）が `fixedDate` より後。平準化ON/OFFに関わらず判定する。
+  - UI: WBS表の行（名前欄）に `AlertTriangle`（error は赤・warning は amber、ホバーで内容をツールチップ表示。折りたたみ中のグループは配下の矛盾も示す）、ガントバーに破線の枠線（塗り色は変えない）、ヘッダーの「依存関係の矛盾 N」ボタンから一覧ダイアログ（項目クリックで該当タスクを表示）。
 
 ### UIレイアウト（WBS/ガント画面）
 
@@ -135,7 +145,7 @@ npm run test:watch  # watchモード（開発中）
 ```
 
 - `src/lib/` に新しい純粋ロジックを追加・変更した場合は、対応する `*.test.js` を必ず追加・更新すること。特に `runCPM`/`levelResources`（`scheduling.js`）はCLAUDE.mdに明文化された仕様（固定マイルストーンのみLS/LFを使う、進捗済みタスクはピン留めする等）の回帰を防ぐ最重要テスト対象なので、挙動を変える変更をした場合は既存テストが仕様変更を正しく反映しているか必ず確認する。
-- `src/agent/cli.test.js` は、CLIのスケジュール計算（`computeSchedule`）が `src/lib/` の `runCPM` と一致すること・整合性チェック・バージョンスナップショット構造を担保する。`scheduling.js` の仕様を変えたらここも確認する。
+- `src/agent/cli.test.js` は、CLIのスケジュール計算（`computeSchedule`）が `src/lib/` の `runCPM` と一致すること・依存関係の矛盾判定（`validate`）がアプリと一致すること・整合性チェック・バージョンスナップショット構造を担保する。`scheduling.js` の仕様を変えたらここも確認する。
 - `src/components/`・`src/App.jsx`（Reactコンポーネント）はユニットテストの対象外。次節の手動確認で担保する。
 
 ## コミットメッセージ
@@ -148,5 +158,5 @@ npm run test:watch  # watchモード（開発中）
 変更後は `npm run test` を実行してユニットテストが全件パスすることを確認したうえで、`npm run build` した `project_scheduler.html` をブラウザ（またはPlaywright）で直接開き、以下を目視・手動確認する。
 
 - コンソールエラーが出ていないこと
-- サンプルデータ（`seedData()`）を開いた状態でスプリント矛盾アラート・スプリント期間重複警告が出ないこと
+- サンプルデータ（`seedData()`）を開いた状態でスプリント矛盾アラート・スプリント期間重複警告・依存関係の矛盾が出ないこと（リソース平準化のON/OFFとも）
 - タスク編集後、リロードしても内容が保持されること（localStorage永続化）

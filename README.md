@@ -40,6 +40,7 @@ To move a plan between devices, or between the Live Demo and the downloaded HTML
 - Automatically level resources against weekly and monthly capacity limits.
 - Define sprints with start dates, end dates, and themes, and assign multiple sprints to a task.
 - Flag conflicts between sprint windows and calculated task dates.
+- Flag dependency problems in the WBS table and Gantt chart: circular dependencies (including cycles through groups), start dates that break a dependency, fixed milestones pushed past their due date, and links to deleted tasks.
 - Inspect dependencies in a network (PERT) view and copy the graph as Mermaid syntax.
 - Save snapshots, compare multiple versions on a Gantt-style timeline, and restore an earlier state.
 - Export and import the complete project, including tasks, resources, sprints, and version history, as JSON.

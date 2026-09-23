@@ -232,8 +232,10 @@ function buildFlatList(tasks, collapsed) {
 }
 function ancestorChain(byId, id) {
   const out = [];
+  const seen = /* @__PURE__ */ new Set([id]);
   let cur = byId[id];
-  while (cur && cur.parentId) {
+  while (cur && cur.parentId && !seen.has(cur.parentId)) {
+    seen.add(cur.parentId);
     cur = byId[cur.parentId];
     if (cur) out.push(cur);
   }
@@ -648,13 +650,6 @@ function levelResources(tasks, cpmResult, resources, cal, sprints) {
     }
     remaining.delete(id);
   }
-  leaves.forEach((t) => {
-    if (t.milestone && t.milestoneMode === "fixed" && t.fixedDate && placed[t.id]) {
-      if (placed[t.id].finish > t.fixedDate) {
-        warnings.push(`\u300C${t.name}\u300D\u306E\u5E73\u6E96\u5316\u5F8C\u306E\u65E5\u7A0B\uFF08${fmtJP(placed[t.id].finish)}\uFF09\u304C\u56FA\u5B9A\u671F\u65E5\uFF08${fmtJP(t.fixedDate)}\uFF09\u3092\u8D85\u904E\u3057\u3066\u3044\u307E\u3059`);
-      }
-    }
-  });
   return { placed, warnings };
 }
 function autoScheduleStartDates(tasks, cal, projectStart, sprints, resources, opts = {}) {
@@ -665,13 +660,15 @@ function autoScheduleStartDates(tasks, cal, projectStart, sprints, resources, op
     const s = auto.result.get(t.id);
     if (s && s.schedStart && !s.isSummary) out.set(t.id, s.schedStart);
   });
-  if (opts.leveling) {
-    const interim = tasks.map((t) => out.has(t.id) ? { ...t, startDate: out.get(t.id) } : t);
-    const { placed } = levelResources(interim, auto.result, resources || [], cal, sprints);
-    Object.entries(placed).forEach(([id, dates]) => {
-      if (dates && dates.start) out.set(id, dates.start);
-    });
-  }
+  const interim = tasks.map((t) => out.has(t.id) ? { ...t, startDate: out.get(t.id) } : t);
+  const { placed } = levelResources(interim, auto.result, opts.leveling ? resources || [] : [], cal, sprints);
+  const byId = {};
+  tasks.forEach((t) => byId[t.id] = t);
+  Object.entries(placed).forEach(([id, dates]) => {
+    const t = byId[id];
+    if (!opts.leveling && t && t.milestone && t.milestoneMode === "fixed") return;
+    if (dates && dates.start) out.set(id, dates.start);
+  });
   return out;
 }
 
@@ -727,6 +724,312 @@ function computeOverlappingSprintIds(sprints) {
     }
   }
   return ids;
+}
+
+// src/lib/deps.js
+function formatDepLabel(dep) {
+  return `${dep.type}${dep.lag ? dep.lag > 0 ? "+" + dep.lag : dep.lag : ""}`;
+}
+
+// src/lib/dependencyIssues.js
+var DEPENDENCY_ISSUE_CODES = Object.freeze({
+  cycle: "dependency-cycle",
+  self: "self-dependency",
+  missing: "predecessor-missing",
+  violation: "dependency-violation",
+  overrun: "fixed-milestone-overrun"
+});
+var DEPENDENCY_ISSUE_LABELS = Object.freeze({
+  [DEPENDENCY_ISSUE_CODES.cycle]: "\u5FAA\u74B0\u53C2\u7167",
+  [DEPENDENCY_ISSUE_CODES.self]: "\u5FAA\u74B0\u53C2\u7167\uFF08\u81EA\u5DF1\u4F9D\u5B58\uFF09",
+  [DEPENDENCY_ISSUE_CODES.missing]: "\u5B58\u5728\u3057\u306A\u3044\u5148\u884C\u30BF\u30B9\u30AF",
+  [DEPENDENCY_ISSUE_CODES.violation]: "\u958B\u59CB\u65E5\u3068\u306E\u77DB\u76FE",
+  [DEPENDENCY_ISSUE_CODES.overrun]: "\u56FA\u5B9A\u671F\u65E5\u306E\u8D85\u904E"
+});
+var SCHEDULE_DEPENDENCY_ISSUE_CODES = Object.freeze([
+  DEPENDENCY_ISSUE_CODES.violation,
+  DEPENDENCY_ISSUE_CODES.overrun
+]);
+var CODE_ORDER = [
+  DEPENDENCY_ISSUE_CODES.cycle,
+  DEPENDENCY_ISSUE_CODES.self,
+  DEPENDENCY_ISSUE_CODES.missing,
+  DEPENDENCY_ISSUE_CODES.violation,
+  DEPENDENCY_ISSUE_CODES.overrun
+];
+function taskName(task, id) {
+  if (!task) return id;
+  return task.name && task.name.trim() ? task.name : "\uFF08\u7121\u984C\u306E\u30BF\u30B9\u30AF\uFF09";
+}
+function isFixedMilestone(t) {
+  return !!(t && t.milestone && t.milestoneMode === "fixed");
+}
+function collectGroupIds(tasks) {
+  const ids = /* @__PURE__ */ new Set();
+  tasks.forEach((t) => {
+    if (t.parentId != null) ids.add(t.parentId);
+  });
+  return ids;
+}
+function wbsRankOf(tasks) {
+  const rank = /* @__PURE__ */ new Map();
+  buildFlatList(tasks, /* @__PURE__ */ new Set()).forEach((t, i) => rank.set(t.id, i));
+  tasks.forEach((t, i) => {
+    if (!rank.has(t.id)) rank.set(t.id, tasks.length + i);
+  });
+  return rank;
+}
+function findSelfDependencies(tasks) {
+  const out = [];
+  tasks.forEach((t) => {
+    if ((t.predecessors || []).some((p) => p && p.id === t.id)) out.push({ taskId: t.id });
+  });
+  return out;
+}
+function findMissingPredecessors(tasks) {
+  const ids = new Set(tasks.map((t) => t.id));
+  const out = [];
+  tasks.forEach((t) => {
+    (t.predecessors || []).forEach((p) => {
+      if (!p || p.id === t.id) return;
+      if (!ids.has(p.id)) out.push({ taskId: t.id, predecessorId: p.id });
+    });
+  });
+  return out;
+}
+function findDependencyCycles(tasks) {
+  const byId = {};
+  tasks.forEach((t) => {
+    if (!(t.id in byId)) byId[t.id] = t;
+  });
+  const groupIds = collectGroupIds(tasks);
+  const rank = wbsRankOf(tasks);
+  const byRank = (a, b) => (rank.get(a) ?? 0) - (rank.get(b) ?? 0);
+  const nodes = Object.keys(byId).sort(byRank);
+  const adj = new Map(nodes.map((id) => [id, /* @__PURE__ */ new Map()]));
+  const addEdge = (from, to, kind) => {
+    if (!adj.has(from) || !adj.has(to)) return;
+    const out = adj.get(from);
+    if (!out.has(to) || kind === "dependency") out.set(to, kind);
+  };
+  nodes.forEach((id) => {
+    const t = byId[id];
+    if (!groupIds.has(id)) {
+      effectivePredecessors(byId, t).forEach((dep) => addEdge(dep.id, id, "dependency"));
+    }
+    if (t.parentId != null && t.parentId !== id) addEdge(id, t.parentId, "member");
+  });
+  const succOf = (id) => [...adj.get(id).keys()].sort(byRank);
+  const index = /* @__PURE__ */ new Map(), low = /* @__PURE__ */ new Map(), onStack = /* @__PURE__ */ new Set();
+  const stack = [];
+  const components = [];
+  let counter = 0;
+  nodes.forEach((root) => {
+    if (index.has(root)) return;
+    const work = [{ id: root, succs: succOf(root), i: 0 }];
+    index.set(root, counter);
+    low.set(root, counter);
+    counter++;
+    stack.push(root);
+    onStack.add(root);
+    while (work.length) {
+      const frame = work[work.length - 1];
+      if (frame.i < frame.succs.length) {
+        const next = frame.succs[frame.i++];
+        if (!index.has(next)) {
+          index.set(next, counter);
+          low.set(next, counter);
+          counter++;
+          stack.push(next);
+          onStack.add(next);
+          work.push({ id: next, succs: succOf(next), i: 0 });
+        } else if (onStack.has(next)) {
+          low.set(frame.id, Math.min(low.get(frame.id), index.get(next)));
+        }
+        continue;
+      }
+      work.pop();
+      if (work.length) {
+        const parent = work[work.length - 1];
+        low.set(parent.id, Math.min(low.get(parent.id), low.get(frame.id)));
+      }
+      if (low.get(frame.id) === index.get(frame.id)) {
+        const comp = [];
+        let x;
+        do {
+          x = stack.pop();
+          onStack.delete(x);
+          comp.push(x);
+        } while (x !== frame.id);
+        components.push(comp);
+      }
+    }
+  });
+  const cycles = [];
+  components.forEach((comp) => {
+    if (comp.length < 2) return;
+    const members = new Set(comp);
+    const hasDependencyEdge = comp.some((from) => [...adj.get(from)].some(([to, kind]) => kind === "dependency" && members.has(to)));
+    if (!hasDependencyEdge) return;
+    const ids = [...comp].sort(byRank);
+    const start = ids[0];
+    const prev = /* @__PURE__ */ new Map();
+    const queue = [start];
+    const visited = /* @__PURE__ */ new Set([start]);
+    let last = null;
+    while (queue.length && last === null) {
+      const cur = queue.shift();
+      for (const next of succOf(cur)) {
+        if (!members.has(next)) continue;
+        if (next === start) {
+          last = cur;
+          break;
+        }
+        if (visited.has(next)) continue;
+        visited.add(next);
+        prev.set(next, cur);
+        queue.push(next);
+      }
+    }
+    const path = [start];
+    for (let cur = last; cur !== null && cur !== start; cur = prev.get(cur) ?? null) path.splice(1, 0, cur);
+    path.push(start);
+    const memberEdges = [];
+    for (let i = 0; i < path.length - 1; i++) {
+      if (adj.get(path[i]).get(path[i + 1]) === "member") memberEdges.push([path[i], path[i + 1]]);
+    }
+    cycles.push({ ids, path, memberEdges });
+  });
+  cycles.sort((a, b) => byRank(a.ids[0], b.ids[0]));
+  return cycles;
+}
+function cycleMessage(cycle, byId) {
+  const nameOf2 = (id) => `\u300C${taskName(byId[id], id)}\u300D`;
+  const route = cycle.path.map(nameOf2).join("\u2192");
+  const notes = cycle.memberEdges.map(([child, parent]) => `${nameOf2(child)}\u306F\u30B0\u30EB\u30FC\u30D7${nameOf2(parent)}\u306E\u914D\u4E0B`);
+  return `\u5FAA\u74B0\u53C2\u7167: ${route}${notes.length ? `\uFF08${notes.join("\u3001")}\uFF09` : ""}`;
+}
+function violationMessage(cal, dep, predName, predDates, required, sched) {
+  const label = formatDepLabel(dep);
+  if (dep.type === "FF" || dep.type === "SF") {
+    const base = dep.type === "FF" ? predDates.finish : predDates.start;
+    const requiredFinish = cal.shift(base, dep.lag);
+    return `\u5148\u884C\u300C${predName}\u300D\uFF08${label}\uFF09\u306E\u6761\u4EF6\u3067\u306F ${fmtJP(requiredFinish)} \u4EE5\u964D\u306B\u7D42\u4E86\u3059\u308B\u5FC5\u8981\u304C\u3042\u308A\u307E\u3059\u304C\u3001${fmtJP(sched.schedFinish)} \u306B\u7D42\u4E86\u3057\u3066\u3044\u307E\u3059`;
+  }
+  return `\u5148\u884C\u300C${predName}\u300D\uFF08${label}\uFF09\u306E\u6761\u4EF6\u3067\u306F ${fmtJP(required)} \u4EE5\u964D\u306B\u958B\u59CB\u3059\u308B\u5FC5\u8981\u304C\u3042\u308A\u307E\u3059\u304C\u3001${fmtJP(sched.schedStart)} \u306B\u958B\u59CB\u3057\u3066\u3044\u307E\u3059`;
+}
+function detectScheduleDependencyIssues(tasks, schedule, cal, opts = {}) {
+  const excludeIds = opts.excludeIds || /* @__PURE__ */ new Set();
+  const byId = {};
+  tasks.forEach((t) => {
+    if (!(t.id in byId)) byId[t.id] = t;
+  });
+  const groupIds = collectGroupIds(tasks);
+  const issues = [];
+  tasks.forEach((t) => {
+    if (byId[t.id] !== t) return;
+    if (groupIds.has(t.id) || excludeIds.has(t.id)) return;
+    const s = schedule.get(t.id);
+    if (!s || !s.schedStart || !s.schedFinish) return;
+    const checks = [];
+    effectivePredecessors(byId, t).forEach((dep) => {
+      if (!byId[dep.id] || excludeIds.has(dep.id)) return;
+      const p = schedule.get(dep.id);
+      if (!p || !p.schedStart || !p.schedFinish) return;
+      const predDates = { start: p.schedStart, finish: p.schedFinish };
+      const required = candidateFromDep(cal, dep, predDates, t.duration).start;
+      checks.push({ dep, predDates, required });
+    });
+    if (isFixedMilestone(t) && t.fixedDate) {
+      const binding = checks.reduce((best, c) => !best || c.required > best.required ? c : best, null);
+      const earliest = binding ? binding.required : null;
+      if (earliest && earliest > t.fixedDate) {
+        issues.push({
+          code: DEPENDENCY_ISSUE_CODES.overrun,
+          severity: "warning",
+          ids: [t.id],
+          predecessorId: binding.dep.id,
+          requiredDate: earliest,
+          actualDate: s.schedFinish,
+          message: `\u5148\u884C\u300C${taskName(byId[binding.dep.id], binding.dep.id)}\u300D\u304B\u3089\u6C42\u3081\u305F\u6700\u65E9\u65E5\uFF08${fmtJP(earliest)}\uFF09\u304C\u56FA\u5B9A\u671F\u65E5\uFF08${fmtJP(t.fixedDate)}\uFF09\u3092\u8D85\u904E\u3057\u3066\u3044\u307E\u3059`
+        });
+        return;
+      }
+      if (s.schedFinish > t.fixedDate) {
+        issues.push({
+          code: DEPENDENCY_ISSUE_CODES.overrun,
+          severity: "warning",
+          ids: [t.id],
+          actualDate: s.schedFinish,
+          message: `\u8868\u793A\u4E2D\u306E\u65E5\u7A0B\uFF08${fmtJP(s.schedFinish)}\uFF09\u304C\u56FA\u5B9A\u671F\u65E5\uFF08${fmtJP(t.fixedDate)}\uFF09\u3092\u8D85\u904E\u3057\u3066\u3044\u307E\u3059`
+        });
+        return;
+      }
+    }
+    if ((t.progress || 0) > 0) return;
+    checks.forEach(({ dep, predDates, required }) => {
+      if (s.schedStart >= required) return;
+      issues.push({
+        code: DEPENDENCY_ISSUE_CODES.violation,
+        severity: "warning",
+        ids: [t.id],
+        predecessorId: dep.id,
+        requiredDate: required,
+        actualDate: s.schedStart,
+        message: violationMessage(cal, dep, taskName(byId[dep.id], dep.id), predDates, required, s)
+      });
+    });
+  });
+  return issues;
+}
+function detectDependencyIssues(tasks, schedule = null, cal = null) {
+  const list = tasks || [];
+  const byId = {};
+  list.forEach((t) => {
+    if (!(t.id in byId)) byId[t.id] = t;
+  });
+  const issues = [];
+  const cycles = findDependencyCycles(list);
+  const inCycle = /* @__PURE__ */ new Set();
+  cycles.forEach((cycle) => {
+    cycle.ids.forEach((id) => inCycle.add(id));
+    issues.push({
+      code: DEPENDENCY_ISSUE_CODES.cycle,
+      severity: "error",
+      ids: cycle.ids,
+      path: cycle.path,
+      message: cycleMessage(cycle, byId)
+    });
+  });
+  findSelfDependencies(list).forEach(({ taskId }) => {
+    issues.push({
+      code: DEPENDENCY_ISSUE_CODES.self,
+      severity: "error",
+      ids: [taskId],
+      predecessorId: taskId,
+      message: "\u81EA\u5206\u81EA\u8EAB\u3092\u5148\u884C\u30BF\u30B9\u30AF\u306B\u3057\u3066\u3044\u307E\u3059\uFF08\u3053\u306E\u4F9D\u5B58\u95A2\u4FC2\u306F\u8A08\u7B97\u306B\u4F7F\u308F\u308C\u3066\u3044\u307E\u305B\u3093\uFF09"
+    });
+  });
+  findMissingPredecessors(list).forEach(({ taskId, predecessorId }) => {
+    issues.push({
+      code: DEPENDENCY_ISSUE_CODES.missing,
+      severity: "error",
+      ids: [taskId],
+      predecessorId,
+      message: `\u5148\u884C\u30BF\u30B9\u30AF\u300C${predecessorId}\u300D\u304C\u5B58\u5728\u3057\u307E\u305B\u3093\uFF08\u524A\u9664\u6E08\u307F\u306E\u30BF\u30B9\u30AF\u3092\u53C2\u7167\u3057\u3066\u3044\u308B\u305F\u3081\u3001\u3053\u306E\u4F9D\u5B58\u95A2\u4FC2\u306F\u8A08\u7B97\u306B\u4F7F\u308F\u308C\u3066\u3044\u307E\u305B\u3093\uFF09`
+    });
+  });
+  if (schedule && cal) {
+    issues.push(...detectScheduleDependencyIssues(list, schedule, cal, { excludeIds: inCycle }));
+  }
+  const rank = wbsRankOf(list);
+  return issues.map((issue, i) => ({ issue, i })).sort((a, b) => {
+    const ra = rank.get(a.issue.ids[0]) ?? 0, rb = rank.get(b.issue.ids[0]) ?? 0;
+    if (ra !== rb) return ra - rb;
+    const ca = CODE_ORDER.indexOf(a.issue.code), cb = CODE_ORDER.indexOf(b.issue.code);
+    if (ca !== cb) return ca - cb;
+    return a.i - b.i;
+  }).map((x) => x.issue);
 }
 
 // src/lib/exportUtils.js
@@ -996,7 +1299,8 @@ function computeSchedule(data, opts = {}) {
     if (v.schedFinish && v.schedFinish > projectEnd) projectEnd = v.schedFinish;
   });
   const sprintConflicts = detectSprintConflicts(tasks, sprints, schedule);
-  return { projectStart, cal, cpm, schedule, projectEnd, leveling, levelWarnings, sprintConflicts };
+  const dependencyIssues = detectDependencyIssues(tasks, schedule, cal).map((issue) => formatDependencyIssue(issue, tasks));
+  return { projectStart, cal, cpm, schedule, projectEnd, leveling, levelWarnings, sprintConflicts, dependencyIssues };
 }
 function scheduleRows(data, schedule) {
   return buildFlatList(data.tasks, /* @__PURE__ */ new Set()).map((t) => {
@@ -1023,6 +1327,11 @@ function scheduleRows(data, schedule) {
 function nameOf(tasks, id) {
   const t = tasks.find((x) => x.id === id);
   return t ? t.name : id;
+}
+function formatDependencyIssue(issue, tasks) {
+  const { code, severity, ids, message, ...detail } = issue;
+  const subject = code === "dependency-cycle" ? "" : `\u300C${nameOf(tasks, ids[0])}\u300D: `;
+  return { severity, code, ids, message: `${subject}${message}`, ...detail };
 }
 var ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 function isISODate(v) {
@@ -1149,34 +1458,6 @@ function findParentCycles(tasks) {
   }
   return cycles;
 }
-function findDependencyCycles(tasks) {
-  const adj = new Map(tasks.map((t) => [t.id, []]));
-  for (const t of tasks) {
-    for (const p of t.predecessors || []) {
-      if (adj.has(p.id)) adj.get(p.id).push(t.id);
-    }
-  }
-  const WHITE = 0, GRAY = 1, BLACK = 2;
-  const color = new Map(tasks.map((t) => [t.id, WHITE]));
-  const stack = [];
-  const cycles = [];
-  const dfs = (u) => {
-    color.set(u, GRAY);
-    stack.push(u);
-    for (const v of adj.get(u) || []) {
-      if (color.get(v) === GRAY) {
-        const i = stack.indexOf(v);
-        if (i >= 0) cycles.push(stack.slice(i).concat(v));
-      } else if (color.get(v) === WHITE) {
-        dfs(v);
-      }
-    }
-    stack.pop();
-    color.set(u, BLACK);
-  };
-  for (const t of tasks) if (color.get(t.id) === WHITE) dfs(t.id);
-  return cycles;
-}
 function analyzeIntegrity(data) {
   const tasks = data.tasks || [];
   const shapeIssues = checkFieldShapes(data);
@@ -1214,24 +1495,12 @@ function analyzeIntegrity(data) {
         issues.push({ severity: "warning", code: "sprint-missing", ids: [t.id], message: `\u300C${t.name}\u300D\u306E\u30B9\u30D7\u30EA\u30F3\u30C8\u53C2\u7167\u300C${sid}\u300D\u304C\u5B58\u5728\u3057\u307E\u305B\u3093` });
       }
     }
-    for (const p of t.predecessors || []) {
-      if (p.id === t.id) {
-        issues.push({ severity: "error", code: "self-dependency", ids: [t.id], message: `\u300C${t.name}\u300D\u304C\u81EA\u5206\u81EA\u8EAB\u306B\u4F9D\u5B58\u3057\u3066\u3044\u307E\u3059` });
-      } else if (!taskIds.has(p.id)) {
-        issues.push({ severity: "error", code: "predecessor-missing", ids: [t.id], message: `\u300C${t.name}\u300D\u306E\u5148\u884C\u30BF\u30B9\u30AF\u300C${p.id}\u300D\u304C\u5B58\u5728\u3057\u307E\u305B\u3093` });
-      }
-    }
     if ((t.predecessors || []).length && isGroupId(tasks, t.id)) {
       issues.push({ severity: "warning", code: "group-has-predecessors", ids: [t.id], message: `\u30B0\u30EB\u30FC\u30D7\u300C${t.name}\u300D\u306B\u5148\u884C\u30BF\u30B9\u30AF\u304C\u8A2D\u5B9A\u3055\u308C\u3066\u3044\u307E\u3059\uFF08\u4F9D\u5B58\u306F\u30EA\u30FC\u30D5\u30BF\u30B9\u30AF\u306B\u4ED8\u3051\u3066\u304F\u3060\u3055\u3044\uFF09` });
     }
   }
-  for (const cyc of findDependencyCycles(tasks)) {
-    issues.push({
-      severity: "error",
-      code: "dependency-cycle",
-      ids: cyc,
-      message: `\u5FAA\u74B0\u4F9D\u5B58: ${cyc.map((id) => nameOf(tasks, id)).join(" \u2192 ")}`
-    });
+  for (const issue of detectDependencyIssues(tasks)) {
+    issues.push(formatDependencyIssue(issue, tasks));
   }
   const overlaps = computeOverlappingSprintIds(data.sprints || []);
   if (overlaps.size) {
@@ -1307,9 +1576,29 @@ function tryComputeSchedule(data, opts) {
     return { ok: false, error: `\u30B9\u30B1\u30B8\u30E5\u30FC\u30EB\u8A08\u7B97\u306B\u5931\u6557\u3057\u307E\u3057\u305F: ${String(e && e.message || e)}` };
   }
 }
-function cmdValidate(positional) {
+var SCHEDULE_BLOCKING_CODES = /* @__PURE__ */ new Set(["duplicate-task-id", "parent-cycle"]);
+function validateProject(data, opts = {}) {
+  const leveling = opts.leveling === void 0 ? !!data.levelingOn : !!opts.leveling;
+  const issues = analyzeIntegrity(data);
+  let scheduleChecks;
+  const blocking = checkFieldShapes(data).find((i) => i.severity === "error") || issues.find((i) => i.severity === "error" && SCHEDULE_BLOCKING_CODES.has(i.code));
+  if (blocking) {
+    scheduleChecks = { performed: false, leveling, reason: `\u6574\u5408\u6027\u30A8\u30E9\u30FC\uFF08${blocking.code}\uFF09\u304C\u3042\u308B\u305F\u3081\u3001\u65E5\u7A0B\u306B\u95A2\u3059\u308B\u4F9D\u5B58\u95A2\u4FC2\u306E\u691C\u67FB\u3092\u884C\u3044\u307E\u305B\u3093\u3067\u3057\u305F` };
+  } else {
+    const computed = tryComputeSchedule(data, { respectManualPins: true, leveling });
+    if (computed.ok) {
+      const scheduleCodes = new Set(SCHEDULE_DEPENDENCY_ISSUE_CODES);
+      issues.push(...computed.result.dependencyIssues.filter((i) => scheduleCodes.has(i.code)));
+      scheduleChecks = { performed: true, leveling };
+    } else {
+      scheduleChecks = { performed: false, leveling, reason: computed.error };
+    }
+  }
+  return { valid: !issues.some((i) => i.severity === "error"), issues, scheduleChecks };
+}
+function cmdValidate(positional, opts) {
   const [path] = positional;
-  if (!path) fail("\u4F7F\u3044\u65B9: validate <file>");
+  if (!path) fail("\u4F7F\u3044\u65B9: validate <file> [--leveling on|off|auto]");
   const raw = readProjectFile(path);
   let data;
   try {
@@ -1328,13 +1617,14 @@ function cmdValidate(positional) {
       }]
     });
   }
-  const issues = analyzeIntegrity(data);
-  const hasError = issues.some((i) => i.severity === "error");
+  const leveling = resolveLeveling(opts.leveling, data);
+  const { valid, issues, scheduleChecks } = validateProject(data, { leveling });
   emit({
     command: "validate",
     file: path,
-    valid: !hasError,
+    valid,
     schemaValid: true,
+    scheduleChecks,
     counts: {
       tasks: data.tasks.length,
       resources: data.resources.length,
@@ -1368,6 +1658,7 @@ function cmdRecalc(positional, opts) {
     tasks: scheduleRows(data, r.schedule),
     sprintConflicts: r.sprintConflicts,
     levelWarnings: r.levelWarnings,
+    dependencyIssues: r.dependencyIssues,
     integrityIssues: integrity
   });
 }
@@ -1479,6 +1770,7 @@ function cmdPlan(positional, opts) {
     scheduleChanges,
     sprintConflicts: { before: before.sprintConflicts, after: after.sprintConflicts },
     levelWarnings: { before: before.levelWarnings, after: after.levelWarnings },
+    dependencyIssues: { before: before.dependencyIssues, after: after.dependencyIssues },
     integrityIssues: integrity,
     proposed
   });
@@ -1561,7 +1853,8 @@ function cmdExplain(positional, opts) {
       sprintFloorApplied,
       fixedMilestoneBackward: !!(task.milestone && task.milestoneMode === "fixed")
     },
-    predecessors
+    predecessors,
+    dependencyIssues: r.dependencyIssues.filter((i) => i.ids.includes(taskId))
   });
 }
 function main() {
@@ -1582,7 +1875,7 @@ function main() {
       process.stdout.write([
         "Project Scheduler \u2014 \u30B9\u30B1\u30B8\u30E5\u30FC\u30EB\u8ABF\u6574CLI",
         "",
-        "  validate <file>",
+        "  validate <file> [--leveling on|off|auto]",
         "  recalc   <file> [--leveling on|off|auto]",
         "  plan     <original.json> <edited.json> [--reschedule] [--leveling on|off|auto]",
         "  explain  <file> --task <taskId> [--leveling on|off|auto]",
@@ -1605,7 +1898,7 @@ export {
   buildVersionSnapshot,
   checkFieldShapes,
   computeSchedule,
-  findDependencyCycles,
   findParentCycles,
-  scheduleRows
+  scheduleRows,
+  validateProject
 };
