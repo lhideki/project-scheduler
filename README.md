@@ -33,17 +33,22 @@ To move a plan between devices, or between the Live Demo and the downloaded HTML
 ## Features
 
 - Edit a WBS as an outline and view its Gantt chart against a working-day calendar that accounts for weekends and Japanese public holidays.
-- Navigate cells with the arrow keys, copy and paste individual cells or rows, and use Undo and Redo.
+- Navigate cells with the arrow keys, copy and paste individual cells or rows, and undo or redo task edits.
+- Add company holidays or extra working days in the `カレンダー編集` (Calendar) tab to override weekends and public holidays.
+- Zoom the Gantt chart from days to weeks and months, hatch non-working days inside task bars, draw a progress line (inazuma line) against a chosen status date, and hover over or focus a bar to see its details in a tooltip.
 - Model all four dependency types (FS, SS, FF, and SF) with lead and lag offsets.
 - Calculate and visualize float and the critical path with the Critical Path Method (CPM).
 - Switch milestones between flexible mode, scheduled forward from dependencies, and fixed mode, scheduled backward from a due date.
 - Automatically level resources against weekly and monthly capacity limits. Work is allocated day by day from the earliest date with free capacity, so a task's duration stretches over the days its assignee is at capacity. Those unallocated days are hatched in the Gantt chart, and the tooltip explains why.
+- Check each assignee's weekly workload against their capacity in the `リソース` (Resources) tab.
 - Define sprints with start dates, end dates, and themes, and assign multiple sprints to a task.
 - Flag conflicts between sprint windows and calculated task dates.
 - Flag dependency problems in the WBS table and Gantt chart: circular dependencies (including cycles through groups), start dates that break a dependency, fixed milestones pushed past their due date, and links to deleted tasks.
-- Inspect dependencies in a network (PERT) view and copy the graph as Mermaid syntax.
+- Inspect dependencies in a network (PERT) view.
+- Copy the calculated schedule as a Mermaid Gantt chart, or copy the visible part of the Gantt chart as a PNG image.
 - Save snapshots, compare multiple versions on a Gantt-style timeline, and restore an earlier state.
-- Export and import the complete project, including tasks, resources, sprints, and version history, as JSON.
+- Export and import the complete project, including tasks, resources, sprints, calendar overrides, the resource leveling setting, and version history, as JSON.
+- Export a shared HTML file that embeds the current plan. See [Share a snapshot as HTML](#share-a-snapshot-as-html).
 - Use the included Claude Code Skill to let an AI agent adjust an exported plan directly. See [AI-assisted replanning](#ai-assisted-replanning).
 
 <details>
@@ -68,6 +73,12 @@ To move a plan between devices, or between the Live Demo and the downloaded HTML
 When opened in a regular browser, the app automatically saves changes to that browser's `localStorage` after about 0.8 seconds. Data stays in that browser and on that device; it is not synchronized automatically with other browsers or devices.
 
 Private browsing or clearing site data may delete the saved plan. Export important plans to JSON regularly as a backup.
+
+## Share a snapshot as HTML
+
+Select `共有用HTML書き出し` (Export shared HTML) from the `書き出し` (Export) menu to download a self-contained HTML file with the current plan embedded. Anyone can open it in a browser without the JSON file. It shows the plan as it was when you exported it.
+
+The shared HTML does not save changes to `localStorage`. You can still edit the plan after opening it, but reloading the page restores the exported state. To keep your changes, export them as JSON.
 
 ## Link a JSON file from a synced folder
 
@@ -138,7 +149,8 @@ Pushing to `master` runs the tests and build in GitHub Actions, then publishes t
 
 ### Requirements
 
-- Node.js 18 or later
+- Node.js 20.19 or later, or 22.12 or later, for development and tests (required by Vitest 4 and Vite 8). GitHub Actions uses Node.js 24.
+- The bundled Skill CLI (`cli.mjs`) itself runs on Node.js 18 or later.
 
 ### Setup and verification
 
@@ -182,7 +194,8 @@ npm run build
 ## Known limitations
 
 - Real-time multi-user editing and automatic cross-device synchronization are not supported. Use JSON export and import to share or transfer a plan.
-- The working-day calendar uses a simplified implementation of Japanese public holidays.
+- The working-day calendar uses a simplified implementation of Japanese public holidays. Use the `カレンダー編集` (Calendar) tab to correct individual dates or add company-specific holidays.
+- Undo and Redo apply only to task edits, not to changes to resources, sprints, or the calendar.
 
 ## Feedback
 
