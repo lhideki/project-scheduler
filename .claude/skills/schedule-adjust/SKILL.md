@@ -86,7 +86,7 @@ node <CLI> explain  <file> --task <taskId> [--leveling on|off|auto]
 ### `recalc <file>`
 非破壊。現在のファイルの実効スケジュールを返す（アプリを開いた状態と一致）。
 `tasks[]`（`schedStart`/`schedFinish`/`critical`/`float`/`progress`）、`projectEnd`、
-`sprintConflicts`、`levelWarnings`（稼働上限内に配置できなかった警告）、`dependencyIssues`
+`sprintConflicts`、`levelWarnings`（稼働上限内に割り当てきれなかった警告）、`dependencyIssues`
 （アプリのヘッダー「依存関係の矛盾」と同じ一覧。形式は `validate` の issue と同じ）、`integrityIssues`。
 **現状把握・what-if 確認に使う。**
 
@@ -97,7 +97,7 @@ node <CLI> explain  <file> --task <taskId> [--leveling on|off|auto]
 - `--reschedule`: 「自動スケジューリング実行」相当。全リーフの `startDate` を依存関係ベースの
   日程へ書き戻す（固定マイルストーン自身は `fixedDate` 由来）。依存タスクを広くカスケードさせたい
   ときに使う。平準化 ON（`--leveling` の解決結果が true）のときは、CPM 最短ではなく**平準化後の
-  配置日**（＝平準化 ON 時の表示スケジュールと一致する日付）を書き戻す。
+  配置日**（＝平準化 ON 時の表示スケジュールと一致する日付。一致するまで書き戻しを繰り返す）を書き戻す。
 - 返り値:
   - `blocked: true` … `edited.json` に整合性エラーあり。`integrityIssues` を見せて修正を促す。
   - `summary` … `projectEnd` の before→after、スケジュールが動くタスク数、
@@ -110,7 +110,11 @@ node <CLI> explain  <file> --task <taskId> [--leveling on|off|auto]
 
 ### `explain <file> --task <taskId>`
 1タスクの ES/EF/LS/LF・フロート・クリティカル、拘束している先行タスク、スプリントフロア、
-ピン留めの有無と理由、そのタスクに関する `dependencyIssues` を返す。「なぜこの日程になるのか」の説明に使う。
+ピン留めの有無と理由、日別割当（`allocation`）、そのタスクに関する `dependencyIssues` を返す。
+「なぜこの日程になるのか」の説明に使う。`allocation` は `days`（日別の割当量）・`allocatedDays`・
+`idleSegments`（期間内で稼働上限により割当がなかった稼働日の区間。`reason` は `weekly`/`monthly`＝
+週次・月次上限に到達、`daily`＝`taskNames` の他タスクでその日が埋まっている）・`overCapacity`
+（稼働上限内に割り当てきれず上限超過のまま）を持つ。平準化 OFF では開始日からの連続配分になる。
 
 ## 標準ワークフロー（保存を伴う調整）
 
@@ -146,6 +150,15 @@ node <CLI> explain  <file> --task <taskId> [--leveling on|off|auto]
   現在の `levelingOn` をユーザーに伝えて ON にするか確認する。ON にするなら `--leveling on` を渡し、
   `proposed.levelingOn` も `true` になる。
 - 依頼がリソースに無関係なら確認は不要。現在値のまま進め、レポートに「平準化 ON/OFF で計算」と一言添える。
+- 平準化 ON では、担当者の空き容量（日次1人日・週次・月次の上限の残り）に応じて工数を早い日から
+  日別に割り当てる。上限に達した日は割当なしのまま挟み、**タスクの期間（終了日）を延長する**
+  （工数 `duration` は変えない。中断は一律に許可され、タスク単位の設定は無い）。延長後の終了日は
+  後続タスク・グループの日程・スプリント矛盾の判定にそのまま反映される。上限値 `0`・未設定は上限なし。
+  「なぜ終了日が遅いのか」を説明するときは `explain` の `allocation.idleSegments` を使う
+  （週次上限で「月・火に作業する」のは早い日から割り当てた計画上の仮定であり、休みではない点に注意）。
+- 着手済み（`progress > 0`）のタスクは開始日に固定したまま、工数の全量を開始日から稼働上限内で
+  割り当てる（他タスクと同じ日に二重に割り当てない）。そのため、優先度の高い未着手タスクの追加・変更で
+  着手済みタスクの終了日が延びることがある。
 - **平準化後の日付は `startDate` に焼き込まれない**（`--reschedule` を付けた場合を除く）。
   平準化は毎回再計算される表示で、確定させたいスケジュールは `versions[]` スナップショットが担う
   （`plan` が自動で1件積む）。`--reschedule` かつ平準化 ON のときだけは、書き戻し後に着手済みへ
@@ -161,7 +174,7 @@ node <CLI> explain  <file> --task <taskId> [--leveling on|off|auto]
   「もっと前倒しで詰めてよいか」を確認してから `--reschedule` を検討する。
 
 ### 「担当者の割り当てが重ならないように」
-- `--leveling on` で `plan`。`levelWarnings`（稼働上限内に配置できなかったタスク）、
+- `--leveling on` で `plan`。`levelWarnings`（稼働上限内に割り当てきれなかったタスク）、
   `dependencyIssues.after` の `fixed-milestone-overrun`（固定マイルストーン期日超過）と
   `after` の `projectEnd` を必ず提示。必要なら担当者（`assigneeId`）の再割り当ても提案。
 

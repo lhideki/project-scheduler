@@ -7,7 +7,7 @@ import {
 
 import { toISO, parseISO, buildHolidayMap, makeCalendar, fmtJP } from "./lib/calendar.js";
 import { uid, migrateSprintIds, isGroupId, buildFlatList, ancestorChain } from "./lib/taskTree.js";
-import { runCPM, rollupSummaries, levelResources, deriveProjectStart, autoScheduleStartDates } from "./lib/scheduling.js";
+import { runCPM, buildDisplaySchedule, deriveProjectStart, autoScheduleStartDates } from "./lib/scheduling.js";
 import { detectSprintConflicts } from "./lib/sprints.js";
 import { detectDependencyIssues, groupDependencyIssuesByTask, DEPENDENCY_ISSUE_LABELS } from "./lib/dependencyIssues.js";
 import {
@@ -194,18 +194,12 @@ export default function App() {
 
   const cpm = useMemo(() => runCPM(tasks, cal, projectStart, sprints), [tasks, cal, projectStart, sprints]);
 
-  const { schedule, levelWarnings } = useMemo(() => {
-    if (!levelingOn) return { schedule: cpm.result, levelWarnings: [] };
-    const { placed, warnings } = levelResources(tasks, cpm.result, resources, cal, sprints);
-    const merged = new Map(cpm.result);
-    for (const [id, dates] of Object.entries(placed)) {
-      const prev = merged.get(id) || {};
-      merged.set(id, { ...prev, schedStart: dates.start, schedFinish: dates.finish });
-    }
-    // サマリー行の再ロールアップ（runCPM と同じロジックを共有、進捗率は子タスクの単純平均）
-    rollupSummaries(tasks, merged);
-    return { schedule: merged, levelWarnings: warnings };
-  }, [levelingOn, cpm, tasks, resources, cal, sprints]);
+  // 表示スケジュール（平準化ONなら担当者の稼働上限に合わせて延長した日程）と日別割当。
+  // 組み立ては CLI（computeSchedule）と共通の buildDisplaySchedule に一本化している。
+  const { schedule, levelWarnings } = useMemo(
+    () => buildDisplaySchedule(tasks, cpm.result, resources, cal, sprints, { leveling: levelingOn }),
+    [levelingOn, cpm, tasks, resources, cal, sprints]
+  );
 
   const projectEnd = useMemo(() => {
     let mx = cpm.projectEnd;

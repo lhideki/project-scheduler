@@ -9,8 +9,9 @@
 export { toISO, parseISO, buildHolidayMap, makeCalendar, fmtJP } from "../lib/calendar.js";
 export {
   runCPM, levelResources, rollupSummaries, deriveProjectStart,
-  candidateFromDep, earliestSprintFloor, autoScheduleStartDates,
+  candidateFromDep, earliestSprintFloor, autoScheduleStartDates, buildDisplaySchedule,
 } from "../lib/scheduling.js";
+export { idleSegments } from "../lib/workAllocation.js";
 export { detectSprintConflicts, computeOverlappingSprintIds } from "../lib/sprints.js";
 export {
   detectDependencyIssues, findDependencyCycles, findMissingPredecessors,

@@ -20,8 +20,9 @@ import { pathToFileURL } from "node:url";
 
 import {
   toISO, buildHolidayMap, makeCalendar,
-  runCPM, levelResources, rollupSummaries, deriveProjectStart,
+  runCPM, buildDisplaySchedule, deriveProjectStart,
   candidateFromDep, earliestSprintFloor, autoScheduleStartDates,
+  idleSegments,
   detectSprintConflicts, computeOverlappingSprintIds,
   detectDependencyIssues, SCHEDULE_DEPENDENCY_ISSUE_CODES,
   normalizeImportedProject,
@@ -127,19 +128,8 @@ export function computeSchedule(data, opts = {}) {
   const cal = makeProjectCalendar(projectStart, calendarExceptions);
   const cpm = runCPM(tasks, cal, projectStart, sprints, { respectManualPins });
 
-  let schedule = cpm.result;
-  let levelWarnings = [];
-  if (leveling) {
-    const { placed, warnings } = levelResources(tasks, cpm.result, resources, cal, sprints);
-    const merged = new Map(cpm.result);
-    for (const [id, dates] of Object.entries(placed)) {
-      const prev = merged.get(id) || {};
-      merged.set(id, { ...prev, schedStart: dates.start, schedFinish: dates.finish });
-    }
-    rollupSummaries(tasks, merged);
-    schedule = merged;
-    levelWarnings = warnings;
-  }
+  // アプリの schedule useMemo と同じ組み立て（src/lib/scheduling.js の buildDisplaySchedule）。
+  const { schedule, levelWarnings } = buildDisplaySchedule(tasks, cpm.result, resources, cal, sprints, { leveling });
 
   let projectEnd = cpm.projectEnd;
   schedule.forEach(v => { if (v.schedFinish && v.schedFinish > projectEnd) projectEnd = v.schedFinish; });
@@ -803,6 +793,17 @@ function cmdExplain(positional, opts) {
       fixedMilestoneBackward: !!(task.milestone && task.milestoneMode === "fixed"),
     },
     predecessors,
+    // 日別割当（平準化ONでは担当者の稼働上限に合わせて延長した割当、OFFでは開始日からの連続配分）。
+    // idleSegments は期間内で稼働上限により割当がなかった稼働日の区間と理由（daily=他タスクで埋まっている）。
+    allocation: s.allocation ? {
+      allocatedDays: s.allocation.alloc.length,
+      days: s.allocation.alloc,
+      idleSegments: idleSegments(s.allocation.idle, s.allocation.alloc).map(seg => ({
+        ...seg,
+        taskNames: seg.taskIds.map(id => nameOf(data.tasks, id)),
+      })),
+      overCapacity: !!s.allocation.overCapacity,
+    } : null,
     dependencyIssues: r.dependencyIssues.filter(i => i.ids.includes(taskId)),
   });
 }

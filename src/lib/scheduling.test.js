@@ -2,8 +2,9 @@ import { describe, it, expect } from "vitest";
 import { buildHolidayMap, makeCalendar } from "./calendar.js";
 import {
   runCPM, rollupSummaries, levelResources, dailyLoads, topoOrder, earliestSprintFloor,
-  deriveProjectStart, autoScheduleStartDates,
+  deriveProjectStart, autoScheduleStartDates, buildDisplaySchedule,
 } from "./scheduling.js";
+import { weekKey, monthKey } from "./calendar.js";
 
 // 2024-01-09(火)〜2024-02-09の間は土日以外の非稼働日が無い期間なので、
 // 日付計算の期待値を単純な曜日カウントで検証できる。
@@ -114,16 +115,18 @@ describe("rollupSummaries", () => {
 
 describe("levelResources", () => {
   it.each([
-    ["週次", 2, 20],
-    ["月次", 5, 3],
-  ])("%s上限内に配置できない場合は探索開始日に戻して警告する", (label, weeklyCapacity, monthlyCapacity) => {
+    ["週次", 1, 20],
+    ["月次", 5, 1],
+  ])("%s上限で探索上限内に割り当てきれない場合は探索開始日からの連続配置に戻して警告する", (label, weeklyCapacity, monthlyCapacity) => {
     const tasks = [
-      { id: "T", name: "大きなタスク", parentId: null, order: 0, startDate: "2024-01-09", duration: 10, assigneeId: "r1", predecessors: [] },
+      { id: "T", name: "大きなタスク", parentId: null, order: 0, startDate: "2024-01-09", duration: 500, assigneeId: "r1", predecessors: [] },
     ];
     const resources = [{ id: "r1", name: "担当者1", weeklyCapacity, monthlyCapacity }];
     const { result } = runCPM(tasks, cal, "2024-01-09", []);
-    const { placed, warnings } = levelResources(tasks, result, resources, cal, []);
-    expect(placed.T).toEqual({ start: "2024-01-09", finish: "2024-01-22" });
+    const { placed, warnings, allocations } = levelResources(tasks, result, resources, cal, []);
+    expect(placed.T).toEqual({ start: "2024-01-09", finish: cal.endFromStart("2024-01-09", 500) });
+    expect(allocations.T.overCapacity).toBe(true);
+    expect(allocations.T.alloc).toEqual(dailyLoads(cal, "2024-01-09", 500));
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain("大きなタスク");
     expect(warnings[0]).toContain("担当者1");
@@ -131,27 +134,30 @@ describe("levelResources", () => {
     expect(warnings[0]).toContain("稼働上限を超過");
   });
 
-  it("配置失敗したタスクの負荷と終了日を、他タスクの平準化・依存関係に反映する", () => {
+  it("割当不成立のタスクの負荷と終了日を、他タスクの平準化・依存関係に反映する", () => {
     const tasks = [
-      { id: "A", name: "A", parentId: null, order: 0, startDate: "2024-01-09", duration: 10, assigneeId: "r1", predecessors: [] },
+      { id: "A", name: "A", parentId: null, order: 0, startDate: "2024-01-09", duration: 500, assigneeId: "r1", predecessors: [] },
       { id: "B", name: "B", parentId: null, order: 1, startDate: "2024-01-09", duration: 1, assigneeId: "r1", predecessors: [] },
       { id: "C", name: "C", parentId: null, order: 2, duration: 1, predecessors: [{ id: "A", type: "FS", lag: 0 }] },
     ];
-    const resources = [{ id: "r1", name: "R1", weeklyCapacity: 2, monthlyCapacity: 20 }];
+    const resources = [{ id: "r1", name: "R1", weeklyCapacity: 1, monthlyCapacity: 20 }];
     const { result } = runCPM(tasks, cal, "2024-01-09", []);
     const { placed, warnings } = levelResources(tasks, result, resources, cal, []);
-    expect(placed.A.finish).toBe("2024-01-22");
-    expect(placed.B.start).toBe("2024-01-23");
-    expect(placed.C.start).toBe("2024-01-23");
+    const aFinish = cal.endFromStart("2024-01-09", 500);
+    expect(placed.A.finish).toBe(aFinish);
+    // A の連続配置（上限超過のまま登録）と同じ週には B を割り当てられない
+    expect(placed.B.start > aFinish).toBe(true);
+    expect(weekKey(placed.B.start) > weekKey(aFinish)).toBe(true);
+    expect(placed.C.start).toBe(cal.shift(aFinish, 1));
     expect(warnings).toHaveLength(1);
   });
 
-  it("配置失敗時も依存関係・手入力開始日・スプリントの下限を守る", () => {
+  it("割当不成立時も依存関係・手入力開始日・スプリントの下限を守る", () => {
     const tasks = [
       { id: "A", name: "A", parentId: null, order: 0, startDate: "2024-01-09", duration: 5, predecessors: [] },
-      { id: "B", name: "B", parentId: null, order: 1, startDate: "2024-01-18", duration: 10, assigneeId: "r1", sprintIds: ["s"], predecessors: [{ id: "A", type: "FS", lag: 0 }] },
+      { id: "B", name: "B", parentId: null, order: 1, startDate: "2024-01-18", duration: 500, assigneeId: "r1", sprintIds: ["s"], predecessors: [{ id: "A", type: "FS", lag: 0 }] },
     ];
-    const resources = [{ id: "r1", name: "R1", weeklyCapacity: 2, monthlyCapacity: 20 }];
+    const resources = [{ id: "r1", name: "R1", weeklyCapacity: 1, monthlyCapacity: 20 }];
     const sprints = [{ id: "s", startDate: "2024-01-22", endDate: "2024-02-09" }];
     const { result } = runCPM(tasks, cal, "2024-01-09", sprints);
     const { placed, warnings } = levelResources(tasks, result, resources, cal, sprints);
@@ -159,15 +165,133 @@ describe("levelResources", () => {
     expect(warnings).toHaveLength(1);
   });
 
-  it("総工数が週次上限を超えていても週をまたいで収まるタスクは配置できる", () => {
+  it("週次上限に達した週の残りを非割当日として翌週へ延長する（Issue #30 の想定例）", () => {
+    // 2024-01-15(月)開始・工数3人日・週次上限2人日: 月・火に2人日、翌月曜に1人日
     const tasks = [
-      { id: "T", name: "T", parentId: null, order: 0, startDate: "2024-01-09", duration: 4, assigneeId: "r1", predecessors: [] },
+      { id: "T", name: "T", parentId: null, order: 0, startDate: "2024-01-15", duration: 3, assigneeId: "r1", predecessors: [] },
+    ];
+    const resources = [{ id: "r1", name: "R1", weeklyCapacity: 2, monthlyCapacity: 20 }];
+    const { result } = runCPM(tasks, cal, "2024-01-15", []);
+    const { placed, warnings, allocations } = levelResources(tasks, result, resources, cal, []);
+    expect(placed.T).toEqual({ start: "2024-01-15", finish: "2024-01-22" });
+    expect(allocations.T.alloc).toEqual([
+      { date: "2024-01-15", load: 1 },
+      { date: "2024-01-16", load: 1 },
+      { date: "2024-01-22", load: 1 },
+    ]);
+    // 水〜金は週次上限による非割当。土日は非稼働日なので idle には含めない（カレンダーから求める）
+    expect(allocations.T.idle).toEqual([
+      { date: "2024-01-17", reason: "weekly" },
+      { date: "2024-01-18", reason: "weekly" },
+      { date: "2024-01-19", reason: "weekly" },
+    ]);
+    expect(warnings).toEqual([]);
+  });
+
+  it("従来は配置できなかった、どの連続期間でも週次上限を超えるタスクも週をまたいで割り当てる", () => {
+    const tasks = [
+      { id: "T", name: "T", parentId: null, order: 0, startDate: "2024-01-09", duration: 10, assigneeId: "r1", predecessors: [] },
     ];
     const resources = [{ id: "r1", name: "R1", weeklyCapacity: 2, monthlyCapacity: 20 }];
     const { result } = runCPM(tasks, cal, "2024-01-09", []);
-    const { placed, warnings } = levelResources(tasks, result, resources, cal, []);
-    expect(placed.T).toEqual({ start: "2024-01-11", finish: "2024-01-16" });
+    const { placed, warnings, allocations } = levelResources(tasks, result, resources, cal, []);
     expect(warnings).toEqual([]);
+    expect(allocations.T.alloc.map(a => a.date)).toEqual([
+      "2024-01-09", "2024-01-10", "2024-01-15", "2024-01-16", "2024-01-22",
+      "2024-01-23", "2024-01-29", "2024-01-30", "2024-02-05", "2024-02-06",
+    ]);
+    expect(placed.T).toEqual({ start: "2024-01-09", finish: "2024-02-06" });
+  });
+
+  it("日別割当の合計は工数と一致し、同じ担当者の複数タスクの合計は日次・週次・月次上限を超えない", () => {
+    const tasks = [
+      { id: "A", name: "A", parentId: null, order: 0, startDate: "2024-01-09", duration: 3.3, assigneeId: "r1", predecessors: [] },
+      { id: "B", name: "B", parentId: null, order: 1, startDate: "2024-01-10", duration: 4.75, assigneeId: "r1", predecessors: [] },
+      { id: "C", name: "C", parentId: null, order: 2, duration: 2.5, assigneeId: "r1", predecessors: [{ id: "A", type: "SS", lag: 1 }] },
+      { id: "D", name: "D", parentId: null, order: 3, startDate: "2024-01-09", duration: 6, assigneeId: "r1", progress: 10, predecessors: [] },
+    ];
+    const resources = [{ id: "r1", name: "R1", weeklyCapacity: 2.5, monthlyCapacity: 9 }];
+    const { result } = runCPM(tasks, cal, "2024-01-09", []);
+    const { allocations, warnings } = levelResources(tasks, result, resources, cal, []);
+    expect(warnings).toEqual([]);
+    const day = {}, week = {}, month = {};
+    tasks.forEach(t => {
+      const sum = allocations[t.id].alloc.reduce((acc, a) => acc + a.load, 0);
+      expect(sum).toBeCloseTo(t.duration, 9);
+      allocations[t.id].alloc.forEach(({ date, load }) => {
+        day[date] = (day[date] || 0) + load;
+        week[weekKey(date)] = (week[weekKey(date)] || 0) + load;
+        month[monthKey(date)] = (month[monthKey(date)] || 0) + load;
+      });
+    });
+    Object.values(day).forEach(v => expect(v).toBeLessThanOrEqual(1 + 1e-9));
+    Object.values(week).forEach(v => expect(v).toBeLessThanOrEqual(2.5 + 1e-9));
+    Object.values(month).forEach(v => expect(v).toBeLessThanOrEqual(9 + 1e-9));
+  });
+
+  it("休日指定・稼働日指定を日別割当に反映する", () => {
+    const calEx = makeCalendar(buildHolidayMap(2024, 2024), [
+      { date: "2024-01-16", type: "holiday", name: "創立記念日" },
+      { date: "2024-01-20", type: "workday", name: "休日出勤" },
+    ]);
+    const tasks = [
+      { id: "T", name: "T", parentId: null, order: 0, startDate: "2024-01-15", duration: 6, assigneeId: "r1", predecessors: [] },
+    ];
+    const resources = [{ id: "r1", name: "R1", weeklyCapacity: 0, monthlyCapacity: 0 }];
+    const { result } = runCPM(tasks, calEx, "2024-01-15", []);
+    const { allocations } = levelResources(tasks, result, resources, calEx, []);
+    // 1/16（休日指定）は飛ばし、1/20（土曜の稼働日指定）には割り当てる
+    expect(allocations.T.alloc.map(a => a.date)).toEqual([
+      "2024-01-15", "2024-01-17", "2024-01-18", "2024-01-19", "2024-01-20", "2024-01-22",
+    ]);
+    expect(allocations.T.idle).toEqual([]);
+  });
+
+  it("他タスクで埋まっている日は日次上限による非割当として、そのタスクを記録する", () => {
+    const tasks = [
+      { id: "T1", name: "T1", parentId: null, order: 0, startDate: "2024-01-17", duration: 2, assigneeId: "r1", predecessors: [] },
+      { id: "T2", name: "T2", parentId: null, order: 1, startDate: "2024-01-15", duration: 4, assigneeId: "r1", predecessors: [] },
+    ];
+    const resources = [{ id: "r1", name: "R1", weeklyCapacity: 5, monthlyCapacity: 20 }];
+    const { result } = runCPM(tasks, cal, "2024-01-15", []);
+    const { placed, allocations } = levelResources(tasks, result, resources, cal, []);
+    expect(placed.T1).toEqual({ start: "2024-01-17", finish: "2024-01-18" });
+    expect(placed.T2).toEqual({ start: "2024-01-15", finish: "2024-01-22" });
+    expect(allocations.T2.alloc.map(a => a.date)).toEqual(["2024-01-15", "2024-01-16", "2024-01-19", "2024-01-22"]);
+    expect(allocations.T2.idle).toEqual([
+      { date: "2024-01-17", reason: "daily", taskIds: ["T1"] },
+      { date: "2024-01-18", reason: "daily", taskIds: ["T1"] },
+    ]);
+  });
+
+  it("着手済みタスクは開始日を固定したまま稼働上限内に割り当て、同じ日に二重に割り当てない", () => {
+    // 同じフロートなら WBS 順で X が先に確定する。着手済みの Y は開始日 1/15 のまま、空いている日に割り当てる。
+    const tasks = [
+      { id: "X", name: "X", parentId: null, order: 0, startDate: "2024-01-15", duration: 2, assigneeId: "r1", predecessors: [] },
+      { id: "Y", name: "Y", parentId: null, order: 1, startDate: "2024-01-15", duration: 2, assigneeId: "r1", progress: 50, predecessors: [] },
+    ];
+    const resources = [{ id: "r1", name: "R1", weeklyCapacity: 5, monthlyCapacity: 20 }];
+    const { result } = runCPM(tasks, cal, "2024-01-15", []);
+    const { placed, allocations } = levelResources(tasks, result, resources, cal, []);
+    expect(placed.X).toEqual({ start: "2024-01-15", finish: "2024-01-16" });
+    expect(placed.Y).toEqual({ start: "2024-01-15", finish: "2024-01-18" });
+    expect(allocations.Y.alloc.map(a => a.date)).toEqual(["2024-01-17", "2024-01-18"]);
+    expect(allocations.Y.idle).toEqual([
+      { date: "2024-01-15", reason: "daily", taskIds: ["X"] },
+      { date: "2024-01-16", reason: "daily", taskIds: ["X"] },
+    ]);
+  });
+
+  it("担当者未設定・工数0のタスクは稼働上限を見ずに連続配置する", () => {
+    const tasks = [
+      { id: "U", name: "U", parentId: null, order: 0, startDate: "2024-01-15", duration: 3, predecessors: [] },
+      { id: "M", name: "M", parentId: null, order: 1, duration: 0, milestone: true, predecessors: [{ id: "U", type: "FS", lag: 0 }] },
+    ];
+    const { result } = runCPM(tasks, cal, "2024-01-15", []);
+    const { placed, allocations } = levelResources(tasks, result, [], cal, []);
+    expect(placed.U).toEqual({ start: "2024-01-15", finish: "2024-01-17" });
+    expect(allocations.U).toEqual({ alloc: dailyLoads(cal, "2024-01-15", 3), idle: [] });
+    expect(allocations.M).toBeUndefined();
   });
 
   it("同じ担当者・同じ希望日のタスクは1日1件までに直列化される", () => {
@@ -270,6 +394,51 @@ describe("autoScheduleStartDates", () => {
     expect(placed.T2.start).toBe("2024-01-12");
   });
 
+  it("平準化ONで容量を分け合うタスクも、書き戻し後に着手済みにして表示が動かない（着手済みも通常の優先順で確定）", () => {
+    // A は別担当者の X（2日）の後続で余裕0。B は A と同じ担当者で余裕のあるタスク。
+    // B は A の割当日（1/17〜1/19）を避けて 1/15・1/16・1/22 に割り当てられる。
+    const res = [
+      { id: "r1", name: "R1", weeklyCapacity: 5, monthlyCapacity: 20 },
+      { id: "r2", name: "R2", weeklyCapacity: 5, monthlyCapacity: 20 },
+    ];
+    const tasks = [
+      { id: "X", name: "X", parentId: null, order: 0, duration: 2, assigneeId: "r2", predecessors: [] },
+      { id: "A", name: "A", parentId: null, order: 1, duration: 3, assigneeId: "r1", predecessors: [{ id: "X", type: "FS", lag: 0 }] },
+      { id: "B", name: "B", parentId: null, order: 2, duration: 3, assigneeId: "r1", predecessors: [] },
+    ];
+    const map = autoScheduleStartDates(tasks, cal, "2024-01-15", [], res, { leveling: true });
+    const written = tasks.map(t => ({ ...t, startDate: map.get(t.id) }));
+    const levelOf = (ts) => {
+      const { result } = runCPM(ts, cal, "2024-01-15", []);
+      return levelResources(ts, result, res, cal, []);
+    };
+    const before = levelOf(written);
+    expect(before.placed.A).toEqual({ start: "2024-01-17", finish: "2024-01-19" });
+    expect(before.placed.B).toEqual({ start: "2024-01-15", finish: "2024-01-22" });
+
+    const after = levelOf(written.map(t => (t.id === "B" ? { ...t, progress: 20 } : t)));
+    expect(after.placed).toEqual(before.placed);
+    expect(after.allocations.B.alloc).toEqual(before.allocations.B.alloc);
+  });
+
+  it("平準化ONでは書き戻した状態の表示と一致するまで書き戻しを繰り返す", () => {
+    // 1回の書き戻しでは T2 を 1/22 とするが、書き戻し後の表示ではフロート順が入れ替わり
+    // T0 が先に翌週の容量（週3人日）を使うため、T2 は 1/29 と表示される。書き戻しもそれに揃える。
+    const res = [{ id: "r1", name: "R1", weeklyCapacity: 3, monthlyCapacity: 20 }];
+    const tasks = [
+      { id: "T0", name: "T0", parentId: null, order: 0, duration: 3, assigneeId: "r1", predecessors: [] },
+      { id: "T1", name: "T1", parentId: null, order: 1, duration: 3, assigneeId: "r1", predecessors: [] },
+      { id: "T2", name: "T2", parentId: null, order: 2, duration: 1, assigneeId: "r1", predecessors: [{ id: "T1", type: "FS", lag: 0 }] },
+    ];
+    const map = autoScheduleStartDates(tasks, cal, "2024-01-15", [], res, { leveling: true });
+    expect(Object.fromEntries(map)).toEqual({ T0: "2024-01-23", T1: "2024-01-15", T2: "2024-01-29" });
+
+    const written = tasks.map(t => ({ ...t, startDate: map.get(t.id) }));
+    const { result } = runCPM(written, cal, deriveProjectStart(written), []);
+    const { placed } = levelResources(written, result, res, cal, []);
+    tasks.forEach(t => expect(placed[t.id].start).toBe(map.get(t.id)));
+  });
+
   it("グループは対象外", () => {
     const tasks = [
       { id: "G", name: "G", parentId: null, order: 0, predecessors: [] },
@@ -310,6 +479,37 @@ describe("autoScheduleStartDates", () => {
     const map = autoScheduleStartDates(tasks, cal, "2024-01-09", [], resources, { leveling: false });
     expect(map.get("M")).toBe("2024-01-10");
     expect(map.get("B")).toBe("2024-01-24"); // T1 終了（1/22）→ M 最早日 1/23 → B は 1/24
+  });
+});
+
+describe("buildDisplaySchedule", () => {
+  const res = [{ id: "r1", name: "R1", weeklyCapacity: 2, monthlyCapacity: 20 }];
+  const tasks = [
+    { id: "G", name: "G", parentId: null, order: 0, predecessors: [] },
+    { id: "T", name: "T", parentId: "G", order: 0, startDate: "2024-01-15", duration: 3, assigneeId: "r1", predecessors: [] },
+    { id: "M", name: "M", parentId: "G", order: 1, duration: 0, milestone: true, predecessors: [{ id: "T", type: "FS", lag: 0 }] },
+  ];
+
+  it("平準化OFFでは CPM の日程に連続配分の日別割当を付け、CPM の結果自体は書き換えない", () => {
+    const { result } = runCPM(tasks, cal, "2024-01-15", []);
+    const { schedule, levelWarnings } = buildDisplaySchedule(tasks, result, res, cal, [], { leveling: false });
+    expect(levelWarnings).toEqual([]);
+    expect(schedule.get("T").schedFinish).toBe("2024-01-17");
+    expect(schedule.get("T").allocation).toEqual({ alloc: dailyLoads(cal, "2024-01-15", 3), idle: [] });
+    expect(schedule.get("M").allocation).toBeUndefined();
+    expect(schedule.get("G").allocation).toBeUndefined();
+    expect(result.get("T").allocation).toBeUndefined();
+  });
+
+  it("平準化ONでは延長後の日程と日別割当を使い、後続タスクとサマリーにも反映する", () => {
+    const { result } = runCPM(tasks, cal, "2024-01-15", []);
+    const { schedule, levelWarnings } = buildDisplaySchedule(tasks, result, res, cal, [], { leveling: true });
+    expect(levelWarnings).toEqual([]);
+    expect(schedule.get("T")).toMatchObject({ schedStart: "2024-01-15", schedFinish: "2024-01-22" });
+    expect(schedule.get("T").allocation.alloc.map(a => a.date)).toEqual(["2024-01-15", "2024-01-16", "2024-01-22"]);
+    expect(schedule.get("M").schedStart).toBe("2024-01-23");
+    expect(schedule.get("G")).toMatchObject({ schedStart: "2024-01-15", schedFinish: "2024-01-23", isSummary: true });
+    expect(result.get("T").schedFinish).toBe("2024-01-17");
   });
 });
 

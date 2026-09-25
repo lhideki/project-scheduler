@@ -29,14 +29,17 @@ export function ResourceView({ resources, setResources, tasks, schedule, cal, re
     tasks.filter(t => t.assigneeId === selRes).forEach(t => {
       const s = schedule.get(t.id);
       if (!s || !s.schedStart || t.duration <= 0) return;
-      dailyLoads(cal, s.schedStart, t.duration).forEach(({ date, load }) => {
+      // ガント・日程計算と同じ日別割当（平準化ONなら稼働上限に合わせて延長した割当）を集計する
+      const alloc = s.allocation ? s.allocation.alloc : dailyLoads(cal, s.schedStart, t.duration);
+      alloc.forEach(({ date, load }) => {
         const wk = weekKey(date);
         usage[wk] = (usage[wk] || 0) + load;
       });
     });
     const weeks = Object.keys(usage).sort();
+    // 上限値0・未設定は「上限なし」（平準化と同じ扱い）なので、超過判定をしない
     const cap = resources.find(r => r.id === selRes)?.weeklyCapacity || 0;
-    return weeks.map(w => ({ week: w.slice(5), days: Math.round(usage[w] * 100) / 100, cap, over: usage[w] > cap + 1e-9 }));
+    return weeks.map(w => ({ week: w.slice(5), days: Math.round(usage[w] * 100) / 100, cap, over: cap > 0 && usage[w] > cap + 1e-9 }));
   }, [selRes, tasks, schedule, resources, cal]);
 
   const capVal = resources.find(r => r.id === selRes)?.weeklyCapacity || 0;
@@ -53,8 +56,8 @@ export function ResourceView({ resources, setResources, tasks, schedule, cal, re
             <thead className="bg-slate-50 text-slate-500">
               <tr>
                 <th className="text-left px-3 py-2 font-medium">名前</th>
-                <th className="text-left px-3 py-2 font-medium">週次上限（日/週）</th>
-                <th className="text-left px-3 py-2 font-medium">月次上限（日/月）</th>
+                <th className="text-left px-3 py-2 font-medium" title="0 は上限なし（1日1人日の上限のみ適用）">週次上限（日/週、0=上限なし）</th>
+                <th className="text-left px-3 py-2 font-medium" title="0 は上限なし（1日1人日の上限のみ適用）">月次上限（日/月、0=上限なし）</th>
                 <th className="w-10" />
               </tr>
             </thead>
@@ -85,15 +88,15 @@ export function ResourceView({ resources, setResources, tasks, schedule, cal, re
               <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
               <XAxis dataKey="week" tick={{ fontSize: 10 }} />
               <YAxis tick={{ fontSize: 10 }} allowDecimals={false} />
-              <Tooltip formatter={(v) => [`${v} 日`, "割当日数"]} labelFormatter={l => `週: ${l}`} />
-              <ReferenceLine y={capVal} stroke="#DC2626" strokeDasharray="4 3" label={{ value: "上限", position: "right", fontSize: 10, fill: "#DC2626" }} />
+              <Tooltip formatter={(v) => [`${v} 人日`, "割当工数"]} labelFormatter={l => `週: ${l}`} />
+              {capVal > 0 && <ReferenceLine y={capVal} stroke="#DC2626" strokeDasharray="4 3" label={{ value: "上限", position: "right", fontSize: 10, fill: "#DC2626" }} />}
               <Bar dataKey="days" radius={[3, 3, 0, 0]}>
                 {weeklyData.map((d, i) => <Cell key={i} fill={d.over ? "#DC2626" : "#6366F1"} />)}
               </Bar>
             </BarChart>
           </ResponsiveContainer>
         </div>
-        <p className="text-[11px] text-slate-400 mt-1">赤い破線は週次稼働上限。バーが上限を超える週は平準化スケジューリングの対象になります。</p>
+        <p className="text-[11px] text-slate-400 mt-1">赤い破線は週次稼働上限（0は上限なし）。ガントの日程と同じ日別割当を集計しています。リソース平準化をONにすると、上限に収まるよう工数を早い日から割り当て、上限に達した日を挟んでタスクの期間を延長します。</p>
       </div>
     </div>
   );

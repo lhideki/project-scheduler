@@ -37,7 +37,7 @@ To move a plan between devices, or between the Live Demo and the downloaded HTML
 - Model all four dependency types (FS, SS, FF, and SF) with lead and lag offsets.
 - Calculate and visualize float and the critical path with the Critical Path Method (CPM).
 - Switch milestones between flexible mode, scheduled forward from dependencies, and fixed mode, scheduled backward from a due date.
-- Automatically level resources against weekly and monthly capacity limits.
+- Automatically level resources against weekly and monthly capacity limits. Work is allocated day by day from the earliest date with free capacity, so a task's duration stretches over the days its assignee is at capacity. Those unallocated days are hatched in the Gantt chart, and the tooltip explains why.
 - Define sprints with start dates, end dates, and themes, and assign multiple sprints to a task.
 - Flag conflicts between sprint windows and calculated task dates.
 - Flag dependency problems in the WBS table and Gantt chart: circular dependencies (including cycles through groups), start dates that break a dependency, fixed milestones pushed past their due date, and links to deleted tasks.
