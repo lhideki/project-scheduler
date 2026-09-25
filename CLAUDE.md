@@ -74,7 +74,7 @@ src/
     IconBtn.jsx、Tab.jsx
 ```
 
-リポジトリ直下の `scripts/` は生成スクリプト（`build-html.mjs`・`build-json-doc.mjs`・`build-agent.mjs`）、`.github/workflows/pages.yml` は `master` への push 時に `npm ci`→`npm run test`→`npm run build` を実行し、`project_scheduler.html` を GitHub Pages（Live Demo）へ公開するワークフロー（Node 24）。開発・テストには Node.js 20.19 以上（または 22.12 以上）が必要（vitest 4 / vite 8 の要件）。Skill の `cli.mjs` は `target: "node18"` でバンドルしているため、実行は Node 18 以上で動く。
+リポジトリ直下の `scripts/` は生成スクリプト（`build-html.mjs`・`build-json-doc.mjs`・`build-agent.mjs`）、`.github/workflows/pages.yml` は `master` への push 時に `npm ci`→`npm run test`→`npm run build` を実行し、`project_scheduler.html` を GitHub Pages（Live Demo）へ公開するワークフロー（Node 24）。開発・テストには Node.js `^20.19.0 || ^22.12.0 || >=24.0.0`（20.19以上の20.x、22.12以上の22.x、または24以上。vitest 4 と vite 8 の engines の共通範囲で、21・23は対象外）が必要。Skill の `cli.mjs` は `target: "node18"` でバンドルしているため、実行は Node 18 以上で動く。
 
 新しい純粋ロジック（日付計算・依存関係解決・スケジューリング・データ変換など、Reactやブラウザ固有APIに依存しない処理）を追加する場合は `src/lib/` に置き、対応する `*.test.js` を書くこと。DOM/ブラウザAPI（`window`・`document`・ポインタイベント等）に依存するが React 非依存のヘルパーは `src/dom/` に置く。Reactコンポーネントは `src/components/` に1コンポーネント1ファイルで置く。
 
@@ -142,7 +142,7 @@ bee（`@nulab/bee` 1.1 以上、Backlog公式CLI）経由で保存JSONと Backlo
 - ガントの日付軸は `dayWidth`（1日あたりのピクセル幅）を `DAY_WIDTH_STOPS` の段階でズームし、`axisTier(dayWidth)` の粒度（`day`/`week`/`month`）に応じてヘッダーの目盛りを日→週→月に縮約する（`src/lib/timeAxis.js`）。バー・依存線・稲妻線は常に線形スケール（1日 = `dayWidth`）のままで、切り替わるのは目盛りと背景の網掛け・罫線だけ。
 - タスクバー内の非稼働日（土日・祝日・休日指定）は斜線（`ganttNonWorkdayHatch`）で網掛けする。`month` 粒度では背景・バーとも日単位の網掛けを省略する。稼働上限による非割当日の網掛け（`ganttIdleHatch`）は下記「スケジューリングロジック」の `buildDisplaySchedule` を参照。
 - 稲妻線（進捗線、`InazumaLine`）は表示を切り替えられ、進捗基準日（稲妻線と今日の縦線の基準、既定は本日）を手動で指定できる。予定日程（`schedStart`/`schedFinish`）自体は進捗率で変えない。
-- タスクバー・マイルストーンはホバー（とキーボードフォーカス）でツールチップを出す。ツールチップの位置は実際に描画したサイズと最新のポインタ位置から決め、スクロール時・依存関係リンクや行のドラッグ中は出さない。
+- タスクバー・マイルストーンはポインタのホバーでツールチップを出す。通常のタスクバーはキーボードでもフォーカスでき（`tabIndex=0`）、フォーカス時も同じツールチップを出し、同じ内容を `aria-label` に持つ（マイルストーンはホバーのみで、`tabIndex`・`aria-label` は持たない）。ツールチップの位置は実際に描画したサイズと最新のポインタ位置から決め、スクロール時・依存関係リンクや行のドラッグ中は出さない。
 
 ### 書き出しメニュー
 
@@ -172,7 +172,7 @@ App は起動元を概念的に3種類として扱う。`autoSaveDisabled`（= `
   - `PROJECT_JSON_SCHEMA`（`src/lib/exportUtils.js`。`npm run build:docs` で `docs/json-format.md` に反映）と `buildProjectExport`/`normalizeImportedProject`
   - App の読み込み経路（localStorage の初回ロード、linked の `applyLinkedProject`、embedded の `initialProject`、JSON「読み込み」の `handleImportFile`）と `pm_project` の自動保存
   - バージョンスナップショット（`saveVersion` の `rawXxx`）と復元（`restoreVersion`）、`seedData()`（`src/lib/seedData.js`）
-  - インポートは `schemaVersion: 1` のみ受け付け、`tasks`/`resources`/`sprints`/`versions` は必須（無ければ読み込み失敗）。後から追加するキーは任意項目にし、キーが無い場合だけ既定値（`false`・`[]` 等）へフォールバックする（キーがあって型が不正な場合は失敗させる）。
+  - インポートは `schemaVersion: 1` のみ受け付け、`tasks`/`resources`/`sprints`/`versions` は必須（無ければ読み込み失敗）。後から追加するキーは任意項目にし、キーが無い場合は既定値（`false`・`[]` 等）へフォールバックする。キーがあって型が不正な場合の扱いはキーごとに異なる（`calendarExceptions` は配列でなければ読み込み失敗、`levelingOn` は boolean 以外なら `false` に丸める）。
 - 依存パッケージのバージョンは `package.json` を正とする。
 
 ## ユニットテスト

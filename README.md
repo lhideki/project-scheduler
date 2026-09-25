@@ -149,7 +149,7 @@ Pushing to `master` runs the tests and build in GitHub Actions, then publishes t
 
 ### Requirements
 
-- Node.js 20.19 or later, or 22.12 or later, for development and tests (required by Vitest 4 and Vite 8). GitHub Actions uses Node.js 24.
+- Node.js `^20.19.0 || ^22.12.0 || >=24.0.0` for development and tests: 20.x from 20.19, 22.x from 22.12, or 24 and later. Node.js 21 and 23 are not supported. This is the range that Vitest 4 and Vite 8 both support. GitHub Actions uses Node.js 24.
 - The bundled Skill CLI (`cli.mjs`) itself runs on Node.js 18 or later.
 
 ### Setup and verification
