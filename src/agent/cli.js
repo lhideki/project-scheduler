@@ -21,7 +21,7 @@ import { pathToFileURL } from "node:url";
 import {
   toISO, buildHolidayMap, makeCalendar,
   runCPM, buildDisplaySchedule, deriveProjectStart,
-  candidateFromDep, earliestSprintFloor, autoScheduleStartDates,
+  candidateFromDep, earliestSprintFloor, computeAutoSchedule,
   idleSegments,
   detectSprintConflicts, computeOverlappingSprintIds,
   detectDependencyIssues, SCHEDULE_DEPENDENCY_ISSUE_CODES,
@@ -444,7 +444,7 @@ export function buildVersionSnapshot(data, schedule, name) {
  *  日付）を書き戻す（autoScheduleStartDates 参照）。App のボタンと結果を揃えるため、
  *  固定マイルストーンを特別扱いしない（＝アプリと CLI で結果がずれないようにする）。 */
 export function applyAutoSchedule(data, projectStart, cal, opts = {}) {
-  const startDates = autoScheduleStartDates(
+  const { startDates, converged } = computeAutoSchedule(
     data.tasks, cal, projectStart, data.sprints || [], data.resources || [],
     { leveling: !!opts.leveling }
   );
@@ -455,7 +455,8 @@ export function applyAutoSchedule(data, projectStart, cal, opts = {}) {
     if (t.startDate !== to) changed.push({ id: t.id, from: t.startDate ?? null, to });
     return { ...t, startDate: to };
   });
-  return { tasks, changed };
+  // converged: 平準化ONで、書き戻した開始日と表示（平準化後の配置日）の一致を確認できたか
+  return { tasks, changed, converged };
 }
 
 /* -------------------------------------------------------------------------------------------
@@ -615,12 +616,14 @@ function cmdPlan(positional, opts) {
 
   let proposedTasks = edited.tasks;
   let startDateChanges = [];
+  let rescheduleConverged = null;
   if (reschedule) {
     const editedProjectStart = deriveProjectStart(edited.tasks, toISO(new Date()));
     const editedCal = makeProjectCalendar(editedProjectStart, edited.calendarExceptions || []);
     const applied = applyAutoSchedule(edited, editedProjectStart, editedCal, { leveling: afterLeveling });
     proposedTasks = applied.tasks;
     startDateChanges = applied.changed;
+    rescheduleConverged = applied.converged;
   }
 
   // 提案JSON: versions 先頭に「調整前」スナップショットを追加
@@ -692,6 +695,8 @@ function cmdPlan(positional, opts) {
       projectEnd: { from: before.projectEnd, to: after.projectEnd },
       tasksWithChangedSchedule: scheduleChanges.filter(c => c.kind === "changed").length,
       startDateWritebacks: startDateChanges.length,
+      // --reschedule 時のみ。false なら書き戻した開始日と表示（平準化後の配置日）の一致を確認できていない
+      rescheduleConverged,
       newlyCritical,
       noLongerCritical,
       snapshotName,

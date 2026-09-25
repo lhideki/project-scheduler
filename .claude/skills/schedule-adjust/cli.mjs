@@ -115,18 +115,38 @@ function normalizeCalendarExceptions(exceptions) {
 }
 function makeCalendar(holidayMap, exceptions = []) {
   const { list: normalizedExceptions, forcedWorkdays, extraHolidays } = normalizeCalendarExceptions(exceptions);
+  let minYear = Infinity, maxYear = -Infinity;
+  for (const key of holidayMap.keys()) {
+    const y = Number(key.slice(0, 4));
+    if (y < minYear) minYear = y;
+    if (y > maxYear) maxYear = y;
+  }
+  const extraYearHolidays = /* @__PURE__ */ new Map();
+  function nationalHolidayName(iso) {
+    const name = holidayMap.get(iso);
+    if (name !== void 0 || holidayMap.size === 0) return name;
+    const y = Number(iso.slice(0, 4));
+    if (y >= minYear && y <= maxYear) return void 0;
+    let yearMap = extraYearHolidays.get(y);
+    if (!yearMap) {
+      yearMap = /* @__PURE__ */ new Map();
+      for (const [date, n] of buildHolidayMap(y, y)) if (date.startsWith(`${y}-`)) yearMap.set(date, n);
+      extraYearHolidays.set(y, yearMap);
+    }
+    return yearMap.get(iso);
+  }
   function isWorkday(d) {
     const iso = toISO(d);
     if (forcedWorkdays.has(iso)) return true;
     if (isWeekend(d)) return false;
-    if (holidayMap.has(iso)) return false;
+    if (nationalHolidayName(iso) !== void 0) return false;
     if (extraHolidays.has(iso)) return false;
     return true;
   }
   function holidayName(s) {
     if (forcedWorkdays.has(s)) return null;
     if (extraHolidays.has(s)) return extraHolidays.get(s) || "\u4F11\u65E5";
-    return holidayMap.get(s) || null;
+    return nationalHolidayName(s) || null;
   }
   function isWorkdayStr(s) {
     return isWorkday(parseISO(s));
@@ -254,7 +274,7 @@ function effectivePredecessors(byId, leaf) {
 }
 
 // src/lib/workAllocation.js
-var ALLOCATION_UNITS_PER_DAY = 100;
+var ALLOCATION_UNITS_PER_DAY = 1e6;
 var DAILY_CAPACITY = 1;
 var ALLOCATION_SEARCH_WORKDAYS = 2e3;
 var toUnits = (days) => Math.round(days * ALLOCATION_UNITS_PER_DAY);
@@ -298,7 +318,6 @@ function allocateWork(ledger, resource, cal, startStr, duration, opts = {}) {
   const dayCap = toUnits(DAILY_CAPACITY);
   const selfWeek = /* @__PURE__ */ new Map(), selfMonth = /* @__PURE__ */ new Map();
   let remaining = Math.max(1, toUnits(duration));
-  let allocatedLoad = 0;
   const alloc = [], idle = [];
   let d = cal.snapForward(startStr);
   let scanned = 0;
@@ -314,9 +333,7 @@ function allocateWork(ledger, resource, cal, startStr, duration, opts = {}) {
         remaining -= units;
         selfWeek.set(wk, (selfWeek.get(wk) || 0) + units);
         selfMonth.set(mo, (selfMonth.get(mo) || 0) + units);
-        const load = remaining <= 0 ? duration - allocatedLoad : units / ALLOCATION_UNITS_PER_DAY;
-        allocatedLoad += load;
-        const entry = { date: d, load };
+        const entry = { date: d, load: units / ALLOCATION_UNITS_PER_DAY };
         if (remaining > 0 && units < dayCap) entry.limitedBy = units === dayFree ? "daily" : units === weekFree ? "weekly" : "monthly";
         alloc.push(entry);
       } else if (alloc.length || pinned) {
@@ -734,8 +751,8 @@ function buildDisplaySchedule(tasks, cpmResult, resources, cal, sprints, opts = 
   rollupSummaries(tasks, schedule);
   return { schedule, levelWarnings: warnings };
 }
-var AUTO_SCHEDULE_MAX_ITERATIONS = 10;
-function autoScheduleStartDates(tasks, cal, projectStart, sprints, resources, opts = {}) {
+var AUTO_SCHEDULE_MAX_ITERATIONS = 20;
+function computeAutoSchedule(tasks, cal, projectStart, sprints, resources, opts = {}) {
   const auto = runCPM(tasks, cal, projectStart, sprints, { respectManualPins: false });
   const out = /* @__PURE__ */ new Map();
   tasks.forEach((t) => {
@@ -752,8 +769,11 @@ function autoScheduleStartDates(tasks, cal, projectStart, sprints, resources, op
     if (!opts.leveling && t && t.milestone && t.milestoneMode === "fixed") return;
     if (dates && dates.start) out.set(id, dates.start);
   });
+  let converged = true;
   if (opts.leveling) {
-    for (let iter = 0; iter < AUTO_SCHEDULE_MAX_ITERATIONS; iter++) {
+    converged = false;
+    const maxIterations = opts.maxIterations ?? AUTO_SCHEDULE_MAX_ITERATIONS;
+    for (let iter = 0; iter < maxIterations; iter++) {
       const written = tasks.map((t) => out.has(t.id) ? { ...t, startDate: out.get(t.id) } : t);
       const displayStart = deriveProjectStart(written, projectStart);
       const display = runCPM(written, cal, displayStart, sprints);
@@ -764,10 +784,13 @@ function autoScheduleStartDates(tasks, cal, projectStart, sprints, resources, op
         out.set(id, dates.start);
         changed = true;
       });
-      if (!changed) break;
+      if (!changed) {
+        converged = true;
+        break;
+      }
     }
   }
-  return out;
+  return { startDates: out, converged };
 }
 
 // src/lib/sprints.js
@@ -1638,7 +1661,7 @@ function buildVersionSnapshot(data, schedule, name) {
   };
 }
 function applyAutoSchedule(data, projectStart, cal, opts = {}) {
-  const startDates = autoScheduleStartDates(
+  const { startDates, converged } = computeAutoSchedule(
     data.tasks,
     cal,
     projectStart,
@@ -1653,7 +1676,7 @@ function applyAutoSchedule(data, projectStart, cal, opts = {}) {
     if (t.startDate !== to) changed.push({ id: t.id, from: t.startDate ?? null, to });
     return { ...t, startDate: to };
   });
-  return { tasks, changed };
+  return { tasks, changed, converged };
 }
 function tryComputeSchedule(data, opts) {
   try {
@@ -1776,12 +1799,14 @@ function cmdPlan(positional, opts) {
   const before = beforeComputed.result;
   let proposedTasks = edited.tasks;
   let startDateChanges = [];
+  let rescheduleConverged = null;
   if (reschedule) {
     const editedProjectStart = deriveProjectStart(edited.tasks, toISO(/* @__PURE__ */ new Date()));
     const editedCal = makeProjectCalendar(editedProjectStart, edited.calendarExceptions || []);
     const applied = applyAutoSchedule(edited, editedProjectStart, editedCal, { leveling: afterLeveling });
     proposedTasks = applied.tasks;
     startDateChanges = applied.changed;
+    rescheduleConverged = applied.converged;
   }
   const snapshotName = `AI\u8ABF\u6574\u524D ${(/* @__PURE__ */ new Date()).toISOString().slice(0, 16).replace("T", " ")}`;
   const proposed = {
@@ -1848,6 +1873,8 @@ function cmdPlan(positional, opts) {
       projectEnd: { from: before.projectEnd, to: after.projectEnd },
       tasksWithChangedSchedule: scheduleChanges.filter((c) => c.kind === "changed").length,
       startDateWritebacks: startDateChanges.length,
+      // --reschedule 時のみ。false なら書き戻した開始日と表示（平準化後の配置日）の一致を確認できていない
+      rescheduleConverged,
       newlyCritical,
       noLongerCritical,
       snapshotName

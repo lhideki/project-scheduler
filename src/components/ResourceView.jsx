@@ -5,13 +5,12 @@ import {
 } from "recharts";
 import { uid } from "../lib/taskTree.js";
 import { weekKey } from "../lib/calendar.js";
-import { dailyLoads } from "../lib/scheduling.js";
 import { IconBtn } from "./IconBtn.jsx";
 
 /* =========================================================================================
    10. リソース ビュー
    ========================================================================================= */
-export function ResourceView({ resources, setResources, tasks, schedule, cal, requestConfirm }) {
+export function ResourceView({ resources, setResources, tasks, schedule, requestConfirm }) {
   const [selRes, setSelRes] = useState(resources[0]?.id || null);
   useEffect(() => { if (!resources.find(r => r.id === selRes)) setSelRes(resources[0]?.id || null); }, [resources]);
 
@@ -28,10 +27,10 @@ export function ResourceView({ resources, setResources, tasks, schedule, cal, re
     const usage = {};
     tasks.filter(t => t.assigneeId === selRes).forEach(t => {
       const s = schedule.get(t.id);
-      if (!s || !s.schedStart || t.duration <= 0) return;
-      // ガント・日程計算と同じ日別割当（平準化ONなら稼働上限に合わせて延長した割当）を集計する
-      const alloc = s.allocation ? s.allocation.alloc : dailyLoads(cal, s.schedStart, t.duration);
-      alloc.forEach(({ date, load }) => {
+      // ガント・日程計算と同じ日別割当（平準化ONなら稼働上限に合わせて延長した割当）だけを集計する。
+      // 開始日＋工数から連続配置を計算し直すと、延長したタスクで負荷がガントとずれるため行わない。
+      if (!s || !s.allocation) return;
+      s.allocation.alloc.forEach(({ date, load }) => {
         const wk = weekKey(date);
         usage[wk] = (usage[wk] || 0) + load;
       });
@@ -40,7 +39,7 @@ export function ResourceView({ resources, setResources, tasks, schedule, cal, re
     // 上限値0・未設定は「上限なし」（平準化と同じ扱い）なので、超過判定をしない
     const cap = resources.find(r => r.id === selRes)?.weeklyCapacity || 0;
     return weeks.map(w => ({ week: w.slice(5), days: Math.round(usage[w] * 100) / 100, cap, over: cap > 0 && usage[w] > cap + 1e-9 }));
-  }, [selRes, tasks, schedule, resources, cal]);
+  }, [selRes, tasks, schedule, resources]);
 
   const capVal = resources.find(r => r.id === selRes)?.weeklyCapacity || 0;
 

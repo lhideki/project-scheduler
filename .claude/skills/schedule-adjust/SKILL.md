@@ -101,7 +101,9 @@ node <CLI> explain  <file> --task <taskId> [--leveling on|off|auto]
 - 返り値:
   - `blocked: true` … `edited.json` に整合性エラーあり。`integrityIssues` を見せて修正を促す。
   - `summary` … `projectEnd` の before→after、スケジュールが動くタスク数、
-    `newlyCritical`/`noLongerCritical`、`snapshotName`
+    `newlyCritical`/`noLongerCritical`、`snapshotName`、`rescheduleConverged`（`--reschedule` 時のみ。
+    `false` なら書き戻した開始日と平準化後の表示の一致を確認できていないので、その旨をレポートに書き、
+    `proposed` で `plan --reschedule` をもう一度実行する）
   - `scheduleChanges[]` … タスクごとの before→after（`schedStart`/`schedFinish`/`critical`/`shiftWorkdays`）
   - `startDateChanges[]` … `--reschedule` 時の `startDate` 書き戻し一覧
   - `sprintConflicts` / `levelWarnings` / `dependencyIssues` … before/after

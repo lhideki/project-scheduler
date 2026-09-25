@@ -224,3 +224,20 @@ describe("nonWorkdaySegments", () => {
     expect(nonWorkdaySegments(cal, "2024-01-09", "")).toEqual([]);
   });
 });
+
+describe("makeCalendar: holidayMap の収録範囲外の年", () => {
+  it("範囲外の年の祝日もその場で計算して非稼働日として扱う（holidayMap 自体は書き換えない）", () => {
+    const holidayMap = buildHolidayMap(2024, 2024); // 2023〜2025年を収録
+    const cal = makeCalendar(holidayMap);
+    // 2032-01-12 は成人の日（1月第2月曜）
+    expect(cal.isWorkdayStr("2032-01-12")).toBe(false);
+    expect(cal.holidayName("2032-01-12")).toBe("成人の日");
+    expect(cal.isWorkdayStr("2032-01-13")).toBe(true);
+    expect(holidayMap.has("2032-01-12")).toBe(false);
+  });
+
+  it("空の holidayMap（祝日を使わない呼び出し）では補わない", () => {
+    const cal = makeCalendar(new Map());
+    expect(cal.isWorkdayStr("2032-01-12")).toBe(true);
+  });
+});

@@ -171,6 +171,20 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
     if (barTooltipTimerRef.current) { clearTimeout(barTooltipTimerRef.current); barTooltipTimerRef.current = null; }
     setBarTooltip(null);
   }
+  // キーボード操作（Tab）でタスクバーにフォーカスしたときも、ホバーと同じツールチップを表示する。
+  // フォーカス時のスクロール（画面外のバーを表示範囲に入れる）でスクロールハンドラに閉じられないよう、
+  // スクロール後のフレームでバーの位置を測って表示する。マウスのクリックによるフォーカスでは出さない。
+  function showBarTooltipOnFocus(e, taskId) {
+    const el = e.currentTarget;
+    let keyboardFocus = true;
+    try { keyboardFocus = el.matches(":focus-visible"); } catch (err) { /* :focus-visible 非対応環境では常に表示 */ }
+    if (!keyboardFocus || linkDrag || rowDrag) return;
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (document.activeElement !== el) return;
+      const r = el.getBoundingClientRect();
+      setBarTooltip({ taskId, kind: "bar", x: r.left + Math.min(r.width, 24), y: r.top + ROW_H / 2 });
+    }));
+  }
   useEffect(() => () => { if (barTooltipTimerRef.current) clearTimeout(barTooltipTimerRef.current); }, []);
   // 実際にレンダリングされたツールチップのサイズを測ってから位置を確定する（内容量に応じて高さ・幅が変わるため、
   // 固定値での画面端クランプでは長い内容のときにはみ出すことがある）。
@@ -1463,6 +1477,12 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                         onPointerEnter={e => showBarTooltipAfterDelay(t.id, e.clientX, e.clientY)}
                         onPointerMove={e => moveBarTooltip(t.id, e.clientX, e.clientY)}
                         onPointerLeave={hideBarTooltip}
+                        // キーボード・スクリーンリーダーからも、ツールチップと同じ内容（非割当日の理由を含む）を確認できるようにする
+                        tabIndex={0}
+                        role="group"
+                        aria-label={buildBarTooltipLines(t, s).join("。")}
+                        onFocus={e => showBarTooltipOnFocus(e, t.id)}
+                        onBlur={hideBarTooltip}
                       >
                         {(nonWorkdaySegs.length > 0 || idleRuns.length > 0) && (
                           <clipPath id={clipId}><rect x={x1} y={y + 6} width={barW} height={ROW_H - 12} rx={4} /></clipPath>

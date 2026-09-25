@@ -76,6 +76,26 @@ describe("allocateWork", () => {
     expect(r.ok).toBe(true);
     expect(r.alloc).toEqual([{ date: "2024-01-15", load: 0.001 }]);
   });
+
+  it("端数のある工数でも1日の割当は日次上限（1人日）を超えない", () => {
+    const r = allocateWork(createCapacityLedger(), res(0, 0), cal, "2024-01-15", 1.004);
+    expect(r.alloc).toEqual([{ date: "2024-01-15", load: 1 }, { date: "2024-01-16", load: 0.004 }]);
+  });
+
+  it("0.01人日未満の工数も台帳に同じ量で登録され、複数タスクの合計が週次上限を超えない", () => {
+    const ledger = createCapacityLedger();
+    const week1 = [];
+    ["A", "B", "C"].forEach(id => {
+      const r = allocateWork(ledger, res(0.01, 20), cal, "2024-01-15", 0.004);
+      commitAllocation(ledger, "r1", id, r.alloc);
+      r.alloc.filter(a => a.date <= "2024-01-19").forEach(a => week1.push(a.load));
+      expect(r.alloc.reduce((sum, a) => sum + a.load, 0)).toBeCloseTo(0.004, 9);
+    });
+    // 1週目は 0.004 + 0.004 + 0.002 = 0.01 まで。C の残り 0.002 は翌週に回る
+    expect(week1.reduce((a, b) => a + b, 0)).toBeCloseTo(0.01, 9);
+    const c = allocateWork(ledger, res(0.01, 20), cal, "2024-01-15", 0.001);
+    expect(c.alloc[0].date >= "2024-01-22").toBe(true);
+  });
 });
 
 describe("consecutiveDateRuns", () => {

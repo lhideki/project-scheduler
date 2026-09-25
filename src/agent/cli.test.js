@@ -413,6 +413,8 @@ describe("applyAutoSchedule", () => {
     // 冪等性: 書き戻し済みデータに再適用しても startDate は動かない
     const again = applyAutoSchedule({ ...data, tasks }, projectStart, cal);
     expect(again.changed).toEqual([]);
+    expect(again.converged).toBe(true);
+    expect(applyAutoSchedule(data, projectStart, cal, { leveling: true }).converged).toBe(true);
   });
 
   it("leveling:true では平準化後の配置日を書き戻す（着手済みにしても表示が戻らない）", () => {

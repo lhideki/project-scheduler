@@ -22,7 +22,8 @@
  * @property {(finishStr: string, duration: number) => string} startFromEnd
  * @property {(aStr: string, bStr: string) => number} workdaysBetween - 稼働日数の差（符号あり）
  * @property {(s: string) => (string|null)} holidayName - 表示用の休日名（休日名・祝日名。稼働日指定の日は null）
- * @property {Map<string,string>} holidayMap - 日付(YYYY-MM-DD) -> 国民の祝日名（例外は含まない）
+ * @property {Map<string,string>} holidayMap - 日付(YYYY-MM-DD) -> 国民の祝日名（例外は含まない。makeCalendar に渡したマップそのもので、
+ *   収録範囲外の年の祝日は含まない。稼働日判定・holidayName は範囲外の年の祝日もその場で計算して扱う）
  * @property {CalendarException[]} exceptions - 適用中のカレンダー例外（正規化済み）
  */
 
@@ -149,11 +150,36 @@ export function normalizeCalendarExceptions(exceptions) {
 export function makeCalendar(holidayMap, exceptions = []) {
   const { list: normalizedExceptions, forcedWorkdays, extraHolidays } = normalizeCalendarExceptions(exceptions);
 
+  // holidayMap が収録している年の範囲。範囲外の年の日付を問い合わせたときは、その年の祝日をその場で
+  // 計算して補う（担当者の稼働上限でタスクが長く延長されると、holidayMap を作った範囲より先まで
+  // 割り当てることがあり、範囲外の祝日に作業を割り当ててしまわないようにするため）。
+  // 空の holidayMap（祝日を使わない呼び出し）は補わない。holidayMap 自体は書き換えない。
+  let minYear = Infinity, maxYear = -Infinity;
+  for (const key of holidayMap.keys()) {
+    const y = Number(key.slice(0, 4));
+    if (y < minYear) minYear = y;
+    if (y > maxYear) maxYear = y;
+  }
+  const extraYearHolidays = new Map(); // year -> Map(date -> name)
+  function nationalHolidayName(iso) {
+    const name = holidayMap.get(iso);
+    if (name !== undefined || holidayMap.size === 0) return name;
+    const y = Number(iso.slice(0, 4));
+    if (y >= minYear && y <= maxYear) return undefined;
+    let yearMap = extraYearHolidays.get(y);
+    if (!yearMap) {
+      yearMap = new Map();
+      for (const [date, n] of buildHolidayMap(y, y)) if (date.startsWith(`${y}-`)) yearMap.set(date, n);
+      extraYearHolidays.set(y, yearMap);
+    }
+    return yearMap.get(iso);
+  }
+
   function isWorkday(d) {
     const iso = toISO(d);
     if (forcedWorkdays.has(iso)) return true;
     if (isWeekend(d)) return false;
-    if (holidayMap.has(iso)) return false;
+    if (nationalHolidayName(iso) !== undefined) return false;
     if (extraHolidays.has(iso)) return false;
     return true;
   }
@@ -161,7 +187,7 @@ export function makeCalendar(holidayMap, exceptions = []) {
   function holidayName(s) {
     if (forcedWorkdays.has(s)) return null;
     if (extraHolidays.has(s)) return extraHolidays.get(s) || "休日";
-    return holidayMap.get(s) || null;
+    return nationalHolidayName(s) || null;
   }
   function isWorkdayStr(s) { return isWorkday(parseISO(s)); }
   function snapForward(s) { const d = parseISO(s); while (!isWorkday(d)) d.setUTCDate(d.getUTCDate() + 1); return toISO(d); }

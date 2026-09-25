@@ -7,7 +7,7 @@ import {
 
 import { toISO, parseISO, buildHolidayMap, makeCalendar, fmtJP } from "./lib/calendar.js";
 import { uid, migrateSprintIds, isGroupId, buildFlatList, ancestorChain } from "./lib/taskTree.js";
-import { runCPM, buildDisplaySchedule, deriveProjectStart, autoScheduleStartDates } from "./lib/scheduling.js";
+import { runCPM, buildDisplaySchedule, deriveProjectStart, computeAutoSchedule } from "./lib/scheduling.js";
 import { detectSprintConflicts } from "./lib/sprints.js";
 import { detectDependencyIssues, groupDependencyIssuesByTask, DEPENDENCY_ISSUE_LABELS } from "./lib/dependencyIssues.js";
 import {
@@ -396,7 +396,7 @@ export default function App() {
   // 書き戻す。CPMの日付を書き戻すと、その後に着手済みにしたタスクが levelResources で
   // startDate へピン留めされ、表示が平準化前の位置に戻って見えてしまうため。
   function runScheduling() {
-    const startDates = autoScheduleStartDates(
+    const { startDates, converged } = computeAutoSchedule(
       tasks, cal, projectStart, sprints, resources, { leveling: levelingOn }
     );
     const changedIds = new Set();
@@ -408,9 +408,12 @@ export default function App() {
     }));
     skipHighlightClearRef.current = true;
     setAutoScheduleHighlightIds(changedIds);
-    showToast(levelingOn
-      ? "依存関係とリソース平準化に基づき開始日を再計算しました"
-      : "依存関係に基づき再スケジューリングしました");
+    // 平準化ONで、書き戻しと表示の一致を上限回数内に確認できなかった場合は成功扱いにせず知らせる
+    showToast(!converged
+      ? "開始日を再計算しましたが、一部のタスクで表示と開始日が一致していない可能性があります。もう一度実行してください"
+      : levelingOn
+        ? "依存関係とリソース平準化に基づき開始日を再計算しました"
+        : "依存関係に基づき再スケジューリングしました");
   }
 
   async function saveVersion(name) {
@@ -769,7 +772,7 @@ export default function App() {
           <NetworkView tasks={tasks} setTasks={setTasks} schedule={schedule} selectedId={selectedId} setSelectedId={setSelectedId} />
         )}
         {tab === "resource" && (
-          <ResourceView resources={resources} setResources={setResources} tasks={tasks} schedule={schedule} cal={cal} requestConfirm={requestConfirm} />
+          <ResourceView resources={resources} setResources={setResources} tasks={tasks} schedule={schedule} requestConfirm={requestConfirm} />
         )}
         {tab === "sprints" && (
           <SprintsView sprints={sprints} setSprints={setSprints} tasks={tasks} requestConfirm={requestConfirm} />

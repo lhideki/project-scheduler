@@ -566,8 +566,8 @@ export function buildDisplaySchedule(tasks, cpmResult, resources, cal, sprints, 
   return { schedule, levelWarnings: warnings };
 }
 
-/** autoScheduleStartDates で、書き戻しと表示を一致させる反復の上限回数（通常は2回以内で収束する）。 */
-const AUTO_SCHEDULE_MAX_ITERATIONS = 10;
+/** computeAutoSchedule で、書き戻しと表示を一致させる反復の上限回数（通常は2回以内で収束する）。 */
+const AUTO_SCHEDULE_MAX_ITERATIONS = 20;
 
 /**
  * 「自動スケジューリング実行」（App.jsx runScheduling / CLI applyAutoSchedule）で、
@@ -602,6 +602,23 @@ const AUTO_SCHEDULE_MAX_ITERATIONS = 10;
  * @returns {Map<string, string>} leafId -> 書き戻す開始日（YYYY-MM-DD）
  */
 export function autoScheduleStartDates(tasks, cal, projectStart, sprints, resources, opts = {}) {
+  return computeAutoSchedule(tasks, cal, projectStart, sprints, resources, opts).startDates;
+}
+
+/**
+ * autoScheduleStartDates と同じ書き戻し日を求め、平準化ONで書き戻しと表示が一致したか（converged）も返す。
+ * 反復の上限回数（opts.maxIterations、既定 AUTO_SCHEDULE_MAX_ITERATIONS）に達しても一致しなかった場合は
+ * converged: false を返し、呼び出し側（App の「自動スケジューリング実行」・CLI の plan --reschedule）が
+ * 利用者に知らせる（一致しないまま成功扱いにしない）。平準化OFFは反復しないため常に true。
+ * @param {import("./taskTree.js").Task[]} tasks
+ * @param {import("./calendar.js").Calendar} cal
+ * @param {string} projectStart
+ * @param {import("./taskTree.js").Sprint[]} sprints
+ * @param {import("./taskTree.js").Resource[]} resources
+ * @param {{leveling?: boolean, maxIterations?: number}} [opts]
+ * @returns {{startDates: Map<string, string>, converged: boolean}}
+ */
+export function computeAutoSchedule(tasks, cal, projectStart, sprints, resources, opts = {}) {
   const auto = runCPM(tasks, cal, projectStart, sprints, { respectManualPins: false });
   const out = new Map();
   tasks.forEach(t => {
@@ -618,13 +635,16 @@ export function autoScheduleStartDates(tasks, cal, projectStart, sprints, resour
     if (!opts.leveling && t && t.milestone && t.milestoneMode === "fixed") return;
     if (dates && dates.start) out.set(id, dates.start);
   });
+  let converged = true;
   if (opts.leveling) {
     // 書き戻した状態の表示（手入力の開始日を固定した runCPM ＋ 平準化）と一致するまで書き戻しを繰り返す。
     // 上の配置は respectManualPins:false の CPM のフロートで処理順を決めるが、表示は書き戻し後の開始日で
     // 求めたフロートで処理順を決めるため、担当者の容量を分け合うタスクの割当順が入れ替わり、表示だけが
     // 書き戻した日付からずれることがある。平準化では手入力の開始日が後ろ倒しのみの下限なので、
-    // 各反復で日付は後ろにしか動かず、有限回で収束する。
-    for (let iter = 0; iter < AUTO_SCHEDULE_MAX_ITERATIONS; iter++) {
+    // 各反復で日付は後ろにしか動かない。上限回数内に一致を確認できなければ converged: false を返す。
+    converged = false;
+    const maxIterations = opts.maxIterations ?? AUTO_SCHEDULE_MAX_ITERATIONS;
+    for (let iter = 0; iter < maxIterations; iter++) {
       const written = tasks.map(t => (out.has(t.id) ? { ...t, startDate: out.get(t.id) } : t));
       const displayStart = deriveProjectStart(written, projectStart);
       const display = runCPM(written, cal, displayStart, sprints);
@@ -635,8 +655,8 @@ export function autoScheduleStartDates(tasks, cal, projectStart, sprints, resour
         out.set(id, dates.start);
         changed = true;
       });
-      if (!changed) break;
+      if (!changed) { converged = true; break; }
     }
   }
-  return out;
+  return { startDates: out, converged };
 }

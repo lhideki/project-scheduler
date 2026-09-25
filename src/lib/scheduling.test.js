@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { buildHolidayMap, makeCalendar } from "./calendar.js";
 import {
   runCPM, rollupSummaries, levelResources, dailyLoads, topoOrder, earliestSprintFloor,
-  deriveProjectStart, autoScheduleStartDates, buildDisplaySchedule,
+  deriveProjectStart, autoScheduleStartDates, computeAutoSchedule, buildDisplaySchedule,
 } from "./scheduling.js";
 import { weekKey, monthKey } from "./calendar.js";
 
@@ -437,6 +437,23 @@ describe("autoScheduleStartDates", () => {
     const { result } = runCPM(written, cal, deriveProjectStart(written), []);
     const { placed } = levelResources(written, result, res, cal, []);
     tasks.forEach(t => expect(placed[t.id].start).toBe(map.get(t.id)));
+  });
+
+  it("computeAutoSchedule は、書き戻しと表示の一致を上限回数内に確認できなかった場合に converged: false を返す", () => {
+    // 上の「一致するまで書き戻しを繰り返す」と同じデータ。1回目の確認で T2 が動くため、1回で打ち切ると未確認になる。
+    const res = [{ id: "r1", name: "R1", weeklyCapacity: 3, monthlyCapacity: 20 }];
+    const tasks = [
+      { id: "T0", name: "T0", parentId: null, order: 0, duration: 3, assigneeId: "r1", predecessors: [] },
+      { id: "T1", name: "T1", parentId: null, order: 1, duration: 3, assigneeId: "r1", predecessors: [] },
+      { id: "T2", name: "T2", parentId: null, order: 2, duration: 1, assigneeId: "r1", predecessors: [{ id: "T1", type: "FS", lag: 0 }] },
+    ];
+    const ok = computeAutoSchedule(tasks, cal, "2024-01-15", [], res, { leveling: true });
+    expect(ok.converged).toBe(true);
+    expect(ok.startDates.get("T2")).toBe("2024-01-29");
+    const capped = computeAutoSchedule(tasks, cal, "2024-01-15", [], res, { leveling: true, maxIterations: 1 });
+    expect(capped.converged).toBe(false);
+    // 平準化OFFは反復しないため常に一致扱い
+    expect(computeAutoSchedule(tasks, cal, "2024-01-15", [], res, { leveling: false }).converged).toBe(true);
   });
 
   it("グループは対象外", () => {

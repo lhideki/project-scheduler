@@ -5,12 +5,13 @@ import { toISO, parseISO, weekKey, monthKey, cal_addDaysISO } from "./calendar.j
    ------------------------------------------------------------------------------------------
    開始候補日から早い日順に、担当者の空き容量（日次・週次・月次の各上限の残り）の範囲で工数を
    日ごとに割り当てる。途中に割当のない稼働日を挟んでもよい（タスク途中の中断を一律に許可する）。
-   容量は 0.01人日を1単位とする整数で管理し、浮動小数の誤差で上限判定や合計がずれないようにする
-   （工数の入力は UI 上 0.01人日単位に丸められている）。
+   容量は 100万分の1人日を1単位とする整数で管理し、日別割当の値もこの単位の整数から求める
+   （台帳と日別割当の単位を揃え、浮動小数の誤差で上限判定や合計がずれないようにする。工数の入力は
+   UI 上 0.01人日単位に丸められるが、JSON・CLI からはより細かい値も入りうる）。
    ========================================================================================= */
 
-/** 容量管理の単位（1人日 = 100単位 = 0.01人日刻み）。 */
-export const ALLOCATION_UNITS_PER_DAY = 100;
+/** 容量管理の単位（1人日 = 1,000,000単位 = 100万分の1人日刻み）。 */
+export const ALLOCATION_UNITS_PER_DAY = 1000000;
 /** 1人が1日に割り当てられる上限（人日）。同じ担当者が同じ日に複数タスクで合計1人日を超えないようにする。 */
 export const DAILY_CAPACITY = 1;
 /** 1タスクの割当を探索する稼働日数の上限。これを超えても割り当てきれない場合は割当不成立とする。 */
@@ -110,9 +111,8 @@ export function allocateWork(ledger, resource, cal, startStr, duration, opts = {
   const dayCap = toUnits(DAILY_CAPACITY);
   // このタスク自身が同じ週・月に割り当てた分（台帳へ登録する前なので別に数える）
   const selfWeek = new Map(), selfMonth = new Map();
-  // 0.01人日未満の工数も1単位として扱い、割当が空にならないようにする
+  // 1単位未満の工数も1単位として扱い、割当が空にならないようにする
   let remaining = Math.max(1, toUnits(duration));
-  let allocatedLoad = 0;
   const alloc = [], idle = [];
   let d = cal.snapForward(startStr);
   let scanned = 0;
@@ -129,10 +129,8 @@ export function allocateWork(ledger, resource, cal, startStr, duration, opts = {
         remaining -= units;
         selfWeek.set(wk, (selfWeek.get(wk) || 0) + units);
         selfMonth.set(mo, (selfMonth.get(mo) || 0) + units);
-        // 最終日は入力した工数との差分をそのまま載せ、日別割当の合計を工数と一致させる
-        const load = remaining <= 0 ? duration - allocatedLoad : units / ALLOCATION_UNITS_PER_DAY;
-        allocatedLoad += load;
-        const entry = { date: d, load };
+        // 日別割当の値は台帳と同じ単位の整数から求める（commitAllocation で同じ量が登録される）
+        const entry = { date: d, load: units / ALLOCATION_UNITS_PER_DAY };
         if (remaining > 0 && units < dayCap) entry.limitedBy = units === dayFree ? "daily" : units === weekFree ? "weekly" : "monthly";
         alloc.push(entry);
       } else if (alloc.length || pinned) {
