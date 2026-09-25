@@ -42,11 +42,15 @@ src/
     calendar.js             # 祝日計算・稼働日カレンダー
     deps.js                  # 依存関係の文字列パーサ（3FS+2 等）
     taskTree.js               # WBSツリー・ヘルパー（isGroupId/buildFlatList等）
+    wbsEditing.js             # WBS表のセル・行のテキスト化と貼り付け（コピー＆ペースト用。WBS_EDITABLE_COLUMNS）
+    history.js                # タスク編集の Undo/Redo 履歴 reducer（taskHistoryReducer、直近100件）
+    timeAxis.js               # ガントの日付軸（ズーム段階 DAY_WIDTH_STOPS と日→週→月の目盛り縮約）
     scheduling.js              # CPMエンジン（runCPM）・リソース平準化（levelResources）・表示スケジュールの組み立て（buildDisplaySchedule）
     workAllocation.js          # 工数の日別割当（担当者の稼働上限に合わせた分割割当・非割当日の理由・割当上の進捗位置）
     sprints.js                  # スプリント配色・期間重複検出
     dependencyIssues.js         # 依存関係の矛盾検出（循環参照・存在しない先行・開始日との矛盾・固定期日超過。App と CLI で共通）
-    exportUtils.js               # JSON/Mermaidエクスポート
+    exportUtils.js               # JSON入出力（PROJECT_JSON_SCHEMA・buildProjectExport・normalizeImportedProject）・Mermaidガント生成
+    jsonSchemaDoc.js             # PROJECT_JSON_SCHEMA から docs/json-format.md を生成（build:docs）
     linkedProject.js              # ?schedule= クエリのパース
     embeddedProject.js             # 共有用HTMLの埋め込みJSONのシリアライズ/パース（"<" のユニコードエスケープ）
     seedData.js                   # サンプルデータ
@@ -55,14 +59,22 @@ src/
     pointerDrag.js         # ポインタドラッグ・SVG座標変換・日付スケール（DOM API依存のため lib/ とは別）
     linkedProjectFile.js   # ?schedule= 用のFileSystemFileHandle永続化（IndexedDB）
     embeddedProjectDom.js  # 共有用HTMLの埋め込みデータ読み取り（readEmbeddedProject）とHTML生成（buildSharedHtml）
+    ganttPngExport.js      # ガント表示範囲のPNGコピー（copyVisibleGanttAsPng）
   agent/                   # AIエージェント用SkillのCLI（Node実行。src/lib/ を再利用する薄い層）
     engine.js                # src/lib/ から必要な関数を再エクスポートするだけの集約点
     cli.js                    # 引数パース・ファイル読み込み・レポート整形（計算ロジックは持たない）
     cli.test.js               # computeSchedule 等が src/lib/ と一致することを担保するVitestテスト
-  components/
-    WBSGanttView.jsx、TaskDetailModal.jsx、NetworkView.jsx、ResourceView.jsx、
-    SprintsView.jsx、VersionsView.jsx、IconBtn.jsx、Tab.jsx 他             # Reactコンポーネント
+  components/              # Reactコンポーネント（1コンポーネント1ファイル）
+    WBSGanttView.jsx         # WBS表＋ガント（ズーム・稲妻線・ツールチップ・PNGコピー用ヘッダー生成を含む）
+    GanttDeps.jsx、InazumaLine.jsx   # ガントの依存線・稲妻線（進捗線）
+    TaskDetailModal.jsx、DepInput.jsx、SprintMultiSelect.jsx、ColResizeHandle.jsx
+    NetworkView.jsx、ResourceView.jsx、SprintsView.jsx、VersionsView.jsx
+    CalendarView.jsx、CalendarExceptionsEditor.jsx   # 「カレンダー編集」タブ
+    ExportMenu.jsx           # ヘッダーの「書き出し」ドロップダウン
+    IconBtn.jsx、Tab.jsx
 ```
+
+リポジトリ直下の `scripts/` は生成スクリプト（`build-html.mjs`・`build-json-doc.mjs`・`build-agent.mjs`）、`.github/workflows/pages.yml` は `master` への push 時に `npm ci`→`npm run test`→`npm run build` を実行し、`project_scheduler.html` を GitHub Pages（Live Demo）へ公開するワークフロー（Node 24）。開発・テストには Node.js `^20.19.0 || ^22.12.0 || >=24.0.0`（20.19以上の20.x、22.12以上の22.x、または24以上。vitest 4 と vite 8 の engines の共通範囲で、21・23は対象外）が必要。Skill の `cli.mjs` は `target: "node18"` でバンドルしているため、実行は Node 18 以上で動く。
 
 新しい純粋ロジック（日付計算・依存関係解決・スケジューリング・データ変換など、Reactやブラウザ固有APIに依存しない処理）を追加する場合は `src/lib/` に置き、対応する `*.test.js` を書くこと。DOM/ブラウザAPI（`window`・`document`・ポインタイベント等）に依存するが React 非依存のヘルパーは `src/dom/` に置く。Reactコンポーネントは `src/components/` に1コンポーネント1ファイルで置く。
 
@@ -80,8 +92,9 @@ bee（`@nulab/bee` 1.1 以上、Backlog公式CLI）経由で保存JSONと Backlo
 
 - `tasks`: フラット配列。`parentId` によりWBS階層（グループ／リーフタスク）を表現。グループ専用のエンティティは存在せず、共通ヘルパー `isGroupId(tasks, id)` で判定する。
 - `resources`: 担当者（週次・月次の稼働上限を持つ。上限値 `0`・未設定は「その上限を適用しない」。日次の上限は1人日固定）。
-- `sprints`: `{id, name, theme, startDate, endDate, order}`。タスク側は `sprintIds`（配列）で複数参照できる（1タスク=複数スプリント可、グループには持たせない）。旧形式の単一 `sprintId` で保存されたデータは読み込み時に `migrateSprintIds()` で自動変換する。
-- `versions`: 任意タイミングのスナップショット（`rawTasks`/`rawResources`/`rawSprints` を保持）。
+- `sprints`: `{id, name, theme, startDate, endDate, order}`。タスク側は `sprintIds`（配列）で複数参照できる（1タスク=複数スプリント可、グループには持たせない）。旧形式の単一 `sprintId` で保存されたデータは `migrateSprintIds()` で自動変換する（適用しているのは localStorage からの読み込み・共有用HTML（embedded）の初期化・バージョン復元。JSONの「読み込み」と linked の読み込みでは変換しない）。
+- `versions`: 任意タイミングのスナップショット（`rawTasks`/`rawResources`/`rawSprints`/`rawCalendarExceptions` を保持。`levelingOn` は含めない）。`pm_versions` に保存する。
+- Undo/Redo: `tasks` だけが対象（`useReducer(taskHistoryReducer)`、`src/lib/history.js`、直近100件）。`resources`・`sprints`・`calendarExceptions` の変更は履歴に積まない。初回ロード・linked の読み込みは `resetTasks` で履歴を空にする。キーボードショートカット（Ctrl/Cmd+Z・Shift+Ctrl/Cmd+Z・Ctrl/Cmd+Y）は `window` 全体で受け付ける（ヘッダーのボタン操作直後なども効かせるため。IME変換中は無視する）。ただし `input`/`textarea`/`select`/contenteditable にフォーカスがある間は、ブラウザ標準の Undo を奪わないよう素通りする。タスク編集用の入力欄（WBS表のセル・タスク詳細モーダル）でのショートカットは `WBSGanttView` 側のローカルハンドラ（`stopPropagation` あり）が先に処理する。
 - `levelingOn`: リソース平準化トグルのON/OFF（`boolean`、デフォルト`false`）。`window.storage`（`pm_project`）およびJSONエクスポート/インポートの対象。旧形式JSON（`levelingOn`キーなし）は読み込み時に`false`へフォールバックする。
 - `calendarExceptions`: 非稼働日カレンダーの例外（`{date, type: "holiday" | "workday", name?}` の配列、デフォルト`[]`）。`type: "holiday"`＝休日（平日を非稼働日化）、`type: "workday"`＝稼働日（土日・祝日・休日指定を稼働日化・**最優先**）。UIの種別ラベルは「休日」「稼働日」（内部値は `holiday`/`workday` のまま）。「カレンダー編集」タブ（`CalendarView` → `CalendarExceptionsEditor`）で編集。`window.storage`（`pm_project`）・JSONエクスポート/インポート・バージョンスナップショット（`rawCalendarExceptions`）の対象。旧形式JSON（キーなし）は`[]`へフォールバック。稼働日判定は `makeCalendar(holidayMap, calendarExceptions)`（`src/lib/calendar.js`）に集約されており、`runCPM`/`levelResources` は `cal` を受け取るだけなので変更不要。`holidayMap`（App・CLI とも `buildHolidayMap(y - 1, y + 6)`）の収録範囲外の年の祝日は、`makeCalendar` が問い合わせ時にその年の分を計算して補う（稼働上限でタスクが長く延長され、範囲より先まで割り当てる場合に祝日へ割り当てないため。`cal.holidayMap` 自体は渡したマップのままで、空のマップなら補わない）。
 
@@ -113,7 +126,7 @@ bee（`@nulab/bee` 1.1 以上、Backlog公式CLI）経由で保存JSONと Backlo
   - `float`/`critical` は CPM（担当者を見ない計算）の値のままなので、平準化による延長・後ろ倒しは `critical` に反映されない。
   - 注意: スプリント開始日を実際の計算済み開始日に近づけて設定すると、そのタスクのESが押し上げられてfloatが縮小し、`critical` 判定が変わることがある（表示上のschedStart/schedFinish自体は変わらない）。これは仕様上の既知の挙動であり、バグではない。
 - スプリント矛盾検出（`sprintConflicts` useMemo）: 最終的な表示スケジュールがタスクの所属スプリント期間からはみ出していないかを判定し、はみ出していればヘッダーのアラートアイコン（`AlertTriangle`）経由でダイアログに一覧表示する。複数スプリントが紐付く場合は、それらの期間の和集合（最も早い開始日〜最も遅い終了日）を基準に判定する。リソース平準化警告（`levelWarnings`、稼働上限内での配置失敗）とは別建てのUI。
-- 依存関係の矛盾検出（`dependencyIssues` useMemo → `detectDependencyIssues(tasks, schedule, cal)`、`src/lib/dependencyIssues.js`）: 次の4種（循環参照は自己依存を含む）を判定する。日程の自動修正はしない（開始日の矛盾は「自動スケジューリング実行」で解消する）。CLI の `validate`/`recalc`/`plan`/`explain` も同じ関数を使う（`src/agent/cli.test.js` でアプリと結果が一致することを確認している）。
+- 依存関係の矛盾検出（`dependencyIssues` useMemo → `detectDependencyIssues(tasks, schedule, cal)`、`src/lib/dependencyIssues.js`）: 次の4種・5コード（循環参照は `dependency-cycle` と自己依存の `self-dependency` の2コード）を判定する。日程の自動修正はしない（開始日の矛盾は「自動スケジューリング実行」で解消する）。CLI の `validate`/`recalc`/`plan`/`explain` も同じ関数を使う（`src/agent/cli.test.js` でアプリと結果が一致することを確認している）。
   - `dependency-cycle`（error）: 循環参照。`runCPM` と同じ解釈（リーフへの依存辺は `effectivePredecessors`、グループには「子→親」の所属辺）でグラフを作り、依存辺を含む強連結成分を1件とする。グループを介した循環（AがグループGに依存し、G配下のBがAに依存）も検出する。循環に含まれるタスクは日程が確定しないため、下の2種の判定から除外する。
   - `self-dependency`（error）: 自分自身を先行タスクにしている（循環参照の最小形。`effectivePredecessors` が自己参照を除くため `findDependencyCycles` では検出できず、エンジンも無視するので別途 `findSelfDependencies` で検出する。UIのラベルは「循環参照（自己依存）」）。
   - `predecessor-missing`（error）: 存在しないIDを先行タスクにしている（エンジンは無視するため、依存関係が効いていない）。
@@ -125,6 +138,17 @@ bee（`@nulab/bee` 1.1 以上、Backlog公式CLI）経由で保存JSONと Backlo
 
 - 左ペイン（WBS表）と右ペイン（ガントチャート）の間にドラッグ可能な仕切りバーがある。`paneLeftWidth` state（`null` = 列幅合計に自動追従、ドラッグで固定値、ダブルクリックでリセット）で管理。
 - **重要**: 左ペインを列幅合計より狭くした場合、各列の幅を縮めてはいけない。WBS表の中身全体を `style={{ width: wbsTotalWidth, minWidth: "100%" }}` の内側ラッパーで包み、外側の `overflow-x-auto` コンテナで横スクロールさせる方式にしている（右のガントペインと同じパターン）。このラッパーを外すと、flexboxのデフォルトの縮小挙動により列が潰れる不具合が再発するので注意。
+- WBS表はセル単位の矢印キー移動と、セル・行単位のコピー＆ペーストに対応する。セル・行とテキストの相互変換は `src/lib/wbsEditing.js`（`taskCellText`/`taskCellPatch`/`taskRowText`/`taskRowPatch`）に集約しており、コンポーネント内で再実装しない。
+- ガントの日付軸は `dayWidth`（1日あたりのピクセル幅）を `DAY_WIDTH_STOPS` の段階でズームし、`axisTier(dayWidth)` の粒度（`day`/`week`/`month`）に応じてヘッダーの目盛りを日→週→月に縮約する（`src/lib/timeAxis.js`）。バー・依存線・稲妻線は常に線形スケール（1日 = `dayWidth`）のままで、切り替わるのは目盛りと背景の網掛け・罫線だけ。
+- タスクバー内の非稼働日（土日・祝日・休日指定）は斜線（`ganttNonWorkdayHatch`）で網掛けする。`month` 粒度では背景・バーとも日単位の網掛けを省略する。稼働上限による非割当日の網掛け（`ganttIdleHatch`）は下記「スケジューリングロジック」の `buildDisplaySchedule` を参照。
+- 稲妻線（進捗線、`InazumaLine`）は表示を切り替えられ、進捗基準日（稲妻線と今日の縦線の基準、既定は本日）を手動で指定できる。予定日程（`schedStart`/`schedFinish`）自体は進捗率で変えない。
+- タスクバー・マイルストーンはポインタのホバーでツールチップを出す。通常のタスクバーはキーボードでもフォーカスでき（`tabIndex=0`）、フォーカス時も同じツールチップを出し、同じ内容を `aria-label` に持つ（マイルストーンはホバーのみで、`tabIndex`・`aria-label` は持たない）。ツールチップの位置は実際に描画したサイズと最新のポインタ位置から決め、スクロール時・依存関係リンクや行のドラッグ中は出さない。
+
+### 書き出しメニュー
+
+ヘッダーの「書き出し」ドロップダウン（`ExportMenu`）に、JSON書き出し（`exportProject`）・共有用HTML書き出し（`exportSharedHtml`、下記「起動モード」参照）・Mermaidコピー（`generateMermaidGantt`。表示スケジュールの `schedStart`/`schedFinish` をそのまま使ったガント記法）・PNGとしてコピー（WBS/ガント画面の表示中のみ）をまとめている。
+
+- PNGコピー（`copyVisibleGanttAsPng`、`src/dom/ganttPngExport.js`）は、ガントの「現在見えている範囲」を画像にする。Chrome は `foreignObject` を含む SVG を canvas に描くと tainted 扱いにして `toBlob` を拒否するため、HTML要素で描いている日付ヘッダーは `WBSGanttView` 側で SVG ネイティブ要素だけの断片として組み直し、実DOMのバー・背景SVGと合成する（`foreignObject` を使わないこと）。クリップボードへの画像書き込みに対応していない環境では、PNGファイルのダウンロードに切り替える。
 
 ### 起動モード（local / linked / embedded）
 
@@ -134,7 +158,7 @@ App は起動元を概念的に3種類として扱う。`autoSaveDisabled`（= `
 - `linked`: URL に `?schedule=` がある起動。関連付けた外部JSONを表示し、自動保存しない。最新版の再読込が可能（`src/lib/linkedProject.js`・`src/dom/linkedProjectFile.js`）。
 - `embedded`: 「共有用HTML」で書き出されたHTMLでの起動。`<head>` 内の `<script type="application/json" id="project-scheduler-embedded">` に **既存のProject JSON（`schemaVersion:1`）をそのまま埋め込む**（共有HTML専用スキーマは作らない）。`readEmbeddedProject()` が初期 state を組み立て、`initialProject` 経由で state を初期化する（linked のような非同期ロードはせず、フラッシュを避けるため同期的に初期化）。自動保存しないので、リロードすれば書き出し時点の状態に戻る。ヘッダー下に amber のスナップショットバナー（`Camera` アイコン + `exportedAt` 表示）を出す。
 
-「共有用HTML書き出し」（ヘッダーの `Share2` ボタン → `exportSharedHtml`）は、`buildSharedHtml()`（`src/dom/embeddedProjectDom.js`）で現在ロード済みのHTMLを `cloneNode` し、`#root` を空にして埋め込み `<script>` を差し込んだ自己完結HTMLをダウンロードさせる。埋め込みJSONは `<script>` 内の `</script>` 混入を防ぐため、`serializeEmbeddedProject` が `<`（U+003C）をすべて JSON のユニコードエスケープ（バックスラッシュ + `u003c`）へ置換する（結果の文字列に `<` は現れない。`JSON.parse` で元に戻る）。埋め込み `<script>` は必ず `<head>` に置く（body内のバンドル `<script>` が起動時に `getElementById` で読むため、それより前に解析されている必要がある）。
+「共有用HTML書き出し」（ヘッダーの「書き出し」ドロップダウン〔`ExportMenu`〕の項目 → `exportSharedHtml`）は、`buildSharedHtml()`（`src/dom/embeddedProjectDom.js`）で現在ロード済みのHTMLを `cloneNode` し、`#root` を空にして埋め込み `<script>` を差し込んだ自己完結HTMLをダウンロードさせる。埋め込みJSONは `<script>` 内の `</script>` 混入を防ぐため、`serializeEmbeddedProject` が `<`（U+003C）をすべて JSON のユニコードエスケープ（バックスラッシュ + `u003c`）へ置換する（結果の文字列に `<` は現れない。`JSON.parse` で元に戻る）。埋め込み `<script>` は必ず `<head>` に置く（body内のバンドル `<script>` が起動時に `getElementById` で読むため、それより前に解析されている必要がある）。
 
 ### 永続化・window.storage
 
@@ -144,7 +168,11 @@ App は起動元を概念的に3種類として扱う。`autoSaveDisabled`（= `
 
 - ロジック（`src/lib/`・`src/dom/`）とUIコンポーネント（`src/components/`・`src/App.jsx`）の分離を維持する。CPMロジックやWBSツリー処理などをReactコンポーネントの中に書き戻さないこと。
 - ドラッグ操作は `startPointerDrag`（`src/dom/pointerDrag.js`）、グループ判定・ロールアップは `isGroupId`/`rollupSummaries`（`src/lib/taskTree.js`・`src/lib/scheduling.js`）、日付スケール・SVG座標変換は `makeDateScale`/`svgPointFromRef`（`src/dom/pointerDrag.js`）、依存関係ラベルは `formatDepLabel`（`src/lib/deps.js`）の各共通ヘルパーを再利用し、コンポーネント内にローカルに再定義しないこと。
-- JSON エクスポート/インポート、バージョンスナップショットは `tasks`/`resources`/`sprints` すべてを含める。新しいトップレベルstateを追加した場合は、両方の入出力パスと `seedData()`（`src/lib/seedData.js`）を更新すること（インポート側は後方互換のため、キーが無ければ空配列にフォールバックする）。
+- JSON エクスポート/インポート、バージョンスナップショットは `tasks`/`resources`/`sprints`/`calendarExceptions`（JSONはさらに `versions`/`levelingOn`）を含める。新しいトップレベルstateを追加した場合は、次をすべて更新すること。
+  - `PROJECT_JSON_SCHEMA`（`src/lib/exportUtils.js`。`npm run build:docs` で `docs/json-format.md` に反映）と `buildProjectExport`/`normalizeImportedProject`
+  - App の読み込み経路（localStorage の初回ロード、linked の `applyLinkedProject`、embedded の `initialProject`、JSON「読み込み」の `handleImportFile`）と `pm_project` の自動保存
+  - バージョンスナップショット（`saveVersion` の `rawXxx`）と復元（`restoreVersion`）、`seedData()`（`src/lib/seedData.js`）
+  - インポートは `schemaVersion: 1` のみ受け付け、`tasks`/`resources`/`sprints`/`versions` は必須（無ければ読み込み失敗）。後から追加するキーは任意項目にし、キーが無い場合は既定値（`false`・`[]` 等）へフォールバックする。キーがあって型が不正な場合の扱いはキーごとに異なる（`calendarExceptions` は配列でなければ読み込み失敗、`levelingOn` は boolean 以外なら `false` に丸める）。
 - 依存パッケージのバージョンは `package.json` を正とする。
 
 ## ユニットテスト
