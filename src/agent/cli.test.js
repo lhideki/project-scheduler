@@ -3,7 +3,7 @@ import { describe, it, expect } from "vitest";
 import { seedData } from "../lib/seedData.js";
 import { buildProjectExport } from "../lib/exportUtils.js";
 import { buildHolidayMap, makeCalendar, parseISO } from "../lib/calendar.js";
-import { runCPM, levelResources, rollupSummaries, deriveProjectStart } from "../lib/scheduling.js";
+import { runCPM, levelResources, buildDisplaySchedule, deriveProjectStart } from "../lib/scheduling.js";
 import { detectDependencyIssues } from "../lib/dependencyIssues.js";
 import {
   computeSchedule, scheduleRows, analyzeIntegrity, findParentCycles,
@@ -47,6 +47,30 @@ describe("computeSchedule", () => {
     const data = seedProject();
     const r = computeSchedule(data, { leveling: true });
     expect(r.sprintConflicts).toEqual([]);
+    expect(r.levelWarnings).toEqual([]);
+  });
+
+  it("平準化ONでは稼働上限に合わせて延長した日程と日別割当を返し、アプリ（levelResources）と一致する", () => {
+    const data = {
+      tasks: [
+        { id: "A", name: "A", parentId: null, order: 0, startDate: "2026-11-09", duration: 3, assigneeId: "r1", predecessors: [] },
+        { id: "B", name: "B", parentId: null, order: 1, duration: 2, assigneeId: "r1", predecessors: [{ id: "A", type: "FS", lag: 0 }] },
+      ],
+      resources: [{ id: "r1", name: "R1", weeklyCapacity: 2, monthlyCapacity: 20 }],
+      sprints: [], calendarExceptions: [], levelingOn: true,
+    };
+    const r = computeSchedule(data, { leveling: true });
+    // 2026-11-09(月)開始・週次2人日: A は 11/09・11/10・11/16、B は同じ週の残り（11/17）と翌週（11/23 は祝日のため 11/24）
+    expect(r.schedule.get("A")).toMatchObject({ schedStart: "2026-11-09", schedFinish: "2026-11-16" });
+    expect(r.schedule.get("A").allocation.alloc.map(a => a.date)).toEqual(["2026-11-09", "2026-11-10", "2026-11-16"]);
+    expect(r.schedule.get("B")).toMatchObject({ schedStart: "2026-11-17", schedFinish: "2026-11-24" });
+
+    const ref = levelResources(data.tasks, r.cpm.result, data.resources, r.cal, data.sprints);
+    for (const id of ["A", "B"]) {
+      expect(r.schedule.get(id).schedStart).toBe(ref.placed[id].start);
+      expect(r.schedule.get(id).schedFinish).toBe(ref.placed[id].finish);
+      expect(r.schedule.get(id).allocation).toEqual(ref.allocations[id]);
+    }
     expect(r.levelWarnings).toEqual([]);
   });
 
@@ -150,13 +174,7 @@ function appDependencyIssues(data, leveling) {
   const y = parseISO(projectStart).getUTCFullYear();
   const cal = makeCalendar(buildHolidayMap(y - 1, y + 6), data.calendarExceptions || []);
   const cpm = runCPM(data.tasks, cal, projectStart, data.sprints);
-  let schedule = cpm.result;
-  if (leveling) {
-    const { placed } = levelResources(data.tasks, cpm.result, data.resources, cal, data.sprints);
-    schedule = new Map(cpm.result);
-    for (const [id, dates] of Object.entries(placed)) schedule.set(id, { ...schedule.get(id), schedStart: dates.start, schedFinish: dates.finish });
-    rollupSummaries(data.tasks, schedule);
-  }
+  const { schedule } = buildDisplaySchedule(data.tasks, cpm.result, data.resources, cal, data.sprints, { leveling });
   return detectDependencyIssues(data.tasks, schedule, cal);
 }
 
@@ -363,9 +381,10 @@ describe("buildVersionSnapshot", () => {
 });
 
 describe("applyAutoSchedule", () => {
-  it.each([[2, 20], [5, 3]])("配置失敗後の書き戻しと表示再計算で日付が先送りされ続けない（週%s・月%s）", (weeklyCapacity, monthlyCapacity) => {
+  it.each([[1, 20], [5, 1]])("割当不成立後の書き戻しと表示再計算で日付が先送りされ続けない（週%s・月%s）", (weeklyCapacity, monthlyCapacity) => {
+    // 探索上限（2,000稼働日）内に割り当てきれない大きな工数
     let data = {
-      tasks: [{ id: "T", name: "大きなタスク", parentId: null, order: 0, startDate: "2026-09-16", duration: 10, assigneeId: "r1", progress: 0, predecessors: [] }],
+      tasks: [{ id: "T", name: "大きなタスク", parentId: null, order: 0, startDate: "2026-09-16", duration: 500, assigneeId: "r1", progress: 0, predecessors: [] }],
       resources: [{ id: "r1", name: "担当者1", weeklyCapacity, monthlyCapacity }],
       sprints: [], calendarExceptions: [], levelingOn: true,
     };
@@ -394,6 +413,8 @@ describe("applyAutoSchedule", () => {
     // 冪等性: 書き戻し済みデータに再適用しても startDate は動かない
     const again = applyAutoSchedule({ ...data, tasks }, projectStart, cal);
     expect(again.changed).toEqual([]);
+    expect(again.converged).toBe(true);
+    expect(applyAutoSchedule(data, projectStart, cal, { leveling: true }).converged).toBe(true);
   });
 
   it("leveling:true では平準化後の配置日を書き戻す（着手済みにしても表示が戻らない）", () => {

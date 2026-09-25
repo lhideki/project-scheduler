@@ -20,8 +20,9 @@ import { pathToFileURL } from "node:url";
 
 import {
   toISO, buildHolidayMap, makeCalendar,
-  runCPM, levelResources, rollupSummaries, deriveProjectStart,
-  candidateFromDep, earliestSprintFloor, autoScheduleStartDates,
+  runCPM, buildDisplaySchedule, deriveProjectStart,
+  candidateFromDep, earliestSprintFloor, computeAutoSchedule,
+  idleSegments,
   detectSprintConflicts, computeOverlappingSprintIds,
   detectDependencyIssues, SCHEDULE_DEPENDENCY_ISSUE_CODES,
   normalizeImportedProject,
@@ -127,19 +128,8 @@ export function computeSchedule(data, opts = {}) {
   const cal = makeProjectCalendar(projectStart, calendarExceptions);
   const cpm = runCPM(tasks, cal, projectStart, sprints, { respectManualPins });
 
-  let schedule = cpm.result;
-  let levelWarnings = [];
-  if (leveling) {
-    const { placed, warnings } = levelResources(tasks, cpm.result, resources, cal, sprints);
-    const merged = new Map(cpm.result);
-    for (const [id, dates] of Object.entries(placed)) {
-      const prev = merged.get(id) || {};
-      merged.set(id, { ...prev, schedStart: dates.start, schedFinish: dates.finish });
-    }
-    rollupSummaries(tasks, merged);
-    schedule = merged;
-    levelWarnings = warnings;
-  }
+  // アプリの schedule useMemo と同じ組み立て（src/lib/scheduling.js の buildDisplaySchedule）。
+  const { schedule, levelWarnings } = buildDisplaySchedule(tasks, cpm.result, resources, cal, sprints, { leveling });
 
   let projectEnd = cpm.projectEnd;
   schedule.forEach(v => { if (v.schedFinish && v.schedFinish > projectEnd) projectEnd = v.schedFinish; });
@@ -454,7 +444,7 @@ export function buildVersionSnapshot(data, schedule, name) {
  *  日付）を書き戻す（autoScheduleStartDates 参照）。App のボタンと結果を揃えるため、
  *  固定マイルストーンを特別扱いしない（＝アプリと CLI で結果がずれないようにする）。 */
 export function applyAutoSchedule(data, projectStart, cal, opts = {}) {
-  const startDates = autoScheduleStartDates(
+  const { startDates, converged } = computeAutoSchedule(
     data.tasks, cal, projectStart, data.sprints || [], data.resources || [],
     { leveling: !!opts.leveling }
   );
@@ -465,7 +455,8 @@ export function applyAutoSchedule(data, projectStart, cal, opts = {}) {
     if (t.startDate !== to) changed.push({ id: t.id, from: t.startDate ?? null, to });
     return { ...t, startDate: to };
   });
-  return { tasks, changed };
+  // converged: 平準化ONで、書き戻した開始日と表示（平準化後の配置日）の一致を確認できたか
+  return { tasks, changed, converged };
 }
 
 /* -------------------------------------------------------------------------------------------
@@ -625,12 +616,14 @@ function cmdPlan(positional, opts) {
 
   let proposedTasks = edited.tasks;
   let startDateChanges = [];
+  let rescheduleConverged = null;
   if (reschedule) {
     const editedProjectStart = deriveProjectStart(edited.tasks, toISO(new Date()));
     const editedCal = makeProjectCalendar(editedProjectStart, edited.calendarExceptions || []);
     const applied = applyAutoSchedule(edited, editedProjectStart, editedCal, { leveling: afterLeveling });
     proposedTasks = applied.tasks;
     startDateChanges = applied.changed;
+    rescheduleConverged = applied.converged;
   }
 
   // 提案JSON: versions 先頭に「調整前」スナップショットを追加
@@ -702,6 +695,8 @@ function cmdPlan(positional, opts) {
       projectEnd: { from: before.projectEnd, to: after.projectEnd },
       tasksWithChangedSchedule: scheduleChanges.filter(c => c.kind === "changed").length,
       startDateWritebacks: startDateChanges.length,
+      // --reschedule 時のみ。false なら書き戻した開始日と表示（平準化後の配置日）の一致を確認できていない
+      rescheduleConverged,
       newlyCritical,
       noLongerCritical,
       snapshotName,
@@ -803,6 +798,17 @@ function cmdExplain(positional, opts) {
       fixedMilestoneBackward: !!(task.milestone && task.milestoneMode === "fixed"),
     },
     predecessors,
+    // 日別割当（平準化ONでは担当者の稼働上限に合わせて延長した割当、OFFでは開始日からの連続配分）。
+    // idleSegments は期間内で稼働上限により割当がなかった稼働日の区間と理由（daily=他タスクで埋まっている）。
+    allocation: s.allocation ? {
+      allocatedDays: s.allocation.alloc.length,
+      days: s.allocation.alloc,
+      idleSegments: idleSegments(s.allocation.idle, s.allocation.alloc).map(seg => ({
+        ...seg,
+        taskNames: seg.taskIds.map(id => nameOf(data.tasks, id)),
+      })),
+      overCapacity: !!s.allocation.overCapacity,
+    } : null,
     dependencyIssues: r.dependencyIssues.filter(i => i.ids.includes(taskId)),
   });
 }

@@ -4,7 +4,8 @@ import {
   AlertTriangle, ArrowLeftRight, Info, Diamond, GripVertical, Zap, Flame,
   Undo2, Redo2, Copy, ClipboardPaste,
 } from "lucide-react";
-import { toISO, parseISO, fmtJP, cal_addDaysISO, isWeekend, nonWorkdaySegments } from "../lib/calendar.js";
+import { toISO, parseISO, fmtJP, fmtMD, cal_addDaysISO, isWeekend, nonWorkdaySegments } from "../lib/calendar.js";
+import { idleSegments, consecutiveDateRuns, allocationProgressPoint, DAILY_CAPACITY } from "../lib/workAllocation.js";
 import { uid, buildFlatList, allDescendantIds } from "../lib/taskTree.js";
 import { sprintColorForId } from "../lib/sprints.js";
 import { DEPENDENCY_ISSUE_LABELS } from "../lib/dependencyIssues.js";
@@ -121,6 +122,8 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
   const noToId = useMemo(() => Object.fromEntries(flat.map(t => [t.wbsNo, t.id])), [flat]);
   // 行ごとの担当者名表示（バー・基準行）で resources.find() を毎回線形探索しないよう、事前にMap化しておく。
   const resourceNameById = useMemo(() => new Map(resources.map(r => [r.id, r.name])), [resources]);
+  const resourceById = useMemo(() => new Map(resources.map(r => [r.id, r])), [resources]);
+  const taskNameById = useMemo(() => new Map(tasks.map(t => [t.id, t.name])), [tasks]);
   const sprintNameById = useMemo(() => new Map(sprints.map(sp => [sp.id, sp.name])), [sprints]);
   // 依存関係の矛盾（App.jsx で detectDependencyIssues した結果をタスクIDで引けるようにしたもの）。
   const issuesByTask = dependencyIssuesByTask || EMPTY_ISSUES_BY_TASK;
@@ -168,6 +171,20 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
     if (barTooltipTimerRef.current) { clearTimeout(barTooltipTimerRef.current); barTooltipTimerRef.current = null; }
     setBarTooltip(null);
   }
+  // キーボード操作（Tab）でタスクバーにフォーカスしたときも、ホバーと同じツールチップを表示する。
+  // フォーカス時のスクロール（画面外のバーを表示範囲に入れる）でスクロールハンドラに閉じられないよう、
+  // スクロール後のフレームでバーの位置を測って表示する。マウスのクリックによるフォーカスでは出さない。
+  function showBarTooltipOnFocus(e, taskId) {
+    const el = e.currentTarget;
+    let keyboardFocus = true;
+    try { keyboardFocus = el.matches(":focus-visible"); } catch (err) { /* :focus-visible 非対応環境では常に表示 */ }
+    if (!keyboardFocus || linkDrag || rowDrag) return;
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (document.activeElement !== el) return;
+      const r = el.getBoundingClientRect();
+      setBarTooltip({ taskId, kind: "bar", x: r.left + Math.min(r.width, 24), y: r.top + ROW_H / 2 });
+    }));
+  }
   useEffect(() => () => { if (barTooltipTimerRef.current) clearTimeout(barTooltipTimerRef.current); }, []);
   // 実際にレンダリングされたツールチップのサイズを測ってから位置を確定する（内容量に応じて高さ・幅が変わるため、
   // 固定値での画面端クランプでは長い内容のときにはみ出すことがある）。
@@ -183,6 +200,37 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
   }, [barTooltip]);
   // 依存関係リンクドラッグ中はバーの上をポインタが横切るため、ツールチップを出さない（行ドラッグ用のガードは rowDrag 宣言後に別途設置）。
   useEffect(() => { if (linkDrag) hideBarTooltip(); }, [linkDrag]);
+  // 非割当日（稼働上限により割当のない稼働日）の理由の表示文言。週次・月次上限は「上限に達したため割当なし」と
+  // 表し、特定の曜日に休んでいるように読める表現は避ける（早い日から割り当てた計画上の割当にすぎないため）。
+  function idleReasonLabel(seg, resource) {
+    if (seg.reason === "weekly") return `週次上限（${resource?.weeklyCapacity ?? "-"}人日/週）に到達`;
+    if (seg.reason === "monthly") return `月次上限（${resource?.monthlyCapacity ?? "-"}人日/月）に到達`;
+    const names = seg.taskIds.map(id => `「${taskNameById.get(id) || id}」`);
+    const shown = names.length > 2 ? `${names.slice(0, 2).join("")}ほか${names.length - 2}件` : names.join("");
+    return `他タスク${shown}に割当済み（日次${DAILY_CAPACITY}人日）`;
+  }
+  // 日別割当（schedule の allocation）の要約。非割当の区間は多くても3区間まで表示する。
+  function allocationTooltipLines(t, allocation) {
+    if (!allocation) return [];
+    const lines = [];
+    const resource = resourceById.get(t.assigneeId);
+    if (allocation.idle.length > 0) {
+      lines.push(`稼働上限により割当のない稼働日: ${allocation.idle.length}日（割当 ${allocation.alloc.length}日）`);
+      const segs = idleSegments(allocation.idle, allocation.alloc);
+      segs.slice(0, 3).forEach(seg => {
+        const range = seg.start === seg.end ? fmtMD(seg.start) : `${fmtMD(seg.start)}〜${fmtMD(seg.end)}`;
+        lines.push(`・${range} ${idleReasonLabel(seg, resource)}`);
+      });
+      if (segs.length > 3) lines.push(`・ほか${segs.length - 3}区間`);
+    }
+    const partial = allocation.alloc.filter(a => a.limitedBy);
+    if (partial.length > 0) {
+      const shown = partial.slice(0, 3).map(a => `${fmtMD(a.date)}（${Math.round(a.load * 100) / 100}人日）`).join("、");
+      lines.push(`一部のみ割当: ${shown}${partial.length > 3 ? ` ほか${partial.length - 3}日` : ""}`);
+    }
+    if (allocation.overCapacity) lines.push("稼働上限内に割り当てきれず、上限を超過しています");
+    return lines;
+  }
   // バー本体のホバー情報（開始日・期日・担当者・進捗率等）を、TaskDetailModalの要約としてテキスト化する。
   function buildBarTooltipLines(t, s) {
     const lines = [`${t.wbsNo ? `${t.wbsNo} ` : ""}${t.name}`];
@@ -194,6 +242,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
     } else {
       lines.push(`工数 ${t.duration ?? 0}人日 ・ 進捗 ${Math.max(0, Math.min(100, t.progress || 0))}%`);
       if (t.assigneeId) lines.push(`担当: ${resourceNameById.get(t.assigneeId) || ""}`);
+      lines.push(...allocationTooltipLines(t, s.allocation));
       if (nonWorkdaySegments(cal, s.schedStart, s.schedFinish).length > 0) lines.push("この期間に非稼働日を含みます");
     }
     if (t.sprintIds && t.sprintIds.length > 0) {
@@ -1409,21 +1458,33 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                   }
                   const barW = Math.max(2, x2 - x1);
                   const prog = Math.max(0, Math.min(100, t.progress || 0));
-                  const progW = (barW * prog) / 100;
+                  // 進捗の塗りは、進捗率を工数に対する割合として日別割当の累積から求める（稲妻線と同じ位置）。
+                  const progPoint = prog > 0 && s.allocation ? allocationProgressPoint(s.allocation.alloc, prog / 100) : null;
+                  const progW = progPoint
+                    ? Math.max(0, Math.min(barW, xOf(progPoint.date) + progPoint.dayFraction * dayWidth - x1))
+                    : (barW * prog) / 100;
                   // 非稼働日の網掛け（バーの外形を保つため、バーと同形のclipPathでクリップする）。
                   // month tier では日単位の背景網掛け自体を出していないため、ここでも合わせて省略する。
                   // タスクIDはインポートしたJSON由来の任意文字列（空白・)・#等を含みうる）なので、
                   // SVGのid/url(#...)参照としてそのまま使わず、行インデックス（常にURL安全）を使う。
                   const clipId = `taskbar-clip-${i}`;
                   const nonWorkdaySegs = tier !== "month" ? nonWorkdaySegments(cal, s.schedStart, s.schedFinish) : [];
+                  // 稼働上限により割当のない稼働日（非割当日）は、非稼働日とは別の模様（格子）で網掛けする。
+                  const idleRuns = tier !== "month" && s.allocation ? consecutiveDateRuns(s.allocation.idle.map(d => d.date)) : [];
                   return (
                     <React.Fragment key={t.id}>
                       <g
                         onPointerEnter={e => showBarTooltipAfterDelay(t.id, e.clientX, e.clientY)}
                         onPointerMove={e => moveBarTooltip(t.id, e.clientX, e.clientY)}
                         onPointerLeave={hideBarTooltip}
+                        // キーボード・スクリーンリーダーからも、ツールチップと同じ内容（非割当日の理由を含む）を確認できるようにする
+                        tabIndex={0}
+                        role="group"
+                        aria-label={buildBarTooltipLines(t, s).join("。")}
+                        onFocus={e => showBarTooltipOnFocus(e, t.id)}
+                        onBlur={hideBarTooltip}
                       >
-                        {nonWorkdaySegs.length > 0 && (
+                        {(nonWorkdaySegs.length > 0 || idleRuns.length > 0) && (
                           <clipPath id={clipId}><rect x={x1} y={y + 6} width={barW} height={ROW_H - 12} rx={4} /></clipPath>
                         )}
                         <rect x={x1} y={y + 6} width={barW} height={ROW_H - 12} rx={4} fill={color} opacity={0.35} />
@@ -1433,6 +1494,13 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                           return (
                             <rect key={`nw-${seg.start}`} x={hx1} y={y + 6} width={Math.max(0, hx2 - hx1)} height={ROW_H - 12}
                               clipPath={`url(#${clipId})`} fill="url(#ganttNonWorkdayHatch)" opacity={0.4} />
+                          );
+                        })}
+                        {idleRuns.map(run => {
+                          const hx1 = xOf(run.start), hx2 = xOf(run.end) + dayWidth;
+                          return (
+                            <rect key={`idle-${run.start}`} x={hx1} y={y + 6} width={Math.max(0, hx2 - hx1)} height={ROW_H - 12}
+                              clipPath={`url(#${clipId})`} fill="url(#ganttIdleHatch)" opacity={0.75} data-unallocated="capacity" />
                           );
                         })}
                         <text x={x2 + 6} y={y + ROW_H / 2 + 4} fontSize={10} fill="#475569">{t.name}{t.assigneeId ? ` · ${resourceNameById.get(t.assigneeId) || ""}` : ""}{prog > 0 ? ` (${prog}%)` : ""}</text>
@@ -1456,6 +1524,11 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                       変わっても一貫して視認できるようにする。透明度は模様を使う側（<rect opacity>）で調整する。 */}
                   <pattern id="ganttNonWorkdayHatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
                     <line x1="0" y1="0" x2="0" y2="6" stroke="#FFFFFF" strokeWidth="3" />
+                  </pattern>
+                  {/* 稼働上限による非割当日の網掛け模様。非稼働日（斜線）と区別できるよう格子にする。 */}
+                  <pattern id="ganttIdleHatch" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                    <line x1="0" y1="0" x2="0" y2="5" stroke="#FFFFFF" strokeWidth="1.6" />
+                    <line x1="0" y1="0" x2="5" y2="0" stroke="#FFFFFF" strokeWidth="1.6" />
                   </pattern>
                 </defs>
               </svg>
@@ -1481,7 +1554,13 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
         return (
           <div
             ref={barTooltipRef}
-            style={{ position: "fixed", left: barTooltip.x + 14, top: barTooltip.y + 14, zIndex: 50, pointerEvents: "none", maxWidth: issueLines.length ? 340 : 260 }}
+            style={{
+              position: "fixed", left: barTooltip.x + 14, top: barTooltip.y + 14, zIndex: 50, pointerEvents: "none",
+              // 画面右端の近くでも内容に合わせた幅で測れるようにする（既定の幅だと右端までの残り幅に縮んで折り返してしまい、
+              // 位置確定の useLayoutEffect が縮んだ幅を測る）。非割当の区間など行が長い場合は最大幅を広げる。
+              width: "max-content",
+              maxWidth: (issueLines.length || lines.some(l => l.startsWith("・"))) ? 340 : 260,
+            }}
             className="bg-slate-800 text-white text-[11px] leading-relaxed rounded-md shadow-lg px-3 py-2"
           >
             {lines.map((line, idx) => <div key={idx} className={idx === 0 ? "font-semibold mb-0.5" : ""}>{line}</div>)}

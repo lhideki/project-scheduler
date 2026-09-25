@@ -42,7 +42,8 @@ src/
     calendar.js             # 祝日計算・稼働日カレンダー
     deps.js                  # 依存関係の文字列パーサ（3FS+2 等）
     taskTree.js               # WBSツリー・ヘルパー（isGroupId/buildFlatList等）
-    scheduling.js              # CPMエンジン（runCPM）・リソース平準化（levelResources）
+    scheduling.js              # CPMエンジン（runCPM）・リソース平準化（levelResources）・表示スケジュールの組み立て（buildDisplaySchedule）
+    workAllocation.js          # 工数の日別割当（担当者の稼働上限に合わせた分割割当・非割当日の理由・割当上の進捗位置）
     sprints.js                  # スプリント配色・期間重複検出
     dependencyIssues.js         # 依存関係の矛盾検出（循環参照・存在しない先行・開始日との矛盾・固定期日超過。App と CLI で共通）
     exportUtils.js               # JSON/Mermaidエクスポート
@@ -78,11 +79,11 @@ bee（`@nulab/bee` 1.1 以上、Backlog公式CLI）経由で保存JSONと Backlo
 ### データモデル（すべてトップレベルReact state、`window.storage` に永続化）
 
 - `tasks`: フラット配列。`parentId` によりWBS階層（グループ／リーフタスク）を表現。グループ専用のエンティティは存在せず、共通ヘルパー `isGroupId(tasks, id)` で判定する。
-- `resources`: 担当者（週次・月次の稼働上限を持つ）。
+- `resources`: 担当者（週次・月次の稼働上限を持つ。上限値 `0`・未設定は「その上限を適用しない」。日次の上限は1人日固定）。
 - `sprints`: `{id, name, theme, startDate, endDate, order}`。タスク側は `sprintIds`（配列）で複数参照できる（1タスク=複数スプリント可、グループには持たせない）。旧形式の単一 `sprintId` で保存されたデータは読み込み時に `migrateSprintIds()` で自動変換する。
 - `versions`: 任意タイミングのスナップショット（`rawTasks`/`rawResources`/`rawSprints` を保持）。
 - `levelingOn`: リソース平準化トグルのON/OFF（`boolean`、デフォルト`false`）。`window.storage`（`pm_project`）およびJSONエクスポート/インポートの対象。旧形式JSON（`levelingOn`キーなし）は読み込み時に`false`へフォールバックする。
-- `calendarExceptions`: 非稼働日カレンダーの例外（`{date, type: "holiday" | "workday", name?}` の配列、デフォルト`[]`）。`type: "holiday"`＝休日（平日を非稼働日化）、`type: "workday"`＝稼働日（土日・祝日・休日指定を稼働日化・**最優先**）。UIの種別ラベルは「休日」「稼働日」（内部値は `holiday`/`workday` のまま）。「カレンダー編集」タブ（`CalendarView` → `CalendarExceptionsEditor`）で編集。`window.storage`（`pm_project`）・JSONエクスポート/インポート・バージョンスナップショット（`rawCalendarExceptions`）の対象。旧形式JSON（キーなし）は`[]`へフォールバック。稼働日判定は `makeCalendar(holidayMap, calendarExceptions)`（`src/lib/calendar.js`）に集約されており、`runCPM`/`levelResources` は `cal` を受け取るだけなので変更不要。
+- `calendarExceptions`: 非稼働日カレンダーの例外（`{date, type: "holiday" | "workday", name?}` の配列、デフォルト`[]`）。`type: "holiday"`＝休日（平日を非稼働日化）、`type: "workday"`＝稼働日（土日・祝日・休日指定を稼働日化・**最優先**）。UIの種別ラベルは「休日」「稼働日」（内部値は `holiday`/`workday` のまま）。「カレンダー編集」タブ（`CalendarView` → `CalendarExceptionsEditor`）で編集。`window.storage`（`pm_project`）・JSONエクスポート/インポート・バージョンスナップショット（`rawCalendarExceptions`）の対象。旧形式JSON（キーなし）は`[]`へフォールバック。稼働日判定は `makeCalendar(holidayMap, calendarExceptions)`（`src/lib/calendar.js`）に集約されており、`runCPM`/`levelResources` は `cal` を受け取るだけなので変更不要。`holidayMap`（App・CLI とも `buildHolidayMap(y - 1, y + 6)`）の収録範囲外の年の祝日は、`makeCalendar` が問い合わせ時にその年の分を計算して補う（稼働上限でタスクが長く延長され、範囲より先まで割り当てる場合に祝日へ割り当てないため。`cal.holidayMap` 自体は渡したマップのままで、空のマップなら補わない）。
 
 ### スケジューリングロジック（CPM: クリティカルパス法）
 
@@ -94,11 +95,22 @@ bee（`@nulab/bee` 1.1 以上、Backlog公式CLI）経由で保存JSONと Backlo
   - `float`/`critical` はES/LSの差から計算するため、上記の表示方式の変更後も従来通り機能する（＝表示日程が動かなくても、クリティカルパスや余裕日数の情報は維持される）。
   - 「自動スケジューリング実行」（`opts.respectManualPins: false` で呼び出す再計算・書き戻し専用パス）も同じ選択ロジックを使うため、固定マイルストーン自身以外は常にES/EF（最短）で書き戻される。「マイルストーンに合わせて後ろ倒しにする」のではなく「条件を満たす直近の日程に詰める」形になる。
   - 書き戻す開始日は共通ヘルパー `autoScheduleStartDates()`（`src/lib/scheduling.js`。App.jsx `runScheduling` と CLI `applyAutoSchedule` の両方から使う）で求める。**リソース平準化がONのときは、CPMの日付ではなく平準化後の配置日を書き戻す**（＝書き戻した `startDate` と平準化ON時の表示スケジュールを一致させる）。平準化ON時にCPMの日付を書き戻すと、その後に着手済み（`progress > 0`）にしたタスクが `levelResources` で `startDate` にピン留めされ、表示だけが平準化前の位置に戻って見える不具合が起きるため（意図的な設計。元に戻さないこと）。
+  - 平準化ONではさらに、書き戻した状態の表示（手入力の開始日を固定した `runCPM` ＋ `levelResources`）を計算し、**表示の開始日が書き戻す日付と一致するまで書き戻しを繰り返す**（通常は2回以内で収束）。平準化の処理順（フロート順）は、書き戻し前の CPM（`respectManualPins: false`）と書き戻し後の表示用 CPM とで異なりうるため、担当者の容量を分け合うタスクの割当順が入れ替わり、1回の書き戻しでは表示とずれることがあるため。手入力の開始日は平準化で後ろ倒しのみの下限なので、日付は後ろにしか動かない。上限回数（20回）内に一致を確認できなかった場合は、`computeAutoSchedule` が `converged: false` を返し、App は「自動スケジューリング実行」のトーストで、CLI は `plan --reschedule` の `summary.rescheduleConverged` で知らせる（一致しないまま成功扱いにしない。`autoScheduleStartDates` は `computeAutoSchedule` の開始日だけを返す薄いラッパー）。
   - **平準化OFFのときも、CPMの結果を `startDate` に反映した状態で `levelResources` をリソース無し（`resources=[]`、稼働上限を見ない）で通し、その配置日を書き戻す**（固定マイルストーン自身だけは従来どおりCPMのLSを書き戻す）。CPMのフォワードパスは固定マイルストーンのES（依存関係から求めた最早日）から後続の日程を求めるが、表示・書き戻しされる固定マイルストーン自身の日付はLS（期日由来）なので、余裕のある固定マイルストーン（やそれを含むグループ）の後続タスクが表示上そのマイルストーンより前に開始してしまい、「自動スケジューリング実行」後も依存関係の矛盾が残るため（意図的な設計。元に戻さないこと）。
-- `levelResources(tasks, cpmResult, resources, cal, sprints)`: Serial SGS方式のリソース平準化。`minStart` にCPMと同じスプリントフロアを適用している。進捗率が入力済みのタスクは平準化の対象外とし、現在の開始日に固定する（依存関係・スプリント・リソース競合による調整を行わない）。
-  - タスクは連続する稼働日に配置し、週次・月次上限に合わせたタスク内の作業分割は行わない。2,000候補日の探索で配置できない場合は、依存関係・手入力開始日・スプリントの下限から求めた探索開始日に戻し、稼働上限超過を `levelWarnings` に通知する。探索終端の日付を確定しない。失敗したタスクも負荷に登録し、他タスクの平準化に反映する。
-  - `levelWarnings` は稼働上限内での配置失敗だけを返す。固定マイルストーンの期日超過は、平準化のON/OFFに関わらず下記の依存関係の矛盾検出（`fixed-milestone-overrun`）で扱う（二重に警告しない）。
+- `levelResources(tasks, cpmResult, resources, cal, sprints)`: Serial SGS方式のリソース平準化。`minStart` にCPMと同じスプリントフロアを適用している。戻り値は `{ placed, warnings, allocations }`（`allocations` はリーフの日別割当）。
+  - **工数は担当者の空き容量に応じて日別に割り当てる**（`allocateWork`、`src/lib/workAllocation.js`）。探索開始日から早い日順に、各稼働日へ「残工数・日次の残り（1人日）・週次の残り・月次の残り」の最小値を割り当てる。途中に割当のない稼働日（非割当日）を挟んでよく、タスク途中の中断は一律に許可する（プロジェクト・タスク単位の設定は持たない）。最初に割り当てた日を開始日、工数を割り当て終えた日を終了日とし、日別割当の合計は工数と一致する。容量は100万分の1人日単位の整数で管理し、日別割当の値も同じ単位の整数から求める（台帳に登録する量と日別割当を一致させるため。JSON・CLI からは0.01人日より細かい工数も入りうる）。
+  - 処理順はフロートが小さい順→WBS順で、先に確定したタスクが早い日の容量を使う（直列割当。日ごとに容量を按分する並列方式は採らない）。
+  - 非割当日は原因（`daily`＝他タスクで1人日が埋まっている〔埋めているタスクIDも記録〕／`weekly`／`monthly`）付きで `allocation.idle` に記録する。非稼働日（土日・祝日・休日）は `idle` に含めず、カレンダーから求める。
+  - 進捗率が入力済み（`progress > 0`）のタスクは、依存関係・スプリント・手入力開始日による調整を行わず現在の開始日に固定し、**工数の全量を開始日から稼働上限内で割り当てる**（他タスクと同じ日に二重に割り当てない）。**処理順は未着手タスクと同じ優先順のまま**とし、着手済みを先に確定させない。先に確定させると、「自動スケジューリング実行」後に着手済みにしただけで割当の順序が変わり、そのタスクや同じ担当者の他タスク（余裕のないタスクを含む）の表示が動くため（意図的な設計。元に戻さないこと）。その代わり、着手済みにした後で優先度の高い未着手タスクが追加・変更されると、着手済みタスクの終了日が延びることがある（開始日は動かない。非割当日として理由を表示する）。
+  - 担当者未設定・リソースに存在しない担当者・工数0のタスクは、稼働上限を見ずに開始日からの連続する稼働日に配置する。
+  - 探索上限（2,000稼働日）内に割り当てきれない場合は、探索開始日（着手済みは開始日）からの連続配置に戻し、稼働上限超過を `levelWarnings` に通知する（上限を満たす計画として扱わない）。探索終端の日付を確定しない。割当不成立のタスクも負荷に登録し、他タスクの平準化に反映する。
+  - FF/SF の依存関係は `candidateFromDep` が連続配置を前提に開始日を逆算するため、延長するタスクでは必要より遅く始まることがある（条件は満たす安全側。依存関係の矛盾検出も同じ基準なので誤警告は出ない）。
+  - `levelWarnings` は稼働上限内での割当不成立だけを返す。固定マイルストーンの期日超過は、平準化のON/OFFに関わらず下記の依存関係の矛盾検出（`fixed-milestone-overrun`）で扱う（二重に警告しない）。
+- `buildDisplaySchedule(tasks, cpmResult, resources, cal, sprints, { leveling })`: 表示スケジュールの組み立て（App.jsx の `schedule` useMemo と CLI `computeSchedule` で共通）。平準化OFFでは CPM の日程に開始日からの連続配分（`dailyLoads`）の日別割当を、平準化ONでは `levelResources` の配置日と日別割当を各リーフの `allocation` に載せ、グループを再ロールアップする。**ガントの非割当日の網掛け・ツールチップ・進捗の塗り・稲妻線・リソース画面の負荷集計は、この `allocation` だけを参照する**（開始日＋工数から連続配置を計算し直さないこと。延長したタスクで表示がずれるため）。
+  - 進捗率は工数に対する割合として、日別割当の累積から位置を求める（`allocationProgressPoint`）。ガントの進捗の塗りと稲妻線の進捗点は同じ位置になる。
+  - ガントでは、稼働上限による非割当日を非稼働日（斜線）とは別の模様（格子、`ganttIdleHatch`）で網掛けし、バーのツールチップに区間と理由（週次・月次上限に到達／他タスクに割当済み）、1人日未満しか割り当てられなかった日を表示する。タスクバーはキーボードでフォーカスでき（`tabIndex=0`）、キーボードでフォーカスしたときもツールチップを表示し、同じ内容を `aria-label` に持つ（非割当日の理由をポインタのホバー以外でも確認できるようにするため）。1日の中を部分的に塗り分ける表現は使わない（時間帯を持たないため）。月表示では #29 の非稼働日と同じく網掛けを省略する。
 - `float = workdaysBetween(ES, LS)`、`critical = float <= 0`。
+  - `float`/`critical` は CPM（担当者を見ない計算）の値のままなので、平準化による延長・後ろ倒しは `critical` に反映されない。
   - 注意: スプリント開始日を実際の計算済み開始日に近づけて設定すると、そのタスクのESが押し上げられてfloatが縮小し、`critical` 判定が変わることがある（表示上のschedStart/schedFinish自体は変わらない）。これは仕様上の既知の挙動であり、バグではない。
 - スプリント矛盾検出（`sprintConflicts` useMemo）: 最終的な表示スケジュールがタスクの所属スプリント期間からはみ出していないかを判定し、はみ出していればヘッダーのアラートアイコン（`AlertTriangle`）経由でダイアログに一覧表示する。複数スプリントが紐付く場合は、それらの期間の和集合（最も早い開始日〜最も遅い終了日）を基準に判定する。リソース平準化警告（`levelWarnings`、稼働上限内での配置失敗）とは別建てのUI。
 - 依存関係の矛盾検出（`dependencyIssues` useMemo → `detectDependencyIssues(tasks, schedule, cal)`、`src/lib/dependencyIssues.js`）: 次の4種（循環参照は自己依存を含む）を判定する。日程の自動修正はしない（開始日の矛盾は「自動スケジューリング実行」で解消する）。CLI の `validate`/`recalc`/`plan`/`explain` も同じ関数を使う（`src/agent/cli.test.js` でアプリと結果が一致することを確認している）。

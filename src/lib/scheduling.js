@@ -1,5 +1,12 @@
-import { toISO, parseISO, weekKey, monthKey, fmtJP } from "./calendar.js";
+import { toISO, fmtJP } from "./calendar.js";
 import { isGroupId, buildFlatList, effectivePredecessors } from "./taskTree.js";
+import {
+  dailyLoads, createCapacityLedger, allocateWork, commitAllocation,
+  DAILY_CAPACITY, ALLOCATION_SEARCH_WORKDAYS,
+} from "./workAllocation.js";
+
+// 工数の連続配分は workAllocation.js が正。従来どおり scheduling.js からも参照できるよう再エクスポートする。
+export { dailyLoads };
 
 /* =========================================================================================
    スケジューリング・エンジン（CPM: 4種の依存関係 + リード/ラグ、固定マイルストーンからの逆算、
@@ -9,7 +16,8 @@ import { isGroupId, buildFlatList, effectivePredecessors } from "./taskTree.js";
    双対（最長経路問題）を topological order で 1 パス解くことで厳密に求まる（CPM ⇔ LP 双対）。
    一方、資源上限を同時に満たす最適化（RCPSP）はNP困難で、ブラウザ内で真の整数計画法ソルバーを
    持たずに厳密解を出すのは非現実的なため、フロートが小さいタスクを優先する Serial Schedule
-   Generation Scheme（優先度付き貪欲法）で近似する。
+   Generation Scheme（優先度付き貪欲法）で近似する。各タスクの工数は、担当者の空き容量に応じて
+   早い日から日別に割り当てる（途中に非割当日を挟んでタスク期間を延長する。workAllocation.js）。
    ========================================================================================= */
 
 /**
@@ -26,6 +34,8 @@ import { isGroupId, buildFlatList, effectivePredecessors } from "./taskTree.js";
  * @property {string} schedFinish - 表示用の終了日
  * @property {number} progress - 進捗率（グループは配下の単純平均）
  * @property {boolean} [isSummary] - グループ（サマリー行）のロールアップ結果かどうか
+ * @property {import("./workAllocation.js").TaskAllocation} [allocation] - 日別割当（buildDisplaySchedule がリーフに付与。
+ *   ガント・リソース負荷・進捗表示はこれだけを参照する）
  */
 
 /**
@@ -70,25 +80,6 @@ export function candidateForPredFromSucc(cal, dep, succLateDates, predDuration) 
   // SF
   const s = cal.shift(succLateDates.finish, -lag);
   return { finish: predDuration <= 0 ? s : cal.endFromStart(s, predDuration) };
-}
-
-/** 工数（人日、小数可）を開始日からの各稼働日へ配分する。
- *  満日を1.0人日、端数が残る最終日のみ端数分を割り当てる（例: 2.5人日 → 1.0 / 1.0 / 0.5）。
- *  これにより、日付は常に整数日単位（カレンダー粒度）のまま、稼働負荷だけ小数で扱える。 */
-export function dailyLoads(cal, startStr, duration) {
-  if (duration <= 0) return [];
-  const totalDays = Math.max(1, Math.ceil(duration - 1e-9));
-  const fullDays = Math.floor(duration + 1e-9);
-  const remainder = duration - fullDays;
-  const loadFor = (dayIndex) => (dayIndex === totalDays && remainder > 1e-9) ? remainder : 1;
-  const d = parseISO(cal.snapForward(startStr));
-  const loads = [{ date: toISO(d), load: loadFor(1) }];
-  let count = 1;
-  while (count < totalDays) {
-    d.setUTCDate(d.getUTCDate() + 1);
-    if (cal.isWorkday(d)) { count++; loads.push({ date: toISO(d), load: loadFor(count) }); }
-  }
-  return loads;
 }
 
 export function topoOrder(ids, edgesByTo) {
@@ -362,10 +353,16 @@ export function rollupSummaries(tasks, result) {
  *  （固定マイルストーンからの逆算とは同時併用しない簡易化）。
  *  タスクに手入力の開始日（startDate）がある場合は、依存関係の有無に関わらず
  *  「後ろ倒しのみの下限（フロア）」として適用する（前倒しはしない）。
- *  進捗率が入力済み（着手済み）のタスクは平準化の対象外とし、現在の開始日に固定する。
- *  探索範囲内に配置できない場合は、依存関係等から求めた最短開始日に戻して負荷を登録し、
- *  稼働上限を満たしていないことを警告する（探索終端の日付を確定しない）。
- *  warnings は稼働上限内での配置失敗だけを返す（固定マイルストーンの期日超過は dependencyIssues.js が扱う）。
+ *  担当者付きのタスクは、探索開始日から早い日順に、担当者の空き容量（日次1人日・週次・月次の各上限の
+ *  残り）の範囲で工数を日別に割り当てる（allocateWork）。割当のない稼働日を挟んでよく（中断を一律に
+ *  許可する）、最初に割り当てた日を開始日、工数を割り当て終えた日を終了日とする。処理順は
+ *  フロートが小さい順→WBS順で、先に確定したタスクが早い日の容量を使う（直列割当）。
+ *  進捗率が入力済み（着手済み）のタスクは、依存関係・スプリント・手入力開始日による調整を行わず
+ *  現在の開始日に固定し、工数の全量を開始日から稼働上限内で割り当てる。処理順は未着手タスクと同じ
+ *  優先順のまま（「自動スケジューリング実行」の後に着手済みにしても表示が動かないようにするため）。
+ *  探索上限（2,000稼働日）内に割り当てきれない場合は、探索開始日（着手済みは開始日）からの連続配置に
+ *  戻して負荷を登録し、稼働上限を満たしていないことを警告する（探索終端の日付を確定しない）。
+ *  warnings は稼働上限内での割当不成立だけを返す（固定マイルストーンの期日超過は dependencyIssues.js が扱う）。
  *  resources に空配列を渡すと稼働上限を一切見ないため、「依存関係・手入力開始日・スプリントの下限を
  *  すべて満たす最短の配置」を求める用途にも使える（autoScheduleStartDates の平準化OFF時）。
  * @param {import("./taskTree.js").Task[]} tasks
@@ -373,7 +370,8 @@ export function rollupSummaries(tasks, result) {
  * @param {import("./taskTree.js").Resource[]} resources
  * @param {import("./calendar.js").Calendar} cal
  * @param {import("./taskTree.js").Sprint[]} sprints
- * @returns {{placed: Record<string, {start: string, finish: string}>, warnings: string[]}}
+ * @returns {{placed: Record<string, {start: string, finish: string}>, warnings: string[], allocations: Record<string, import("./workAllocation.js").TaskAllocation>}}
+ *   allocations: 工数が正のリーフの日別割当（担当者の稼働上限を見ないタスクは連続配分）
  */
 export function levelResources(tasks, cpmResult, resources, cal, sprints) {
   const leaves = tasks.filter(t => !isGroupId(tasks, t.id));
@@ -413,47 +411,10 @@ export function levelResources(tasks, cpmResult, resources, cal, sprints) {
   buildFlatList(tasks, new Set()).forEach(t => { wbsOrder[t.id] = t.taskNo; });
 
   const resById = {}; resources.forEach(r => (resById[r.id] = r));
-  const weekUsage = {}, monthUsage = {}, dayUsage = {};
-
-  function spanCheck(assigneeId, startStr, duration) {
-    const cap = resById[assigneeId];
-    if (!cap) return true;
-    const dayAdd = {}, weekAdd = {}, monthAdd = {};
-    dailyLoads(cal, startStr, duration).forEach(({ date, load }) => {
-      dayAdd[date] = (dayAdd[date] || 0) + load;
-      const wk = weekKey(date), mo = monthKey(date);
-      weekAdd[wk] = (weekAdd[wk] || 0) + load;
-      monthAdd[mo] = (monthAdd[mo] || 0) + load;
-    });
-    // 1日あたりの上限は常に1.0人日（同じ担当者が同じ日に複数タスクを掛け持ちすることを防ぐ）。
-    // これにより、他のタスクと同じ日に重ならないよう自動的にずらされる。
-    for (const d in dayAdd) {
-      const used = ((dayUsage[assigneeId] || {})[d] || 0) + dayAdd[d];
-      if (used > 1 + 1e-9) return false;
-    }
-    for (const wk in weekAdd) {
-      const used = ((weekUsage[assigneeId] || {})[wk] || 0) + weekAdd[wk];
-      if (cap.weeklyCapacity && used > cap.weeklyCapacity + 1e-9) return false;
-    }
-    for (const mo in monthAdd) {
-      const used = ((monthUsage[assigneeId] || {})[mo] || 0) + monthAdd[mo];
-      if (cap.monthlyCapacity && used > cap.monthlyCapacity + 1e-9) return false;
-    }
-    return true;
-  }
-  function commit(assigneeId, startStr, duration) {
-    weekUsage[assigneeId] = weekUsage[assigneeId] || {};
-    monthUsage[assigneeId] = monthUsage[assigneeId] || {};
-    dayUsage[assigneeId] = dayUsage[assigneeId] || {};
-    dailyLoads(cal, startStr, duration).forEach(({ date, load }) => {
-      dayUsage[assigneeId][date] = (dayUsage[assigneeId][date] || 0) + load;
-      const wk = weekKey(date), mo = monthKey(date);
-      weekUsage[assigneeId][wk] = (weekUsage[assigneeId][wk] || 0) + load;
-      monthUsage[assigneeId][mo] = (monthUsage[assigneeId][mo] || 0) + load;
-    });
-  }
+  const ledger = createCapacityLedger();
 
   const placed = {};
+  const allocations = {};
   const remaining = new Set(leaves.map(t => t.id));
   const warnings = [];
 
@@ -472,6 +433,38 @@ export function levelResources(tasks, cpmResult, resources, cal, sprints) {
     return { start: min, finish: max };
   }
 
+  /** 担当者の稼働上限を見て割り当てるタスクか（担当者がリソースに存在し、工数が正）。 */
+  const usesCapacity = task => !!(task.assigneeId && task.duration > 0 && resById[task.assigneeId]);
+
+  /** 稼働上限を見ずに、開始日からの連続する稼働日に配置する（担当者未設定・工数0など）。 */
+  function placeContiguous(task, start) {
+    placed[task.id] = { start, finish: task.duration <= 0 ? start : cal.endFromStart(start, task.duration) };
+    if (task.duration > 0) allocations[task.id] = { alloc: dailyLoads(cal, start, task.duration), idle: [] };
+  }
+
+  /** 担当者の空き容量に応じて工数を日別に割り当てて確定する。pinned は着手済みで開始日を固定する場合。 */
+  function placeWithCapacity(task, start, pinned) {
+    const resource = resById[task.assigneeId];
+    const r = allocateWork(ledger, resource, cal, start, task.duration, { pinned });
+    if (r.ok) {
+      commitAllocation(ledger, resource.id, task.id, r.alloc);
+      placed[task.id] = { start: pinned ? start : r.alloc[0].date, finish: r.alloc[r.alloc.length - 1].date };
+      allocations[task.id] = { alloc: r.alloc, idle: r.idle };
+      return;
+    }
+    // 割当不成立は遠い未来への配置成功ではない。探索開始日からの連続配置に戻すことで、
+    // 自動実行の書き戻し・表示の再計算のたびにさらに先送りされることも防ぐ。
+    const alloc = dailyLoads(cal, start, task.duration);
+    // 上限超過のままでも実際に表示する負荷を登録し、他タスクの計算から消さない。
+    commitAllocation(ledger, resource.id, task.id, alloc);
+    placed[task.id] = { start, finish: cal.endFromStart(start, task.duration) };
+    allocations[task.id] = { alloc, idle: [], overCapacity: true };
+    const limits = [`日次${DAILY_CAPACITY}人日`];
+    if (resource.weeklyCapacity) limits.push(`週次${resource.weeklyCapacity}人日`);
+    if (resource.monthlyCapacity) limits.push(`月次${resource.monthlyCapacity}人日`);
+    warnings.push(`「${task.name}」（担当者: ${resource.name}、工数: ${task.duration}人日）は、${limits.join("・")}の稼働上限内で割り当てきれませんでした（探索上限: ${ALLOCATION_SEARCH_WORKDAYS.toLocaleString("en-US")}稼働日）。開始日を${fmtJP(start)}とし、連続する稼働日に配置していますが、稼働上限を超過しています。工数または稼働上限の見直しが必要です。`);
+  }
+
   let guardOuter = 0;
   while (remaining.size && guardOuter < leaves.length + 5) {
     guardOuter++;
@@ -485,15 +478,14 @@ export function levelResources(tasks, cpmResult, resources, cal, sprints) {
     });
     const id = ready[0];
     const task = byId[id];
-    // 進捗率が入力済み（着手済み）のタスクは、平準化の対象外として現在の開始日に固定する
-    // （依存関係・スプリント・リソース競合による調整を一切行わない。リソース使用量だけは
-    // 他タスクの平準化に影響するよう commit しておく）。
+    // 進捗率が入力済み（着手済み）のタスクは、依存関係・スプリント・手入力開始日による調整を行わず
+    // 現在の開始日に固定する。工数は開始日から稼働上限内で割り当てる（他タスクと同じ優先順で確定し、
+    // 着手済みにしただけで割当の順序が変わらないようにする）。
     const hasProgress = (task.progress || 0) > 0;
     if (hasProgress && task.startDate) {
       const start = cal.snapForward(task.startDate);
-      const finish = task.duration <= 0 ? start : cal.endFromStart(start, task.duration);
-      if (task.assigneeId && task.duration > 0 && resById[task.assigneeId]) commit(task.assigneeId, start, task.duration);
-      placed[id] = { start, finish };
+      if (usesCapacity(task)) placeWithCapacity(task, start, true);
+      else placeContiguous(task, start);
       remaining.delete(id);
       continue;
     }
@@ -526,42 +518,56 @@ export function levelResources(tasks, cpmResult, resources, cal, sprints) {
     const sprintFloor = earliestSprintFloor(task.sprintIds, sprintById, cal);
     if (sprintFloor && sprintFloor > minStart) minStart = sprintFloor;
 
-    let start = cal.snapForward(minStart);
-    if (task.assigneeId && task.duration > 0 && resById[task.assigneeId]) {
-      let guard = 0;
-      while (guard < 2000) {
-        guard++;
-        if (spanCheck(task.assigneeId, start, task.duration)) {
-          commit(task.assigneeId, start, task.duration);
-          placed[id] = { start, finish: cal.endFromStart(start, task.duration) };
-          break;
-        }
-        start = cal.shift(start, 1);
-      }
-      if (!placed[id]) {
-        // 探索失敗は遠い未来への配置成功ではない。探索前の候補日に戻すことで、
-        // 自動実行の書き戻し・表示の再計算のたびにさらに先送りされることも防ぐ。
-        start = cal.snapForward(minStart);
-        placed[id] = { start, finish: cal.endFromStart(start, task.duration) };
-        // 上限超過のままでも実際に表示する負荷を登録し、他タスクの計算から消さない。
-        commit(task.assigneeId, start, task.duration);
-        const resource = resById[task.assigneeId];
-        const limits = ["日次1人日"];
-        if (resource.weeklyCapacity) limits.push(`週次${resource.weeklyCapacity}人日`);
-        if (resource.monthlyCapacity) limits.push(`月次${resource.monthlyCapacity}人日`);
-        warnings.push(`「${task.name}」（担当者: ${resource.name}、工数: ${task.duration}人日）は、${limits.join("・")}の稼働上限内で配置できませんでした（探索上限: 2,000稼働日）。開始日を${fmtJP(start)}としていますが、稼働上限を超過しています。タスクの分割または稼働上限の見直しが必要です。`);
-      }
-    } else {
-      const finish = task.duration <= 0 ? start : cal.endFromStart(start, task.duration);
-      placed[id] = { start, finish };
-    }
+    const start = cal.snapForward(minStart);
+    if (usesCapacity(task)) placeWithCapacity(task, start, false);
+    else placeContiguous(task, start);
     remaining.delete(id);
   }
 
   // 固定マイルストーンの期日超過は、平準化の ON/OFF に関わらず detectDependencyIssues
   // （src/lib/dependencyIssues.js）が表示スケジュールから判定する。ここで重ねて警告しない。
-  return { placed, warnings };
+  return { placed, warnings, allocations };
 }
+
+/**
+ * 表示スケジュール（App の schedule useMemo・CLI computeSchedule の schedule）を組み立てる。
+ * 平準化OFFでは runCPM の結果に、開始日からの連続配分の日別割当を付ける。平準化ONでは
+ * levelResources の配置日と日別割当で各リーフを上書きし、グループを再ロールアップする。
+ * どちらの場合もリーフ（工数が正）には allocation が付くため、ガント・リソース負荷・進捗表示は
+ * 平準化のON/OFFで場合分けせずに allocation を参照できる。
+ * @param {import("./taskTree.js").Task[]} tasks
+ * @param {Map<string, ScheduleEntry>} cpmResult - runCPM の結果（書き換えない）
+ * @param {import("./taskTree.js").Resource[]} resources
+ * @param {import("./calendar.js").Calendar} cal
+ * @param {import("./taskTree.js").Sprint[]} sprints
+ * @param {{leveling?: boolean}} [opts]
+ * @returns {{schedule: Map<string, ScheduleEntry>, levelWarnings: string[]}}
+ */
+export function buildDisplaySchedule(tasks, cpmResult, resources, cal, sprints, opts = {}) {
+  const schedule = new Map(cpmResult);
+  if (!opts.leveling) {
+    tasks.forEach(t => {
+      const s = schedule.get(t.id);
+      if (!s || s.isSummary || !s.schedStart || !(t.duration > 0)) return;
+      schedule.set(t.id, { ...s, allocation: { alloc: dailyLoads(cal, s.schedStart, t.duration), idle: [] } });
+    });
+    return { schedule, levelWarnings: [] };
+  }
+  const { placed, warnings, allocations } = levelResources(tasks, cpmResult, resources || [], cal, sprints);
+  for (const [id, dates] of Object.entries(placed)) {
+    const prev = schedule.get(id) || {};
+    const next = { ...prev, schedStart: dates.start, schedFinish: dates.finish };
+    if (allocations[id]) next.allocation = allocations[id];
+    else delete next.allocation;
+    schedule.set(id, next);
+  }
+  // サマリー行の再ロールアップ（runCPM と同じロジックを共有、進捗率は子タスクの単純平均）
+  rollupSummaries(tasks, schedule);
+  return { schedule, levelWarnings: warnings };
+}
+
+/** computeAutoSchedule で、書き戻しと表示を一致させる反復の上限回数（通常は2回以内で収束する）。 */
+const AUTO_SCHEDULE_MAX_ITERATIONS = 20;
 
 /**
  * 「自動スケジューリング実行」（App.jsx runScheduling / CLI applyAutoSchedule）で、
@@ -576,6 +582,9 @@ export function levelResources(tasks, cpmResult, resources, cal, sprints) {
  * 平準化ON時の表示スケジュールとずれる。その状態で着手済み（progress > 0）にすると
  * levelResources がそのタスクを startDate にピン留めするため、表示だけが平準化前の位置へ
  * 「戻る」ように見える不具合が起きる。それを防ぐため、平準化ON時は表示と一致する日付を書き戻す。
+ * 平準化の処理順（フロート順）は、書き戻し前の CPM と書き戻し後の表示用 CPM とで異なりうるため、
+ * 平準化ONでは書き戻した状態の表示（手入力の開始日を固定した runCPM ＋ levelResources）を計算し、
+ * 表示の開始日が書き戻す日付と一致するまで反復する。
  *
  * 平準化OFFでも levelResources を通すのは、固定マイルストーンの後続タスクのため。CPM のフォワードパスは
  * 固定マイルストーンの ES（依存関係から求めた最早日）から後続タスクの日程を求めるが、書き戻す
@@ -593,6 +602,23 @@ export function levelResources(tasks, cpmResult, resources, cal, sprints) {
  * @returns {Map<string, string>} leafId -> 書き戻す開始日（YYYY-MM-DD）
  */
 export function autoScheduleStartDates(tasks, cal, projectStart, sprints, resources, opts = {}) {
+  return computeAutoSchedule(tasks, cal, projectStart, sprints, resources, opts).startDates;
+}
+
+/**
+ * autoScheduleStartDates と同じ書き戻し日を求め、平準化ONで書き戻しと表示が一致したか（converged）も返す。
+ * 反復の上限回数（opts.maxIterations、既定 AUTO_SCHEDULE_MAX_ITERATIONS）に達しても一致しなかった場合は
+ * converged: false を返し、呼び出し側（App の「自動スケジューリング実行」・CLI の plan --reschedule）が
+ * 利用者に知らせる（一致しないまま成功扱いにしない）。平準化OFFは反復しないため常に true。
+ * @param {import("./taskTree.js").Task[]} tasks
+ * @param {import("./calendar.js").Calendar} cal
+ * @param {string} projectStart
+ * @param {import("./taskTree.js").Sprint[]} sprints
+ * @param {import("./taskTree.js").Resource[]} resources
+ * @param {{leveling?: boolean, maxIterations?: number}} [opts]
+ * @returns {{startDates: Map<string, string>, converged: boolean}}
+ */
+export function computeAutoSchedule(tasks, cal, projectStart, sprints, resources, opts = {}) {
   const auto = runCPM(tasks, cal, projectStart, sprints, { respectManualPins: false });
   const out = new Map();
   tasks.forEach(t => {
@@ -609,5 +635,28 @@ export function autoScheduleStartDates(tasks, cal, projectStart, sprints, resour
     if (!opts.leveling && t && t.milestone && t.milestoneMode === "fixed") return;
     if (dates && dates.start) out.set(id, dates.start);
   });
-  return out;
+  let converged = true;
+  if (opts.leveling) {
+    // 書き戻した状態の表示（手入力の開始日を固定した runCPM ＋ 平準化）と一致するまで書き戻しを繰り返す。
+    // 上の配置は respectManualPins:false の CPM のフロートで処理順を決めるが、表示は書き戻し後の開始日で
+    // 求めたフロートで処理順を決めるため、担当者の容量を分け合うタスクの割当順が入れ替わり、表示だけが
+    // 書き戻した日付からずれることがある。平準化では手入力の開始日が後ろ倒しのみの下限なので、
+    // 各反復で日付は後ろにしか動かない。上限回数内に一致を確認できなければ converged: false を返す。
+    converged = false;
+    const maxIterations = opts.maxIterations ?? AUTO_SCHEDULE_MAX_ITERATIONS;
+    for (let iter = 0; iter < maxIterations; iter++) {
+      const written = tasks.map(t => (out.has(t.id) ? { ...t, startDate: out.get(t.id) } : t));
+      const displayStart = deriveProjectStart(written, projectStart);
+      const display = runCPM(written, cal, displayStart, sprints);
+      const { placed: shown } = levelResources(written, display.result, resources || [], cal, sprints);
+      let changed = false;
+      Object.entries(shown).forEach(([id, dates]) => {
+        if (!out.has(id) || !dates || !dates.start || dates.start === out.get(id)) return;
+        out.set(id, dates.start);
+        changed = true;
+      });
+      if (!changed) { converged = true; break; }
+    }
+  }
+  return { startDates: out, converged };
 }

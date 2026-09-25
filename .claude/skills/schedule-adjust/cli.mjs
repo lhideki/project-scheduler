@@ -115,18 +115,38 @@ function normalizeCalendarExceptions(exceptions) {
 }
 function makeCalendar(holidayMap, exceptions = []) {
   const { list: normalizedExceptions, forcedWorkdays, extraHolidays } = normalizeCalendarExceptions(exceptions);
+  let minYear = Infinity, maxYear = -Infinity;
+  for (const key of holidayMap.keys()) {
+    const y = Number(key.slice(0, 4));
+    if (y < minYear) minYear = y;
+    if (y > maxYear) maxYear = y;
+  }
+  const extraYearHolidays = /* @__PURE__ */ new Map();
+  function nationalHolidayName(iso) {
+    const name = holidayMap.get(iso);
+    if (name !== void 0 || holidayMap.size === 0) return name;
+    const y = Number(iso.slice(0, 4));
+    if (y >= minYear && y <= maxYear) return void 0;
+    let yearMap = extraYearHolidays.get(y);
+    if (!yearMap) {
+      yearMap = /* @__PURE__ */ new Map();
+      for (const [date, n] of buildHolidayMap(y, y)) if (date.startsWith(`${y}-`)) yearMap.set(date, n);
+      extraYearHolidays.set(y, yearMap);
+    }
+    return yearMap.get(iso);
+  }
   function isWorkday(d) {
     const iso = toISO(d);
     if (forcedWorkdays.has(iso)) return true;
     if (isWeekend(d)) return false;
-    if (holidayMap.has(iso)) return false;
+    if (nationalHolidayName(iso) !== void 0) return false;
     if (extraHolidays.has(iso)) return false;
     return true;
   }
   function holidayName(s) {
     if (forcedWorkdays.has(s)) return null;
     if (extraHolidays.has(s)) return extraHolidays.get(s) || "\u4F11\u65E5";
-    return holidayMap.get(s) || null;
+    return nationalHolidayName(s) || null;
   }
   function isWorkdayStr(s) {
     return isWorkday(parseISO(s));
@@ -203,6 +223,11 @@ function fmtJP(dateStr) {
   const [y, m, d] = dateStr.split("-");
   return `${y}/${m}/${d}`;
 }
+function cal_addDaysISO(iso, n) {
+  const d = parseISO(iso);
+  d.setUTCDate(d.getUTCDate() + n);
+  return toISO(d);
+}
 
 // src/lib/taskTree.js
 function isGroupId(tasks, id) {
@@ -248,6 +273,112 @@ function effectivePredecessors(byId, leaf) {
   return merged.filter((dep) => !chainIds.has(dep.id));
 }
 
+// src/lib/workAllocation.js
+var ALLOCATION_UNITS_PER_DAY = 1e6;
+var DAILY_CAPACITY = 1;
+var ALLOCATION_SEARCH_WORKDAYS = 2e3;
+var toUnits = (days) => Math.round(days * ALLOCATION_UNITS_PER_DAY);
+function dailyLoads(cal, startStr, duration) {
+  if (duration <= 0) return [];
+  const totalDays = Math.max(1, Math.ceil(duration - 1e-9));
+  const fullDays = Math.floor(duration + 1e-9);
+  const remainder = duration - fullDays;
+  const loadFor = (dayIndex) => dayIndex === totalDays && remainder > 1e-9 ? remainder : 1;
+  const d = parseISO(cal.snapForward(startStr));
+  const loads = [{ date: toISO(d), load: loadFor(1) }];
+  let count = 1;
+  while (count < totalDays) {
+    d.setUTCDate(d.getUTCDate() + 1);
+    if (cal.isWorkday(d)) {
+      count++;
+      loads.push({ date: toISO(d), load: loadFor(count) });
+    }
+  }
+  return loads;
+}
+function createCapacityLedger() {
+  return { usage: /* @__PURE__ */ new Map() };
+}
+function usageOf(ledger, assigneeId) {
+  let u = ledger.usage.get(assigneeId);
+  if (!u) {
+    u = { day: /* @__PURE__ */ new Map(), week: /* @__PURE__ */ new Map(), month: /* @__PURE__ */ new Map(), owners: /* @__PURE__ */ new Map() };
+    ledger.usage.set(assigneeId, u);
+  }
+  return u;
+}
+function capUnits(capacity) {
+  return capacity ? toUnits(capacity) : Infinity;
+}
+function allocateWork(ledger, resource, cal, startStr, duration, opts = {}) {
+  const pinned = !!opts.pinned;
+  const u = usageOf(ledger, resource.id);
+  const weekCap = capUnits(resource.weeklyCapacity);
+  const monthCap = capUnits(resource.monthlyCapacity);
+  const dayCap = toUnits(DAILY_CAPACITY);
+  const selfWeek = /* @__PURE__ */ new Map(), selfMonth = /* @__PURE__ */ new Map();
+  let remaining = Math.max(1, toUnits(duration));
+  const alloc = [], idle = [];
+  let d = cal.snapForward(startStr);
+  let scanned = 0;
+  for (let guard = 0; remaining > 0 && scanned < ALLOCATION_SEARCH_WORKDAYS && guard < ALLOCATION_SEARCH_WORKDAYS * 7; guard++) {
+    if (cal.isWorkdayStr(d)) {
+      scanned++;
+      const wk = weekKey(d), mo = monthKey(d);
+      const dayFree = dayCap - (u.day.get(d) || 0);
+      const weekFree = weekCap - (u.week.get(wk) || 0) - (selfWeek.get(wk) || 0);
+      const monthFree = monthCap - (u.month.get(mo) || 0) - (selfMonth.get(mo) || 0);
+      const units = Math.min(remaining, dayFree, weekFree, monthFree);
+      if (units > 0) {
+        remaining -= units;
+        selfWeek.set(wk, (selfWeek.get(wk) || 0) + units);
+        selfMonth.set(mo, (selfMonth.get(mo) || 0) + units);
+        const entry = { date: d, load: units / ALLOCATION_UNITS_PER_DAY };
+        if (remaining > 0 && units < dayCap) entry.limitedBy = units === dayFree ? "daily" : units === weekFree ? "weekly" : "monthly";
+        alloc.push(entry);
+      } else if (alloc.length || pinned) {
+        const reason = dayFree <= 0 ? "daily" : weekFree <= 0 ? "weekly" : "monthly";
+        const day = { date: d, reason };
+        if (reason === "daily") day.taskIds = [...u.owners.get(d) || []];
+        idle.push(day);
+      }
+    }
+    d = cal_addDaysISO(d, 1);
+  }
+  return { ok: remaining <= 0, alloc, idle };
+}
+function commitAllocation(ledger, assigneeId, taskId, alloc) {
+  const u = usageOf(ledger, assigneeId);
+  alloc.forEach(({ date, load }) => {
+    const units = toUnits(load);
+    if (units <= 0) return;
+    const wk = weekKey(date), mo = monthKey(date);
+    u.day.set(date, (u.day.get(date) || 0) + units);
+    u.week.set(wk, (u.week.get(wk) || 0) + units);
+    u.month.set(mo, (u.month.get(mo) || 0) + units);
+    const owners = u.owners.get(date) || [];
+    if (!owners.includes(taskId)) u.owners.set(date, [...owners, taskId]);
+  });
+}
+function idleSegments(idle, alloc) {
+  const allocDates = (alloc || []).map((a) => a.date);
+  const segments = [];
+  (idle || []).forEach((day) => {
+    const last = segments[segments.length - 1];
+    const allocatedBetween = last && allocDates.some((date) => date > last.end && date < day.date);
+    if (last && last.reason === day.reason && !allocatedBetween) {
+      last.end = day.date;
+      last.days++;
+      (day.taskIds || []).forEach((id) => {
+        if (!last.taskIds.includes(id)) last.taskIds.push(id);
+      });
+    } else {
+      segments.push({ start: day.date, end: day.date, days: 1, reason: day.reason, taskIds: [...day.taskIds || []] });
+    }
+  });
+  return segments;
+}
+
 // src/lib/scheduling.js
 function candidateFromDep(cal, dep, predDates, succDuration) {
   const { type, lag } = dep;
@@ -270,24 +401,6 @@ function candidateForPredFromSucc(cal, dep, succLateDates, predDuration) {
   if (type === "FF") return { finish: cal.shift(succLateDates.finish, -lag) };
   const s = cal.shift(succLateDates.finish, -lag);
   return { finish: predDuration <= 0 ? s : cal.endFromStart(s, predDuration) };
-}
-function dailyLoads(cal, startStr, duration) {
-  if (duration <= 0) return [];
-  const totalDays = Math.max(1, Math.ceil(duration - 1e-9));
-  const fullDays = Math.floor(duration + 1e-9);
-  const remainder = duration - fullDays;
-  const loadFor = (dayIndex) => dayIndex === totalDays && remainder > 1e-9 ? remainder : 1;
-  const d = parseISO(cal.snapForward(startStr));
-  const loads = [{ date: toISO(d), load: loadFor(1) }];
-  let count = 1;
-  while (count < totalDays) {
-    d.setUTCDate(d.getUTCDate() + 1);
-    if (cal.isWorkday(d)) {
-      count++;
-      loads.push({ date: toISO(d), load: loadFor(count) });
-    }
-  }
-  return loads;
 }
 function topoOrder(ids, edgesByTo) {
   const indeg = {};
@@ -525,43 +638,9 @@ function levelResources(tasks, cpmResult, resources, cal, sprints) {
   });
   const resById = {};
   resources.forEach((r) => resById[r.id] = r);
-  const weekUsage = {}, monthUsage = {}, dayUsage = {};
-  function spanCheck(assigneeId, startStr, duration) {
-    const cap = resById[assigneeId];
-    if (!cap) return true;
-    const dayAdd = {}, weekAdd = {}, monthAdd = {};
-    dailyLoads(cal, startStr, duration).forEach(({ date, load }) => {
-      dayAdd[date] = (dayAdd[date] || 0) + load;
-      const wk = weekKey(date), mo = monthKey(date);
-      weekAdd[wk] = (weekAdd[wk] || 0) + load;
-      monthAdd[mo] = (monthAdd[mo] || 0) + load;
-    });
-    for (const d in dayAdd) {
-      const used = ((dayUsage[assigneeId] || {})[d] || 0) + dayAdd[d];
-      if (used > 1 + 1e-9) return false;
-    }
-    for (const wk in weekAdd) {
-      const used = ((weekUsage[assigneeId] || {})[wk] || 0) + weekAdd[wk];
-      if (cap.weeklyCapacity && used > cap.weeklyCapacity + 1e-9) return false;
-    }
-    for (const mo in monthAdd) {
-      const used = ((monthUsage[assigneeId] || {})[mo] || 0) + monthAdd[mo];
-      if (cap.monthlyCapacity && used > cap.monthlyCapacity + 1e-9) return false;
-    }
-    return true;
-  }
-  function commit(assigneeId, startStr, duration) {
-    weekUsage[assigneeId] = weekUsage[assigneeId] || {};
-    monthUsage[assigneeId] = monthUsage[assigneeId] || {};
-    dayUsage[assigneeId] = dayUsage[assigneeId] || {};
-    dailyLoads(cal, startStr, duration).forEach(({ date, load }) => {
-      dayUsage[assigneeId][date] = (dayUsage[assigneeId][date] || 0) + load;
-      const wk = weekKey(date), mo = monthKey(date);
-      weekUsage[assigneeId][wk] = (weekUsage[assigneeId][wk] || 0) + load;
-      monthUsage[assigneeId][mo] = (monthUsage[assigneeId][mo] || 0) + load;
-    });
-  }
+  const ledger = createCapacityLedger();
   const placed = {};
+  const allocations = {};
   const remaining = new Set(leaves.map((t) => t.id));
   const warnings = [];
   function isReady(id) {
@@ -577,6 +656,29 @@ function levelResources(tasks, cpmResult, resources, cal, sprints) {
       if (max === null || p.finish > max) max = p.finish;
     });
     return { start: min, finish: max };
+  }
+  const usesCapacity = (task) => !!(task.assigneeId && task.duration > 0 && resById[task.assigneeId]);
+  function placeContiguous(task, start) {
+    placed[task.id] = { start, finish: task.duration <= 0 ? start : cal.endFromStart(start, task.duration) };
+    if (task.duration > 0) allocations[task.id] = { alloc: dailyLoads(cal, start, task.duration), idle: [] };
+  }
+  function placeWithCapacity(task, start, pinned) {
+    const resource = resById[task.assigneeId];
+    const r = allocateWork(ledger, resource, cal, start, task.duration, { pinned });
+    if (r.ok) {
+      commitAllocation(ledger, resource.id, task.id, r.alloc);
+      placed[task.id] = { start: pinned ? start : r.alloc[0].date, finish: r.alloc[r.alloc.length - 1].date };
+      allocations[task.id] = { alloc: r.alloc, idle: r.idle };
+      return;
+    }
+    const alloc = dailyLoads(cal, start, task.duration);
+    commitAllocation(ledger, resource.id, task.id, alloc);
+    placed[task.id] = { start, finish: cal.endFromStart(start, task.duration) };
+    allocations[task.id] = { alloc, idle: [], overCapacity: true };
+    const limits = [`\u65E5\u6B21${DAILY_CAPACITY}\u4EBA\u65E5`];
+    if (resource.weeklyCapacity) limits.push(`\u9031\u6B21${resource.weeklyCapacity}\u4EBA\u65E5`);
+    if (resource.monthlyCapacity) limits.push(`\u6708\u6B21${resource.monthlyCapacity}\u4EBA\u65E5`);
+    warnings.push(`\u300C${task.name}\u300D\uFF08\u62C5\u5F53\u8005: ${resource.name}\u3001\u5DE5\u6570: ${task.duration}\u4EBA\u65E5\uFF09\u306F\u3001${limits.join("\u30FB")}\u306E\u7A3C\u50CD\u4E0A\u9650\u5185\u3067\u5272\u308A\u5F53\u3066\u304D\u308C\u307E\u305B\u3093\u3067\u3057\u305F\uFF08\u63A2\u7D22\u4E0A\u9650: ${ALLOCATION_SEARCH_WORKDAYS.toLocaleString("en-US")}\u7A3C\u50CD\u65E5\uFF09\u3002\u958B\u59CB\u65E5\u3092${fmtJP(start)}\u3068\u3057\u3001\u9023\u7D9A\u3059\u308B\u7A3C\u50CD\u65E5\u306B\u914D\u7F6E\u3057\u3066\u3044\u307E\u3059\u304C\u3001\u7A3C\u50CD\u4E0A\u9650\u3092\u8D85\u904E\u3057\u3066\u3044\u307E\u3059\u3002\u5DE5\u6570\u307E\u305F\u306F\u7A3C\u50CD\u4E0A\u9650\u306E\u898B\u76F4\u3057\u304C\u5FC5\u8981\u3067\u3059\u3002`);
   }
   let guardOuter = 0;
   while (remaining.size && guardOuter < leaves.length + 5) {
@@ -594,9 +696,8 @@ function levelResources(tasks, cpmResult, resources, cal, sprints) {
     const hasProgress = (task.progress || 0) > 0;
     if (hasProgress && task.startDate) {
       const start2 = cal.snapForward(task.startDate);
-      const finish = task.duration <= 0 ? start2 : cal.endFromStart(start2, task.duration);
-      if (task.assigneeId && task.duration > 0 && resById[task.assigneeId]) commit(task.assigneeId, start2, task.duration);
-      placed[id] = { start: start2, finish };
+      if (usesCapacity(task)) placeWithCapacity(task, start2, true);
+      else placeContiguous(task, start2);
       remaining.delete(id);
       continue;
     }
@@ -622,37 +723,36 @@ function levelResources(tasks, cpmResult, resources, cal, sprints) {
     }
     const sprintFloor = earliestSprintFloor(task.sprintIds, sprintById, cal);
     if (sprintFloor && sprintFloor > minStart) minStart = sprintFloor;
-    let start = cal.snapForward(minStart);
-    if (task.assigneeId && task.duration > 0 && resById[task.assigneeId]) {
-      let guard = 0;
-      while (guard < 2e3) {
-        guard++;
-        if (spanCheck(task.assigneeId, start, task.duration)) {
-          commit(task.assigneeId, start, task.duration);
-          placed[id] = { start, finish: cal.endFromStart(start, task.duration) };
-          break;
-        }
-        start = cal.shift(start, 1);
-      }
-      if (!placed[id]) {
-        start = cal.snapForward(minStart);
-        placed[id] = { start, finish: cal.endFromStart(start, task.duration) };
-        commit(task.assigneeId, start, task.duration);
-        const resource = resById[task.assigneeId];
-        const limits = ["\u65E5\u6B211\u4EBA\u65E5"];
-        if (resource.weeklyCapacity) limits.push(`\u9031\u6B21${resource.weeklyCapacity}\u4EBA\u65E5`);
-        if (resource.monthlyCapacity) limits.push(`\u6708\u6B21${resource.monthlyCapacity}\u4EBA\u65E5`);
-        warnings.push(`\u300C${task.name}\u300D\uFF08\u62C5\u5F53\u8005: ${resource.name}\u3001\u5DE5\u6570: ${task.duration}\u4EBA\u65E5\uFF09\u306F\u3001${limits.join("\u30FB")}\u306E\u7A3C\u50CD\u4E0A\u9650\u5185\u3067\u914D\u7F6E\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F\uFF08\u63A2\u7D22\u4E0A\u9650: 2,000\u7A3C\u50CD\u65E5\uFF09\u3002\u958B\u59CB\u65E5\u3092${fmtJP(start)}\u3068\u3057\u3066\u3044\u307E\u3059\u304C\u3001\u7A3C\u50CD\u4E0A\u9650\u3092\u8D85\u904E\u3057\u3066\u3044\u307E\u3059\u3002\u30BF\u30B9\u30AF\u306E\u5206\u5272\u307E\u305F\u306F\u7A3C\u50CD\u4E0A\u9650\u306E\u898B\u76F4\u3057\u304C\u5FC5\u8981\u3067\u3059\u3002`);
-      }
-    } else {
-      const finish = task.duration <= 0 ? start : cal.endFromStart(start, task.duration);
-      placed[id] = { start, finish };
-    }
+    const start = cal.snapForward(minStart);
+    if (usesCapacity(task)) placeWithCapacity(task, start, false);
+    else placeContiguous(task, start);
     remaining.delete(id);
   }
-  return { placed, warnings };
+  return { placed, warnings, allocations };
 }
-function autoScheduleStartDates(tasks, cal, projectStart, sprints, resources, opts = {}) {
+function buildDisplaySchedule(tasks, cpmResult, resources, cal, sprints, opts = {}) {
+  const schedule = new Map(cpmResult);
+  if (!opts.leveling) {
+    tasks.forEach((t) => {
+      const s = schedule.get(t.id);
+      if (!s || s.isSummary || !s.schedStart || !(t.duration > 0)) return;
+      schedule.set(t.id, { ...s, allocation: { alloc: dailyLoads(cal, s.schedStart, t.duration), idle: [] } });
+    });
+    return { schedule, levelWarnings: [] };
+  }
+  const { placed, warnings, allocations } = levelResources(tasks, cpmResult, resources || [], cal, sprints);
+  for (const [id, dates] of Object.entries(placed)) {
+    const prev = schedule.get(id) || {};
+    const next = { ...prev, schedStart: dates.start, schedFinish: dates.finish };
+    if (allocations[id]) next.allocation = allocations[id];
+    else delete next.allocation;
+    schedule.set(id, next);
+  }
+  rollupSummaries(tasks, schedule);
+  return { schedule, levelWarnings: warnings };
+}
+var AUTO_SCHEDULE_MAX_ITERATIONS = 20;
+function computeAutoSchedule(tasks, cal, projectStart, sprints, resources, opts = {}) {
   const auto = runCPM(tasks, cal, projectStart, sprints, { respectManualPins: false });
   const out = /* @__PURE__ */ new Map();
   tasks.forEach((t) => {
@@ -669,7 +769,28 @@ function autoScheduleStartDates(tasks, cal, projectStart, sprints, resources, op
     if (!opts.leveling && t && t.milestone && t.milestoneMode === "fixed") return;
     if (dates && dates.start) out.set(id, dates.start);
   });
-  return out;
+  let converged = true;
+  if (opts.leveling) {
+    converged = false;
+    const maxIterations = opts.maxIterations ?? AUTO_SCHEDULE_MAX_ITERATIONS;
+    for (let iter = 0; iter < maxIterations; iter++) {
+      const written = tasks.map((t) => out.has(t.id) ? { ...t, startDate: out.get(t.id) } : t);
+      const displayStart = deriveProjectStart(written, projectStart);
+      const display = runCPM(written, cal, displayStart, sprints);
+      const { placed: shown } = levelResources(written, display.result, resources || [], cal, sprints);
+      let changed = false;
+      Object.entries(shown).forEach(([id, dates]) => {
+        if (!out.has(id) || !dates || !dates.start || dates.start === out.get(id)) return;
+        out.set(id, dates.start);
+        changed = true;
+      });
+      if (!changed) {
+        converged = true;
+        break;
+      }
+    }
+  }
+  return { startDates: out, converged };
 }
 
 // src/lib/sprints.js
@@ -1281,19 +1402,7 @@ function computeSchedule(data, opts = {}) {
   const projectStart = deriveProjectStart(tasks, toISO(/* @__PURE__ */ new Date()));
   const cal = makeProjectCalendar(projectStart, calendarExceptions);
   const cpm = runCPM(tasks, cal, projectStart, sprints, { respectManualPins });
-  let schedule = cpm.result;
-  let levelWarnings = [];
-  if (leveling) {
-    const { placed, warnings } = levelResources(tasks, cpm.result, resources, cal, sprints);
-    const merged = new Map(cpm.result);
-    for (const [id, dates] of Object.entries(placed)) {
-      const prev = merged.get(id) || {};
-      merged.set(id, { ...prev, schedStart: dates.start, schedFinish: dates.finish });
-    }
-    rollupSummaries(tasks, merged);
-    schedule = merged;
-    levelWarnings = warnings;
-  }
+  const { schedule, levelWarnings } = buildDisplaySchedule(tasks, cpm.result, resources, cal, sprints, { leveling });
   let projectEnd = cpm.projectEnd;
   schedule.forEach((v) => {
     if (v.schedFinish && v.schedFinish > projectEnd) projectEnd = v.schedFinish;
@@ -1552,7 +1661,7 @@ function buildVersionSnapshot(data, schedule, name) {
   };
 }
 function applyAutoSchedule(data, projectStart, cal, opts = {}) {
-  const startDates = autoScheduleStartDates(
+  const { startDates, converged } = computeAutoSchedule(
     data.tasks,
     cal,
     projectStart,
@@ -1567,7 +1676,7 @@ function applyAutoSchedule(data, projectStart, cal, opts = {}) {
     if (t.startDate !== to) changed.push({ id: t.id, from: t.startDate ?? null, to });
     return { ...t, startDate: to };
   });
-  return { tasks, changed };
+  return { tasks, changed, converged };
 }
 function tryComputeSchedule(data, opts) {
   try {
@@ -1690,12 +1799,14 @@ function cmdPlan(positional, opts) {
   const before = beforeComputed.result;
   let proposedTasks = edited.tasks;
   let startDateChanges = [];
+  let rescheduleConverged = null;
   if (reschedule) {
     const editedProjectStart = deriveProjectStart(edited.tasks, toISO(/* @__PURE__ */ new Date()));
     const editedCal = makeProjectCalendar(editedProjectStart, edited.calendarExceptions || []);
     const applied = applyAutoSchedule(edited, editedProjectStart, editedCal, { leveling: afterLeveling });
     proposedTasks = applied.tasks;
     startDateChanges = applied.changed;
+    rescheduleConverged = applied.converged;
   }
   const snapshotName = `AI\u8ABF\u6574\u524D ${(/* @__PURE__ */ new Date()).toISOString().slice(0, 16).replace("T", " ")}`;
   const proposed = {
@@ -1762,6 +1873,8 @@ function cmdPlan(positional, opts) {
       projectEnd: { from: before.projectEnd, to: after.projectEnd },
       tasksWithChangedSchedule: scheduleChanges.filter((c) => c.kind === "changed").length,
       startDateWritebacks: startDateChanges.length,
+      // --reschedule 時のみ。false なら書き戻した開始日と表示（平準化後の配置日）の一致を確認できていない
+      rescheduleConverged,
       newlyCritical,
       noLongerCritical,
       snapshotName
@@ -1854,6 +1967,17 @@ function cmdExplain(positional, opts) {
       fixedMilestoneBackward: !!(task.milestone && task.milestoneMode === "fixed")
     },
     predecessors,
+    // 日別割当（平準化ONでは担当者の稼働上限に合わせて延長した割当、OFFでは開始日からの連続配分）。
+    // idleSegments は期間内で稼働上限により割当がなかった稼働日の区間と理由（daily=他タスクで埋まっている）。
+    allocation: s.allocation ? {
+      allocatedDays: s.allocation.alloc.length,
+      days: s.allocation.alloc,
+      idleSegments: idleSegments(s.allocation.idle, s.allocation.alloc).map((seg) => ({
+        ...seg,
+        taskNames: seg.taskIds.map((id) => nameOf(data.tasks, id))
+      })),
+      overCapacity: !!s.allocation.overCapacity
+    } : null,
     dependencyIssues: r.dependencyIssues.filter((i) => i.ids.includes(taskId))
   });
 }

@@ -1,5 +1,6 @@
 import React from "react";
 import { ROW_H } from "../constants.js";
+import { allocationProgressPoint } from "../lib/workAllocation.js";
 
 /** 稲妻線（進捗線）。一般的なイナズマ線／MS Project の進行状況線の作図ルールに合わせている。
  *
@@ -11,8 +12,9 @@ import { ROW_H } from "../constants.js";
  *     基準日へ戻る。点と点は斜めの直線で結ぶため、遅れ・進みのある行が三角形状に尖った、
  *     いわゆる「ギザギザ」の形になる。
  *  2. 各行の進捗点は「タスクバー上で進捗率が到達している位置」に打つ
- *     （0%＝バー左端、50%＝バー中央、100%＝バー右端）。位置は稼働日カレンダーで求めるため、
- *     ガントバーの進捗塗り分けの先端とちょうど一致する。基準日より左に尖れば遅れ、右なら前倒し。
+ *     （0%＝バー左端、100%＝バー右端）。進捗率は工数に対する割合として、日別割当（schedule の
+ *     allocation）の累積から位置を求めるため、ガントバーの進捗塗り分けの先端とちょうど一致する
+ *     （稼働上限により割当のない日や非稼働日は進捗の位置に数えない）。基準日より左に尖れば遅れ、右なら前倒し。
  *  3. 予定どおりの行は尖らせず、基準日の位置を通る垂直な線にする。すなわち、完了済み（100%）の
  *     タスクは到達位置が過去でも基準日まで引き上げ（凹ませない）、未着手（0%）で開始前の
  *     タスクは到達位置が未来でも基準日まで引き下げる（凸らせない）。
@@ -36,8 +38,12 @@ export function InazumaLine({ flat, schedule, xOf, dayWidth, cal, baseDateISO, r
     let px;
     if (t.milestone) {
       px = xOf(s.schedStart) + dayWidth / 2; // マイルストーンのマーク位置
+    } else if (s.allocation && s.allocation.alloc.length > 0) {
+      // 日別割当の累積で到達位置を求める（ガントバーの進捗塗りと同じ計算）
+      const pt = frac > 0 ? allocationProgressPoint(s.allocation.alloc, frac) : null;
+      px = pt ? xOf(pt.date) + pt.dayFraction * dayWidth : xOf(s.schedStart);
     } else {
-      // タスクが占める稼働日数（開始日・終了日を含む）を進捗率で按分した位置
+      // 日別割当を持たない行（折りたたみ中のグループ等）は、占める稼働日数（開始日・終了日を含む）を進捗率で按分した位置
       const spanDays = cal.workdaysBetween(s.schedStart, s.schedFinish) + 1;
       const completed = spanDays * frac;
       const whole = Math.floor(completed);
