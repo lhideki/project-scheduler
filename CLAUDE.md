@@ -24,10 +24,24 @@ npm run build     # project_scheduler.html を生成（リポジトリ直下に�
 | `npm run build:html` | `template.html` に `dist/bundle.js` と `dist/output.css` を差し込み `project_scheduler.html` を生成 |
 | `npm run build:docs` | `PROJECT_JSON_SCHEMA` から `docs/json-format.md` を生成 |
 | `npm run build:agent` | `src/agent/cli.js`（と `src/lib/`・メッセージカタログ・`intl-messageformat`）を esbuild でバンドルし `.claude/skills/schedule-adjust/cli.mjs` を生成（AIエージェント用Skillのランタイム。非minify。node_modules なしで動く） |
+| `npm run build:readme` | `README.en.md` から `README.md` を生成（`src/lib/readme.js`。下記「README」参照） |
+
+`npm run build:pages` は `npm run build` に含まれない。`project_scheduler.html` から Live Demo（GitHub Pages）の3ページを `_site/`（`index.html`＝Default・`ja/index.html`・`en/index.html`。コミットしない）に生成する（`src/lib/localizedPages.js`。下記「多言語対応（i18n）」参照）。hreflang のリンクに使う公開URLは環境変数 `PAGES_BASE_URL`（省略時は `https://lhideki.github.io/project-scheduler/`）。
 
 `npm run dev:js` で `dist/bundle.dev.js` を watch モードでビルドできる（非minify、デバッグ用）。ただし現状 `template.html` は本番ビルドのプレースホルダー差し込み専用なので、開発中の動作確認は `dist/bundle.dev.js` を手元のHTMLから読み込むか、`npm run build` を都度実行して `project_scheduler.html` をブラウザで開いて確認する。
 
-**重要**: `src/` 配下のソースを編集したら、必ず `npm run build` を実行してからビルド成果物（`project_scheduler.html`・`docs/json-format.md`・`.claude/skills/schedule-adjust/cli.mjs`）の差分も一緒にコミットすること。これらの成果物を手で直接編集しない（次回ビルドで上書きされる）。
+**重要**: `src/` 配下のソースや `README.en.md` を編集したら、必ず `npm run build` を実行してからビルド成果物（`project_scheduler.html`・`docs/json-format.md`・`.claude/skills/schedule-adjust/cli.mjs`・`README.md`）の差分も一緒にコミットすること。これらの成果物を手で直接編集しない（次回ビルドで上書きされる）。Pull Request の CI（`.github/workflows/ci.yml`）は、ビルドし直した成果物がコミット済みのものと一致しなければ失敗する。
+
+### README
+
+| ファイル | 言語 | Live Demo のリンク先 |
+| --- | --- | --- |
+| `README.md` | 英語（GitHub のリポジトリトップに表示される版）。**`README.en.md` からの生成物**（`npm run build:readme`） | Default（`https://lhideki.github.io/project-scheduler/`） |
+| `README.en.md` | 英語（手で編集する） | `/project-scheduler/en/` |
+| `README.ja.md` | 日本語（手で編集する） | `/project-scheduler/ja/` |
+
+- `README.md` は直接編集せず、`README.en.md` を編集して `npm run build`（または `npm run build:readme`）で再生成する。違いは先頭の生成物の注記と `[Live Demo](...)` のリンク先だけ（`src/lib/readme.js` の `buildDefaultReadme`）。`src/lib/readme.test.js` が、`README.md` が生成結果と一致すること・3ファイルの冒頭の切り替えリンク（`[Default](README.md) | [English](README.en.md) | [日本語](README.ja.md)`）・各 Live Demo リンクの向き先を確認する。
+- 英語と日本語の README は内容をそろえる（片方だけ更新しない）。README 用の画面画像は、英語版が `docs/images/en/`（英語UI）、日本語版が `docs/images/`。日本語のみの外部リンク（機能紹介・実践チュートリアル）は、英語版では「(Japanese)」の注記を付ける。
 
 ## ソース構成
 
@@ -56,12 +70,15 @@ src/
     jsonSchemaDoc.js             # PROJECT_JSON_SCHEMA から docs/json-format.md を生成（build:docs）
     linkedProject.js              # ?schedule= クエリのパース
     embeddedProject.js             # 共有用HTMLの埋め込みJSONのシリアライズ/パース（"<" のユニコードエスケープ）
+    localizedPages.js              # Live Demo の言語別ページ（/ja/・/en/）の生成（言語を固定する <meta>・hreflang）と、言語切り替え時の URL（build:pages）
+    readme.js                      # README.en.md から README.md を生成する（build:readme）
     seedData.js                   # サンプルデータ
     *.test.js                     # 上記各モジュールに対応するVitestユニットテスト
   dom/
     pointerDrag.js         # ポインタドラッグ・SVG座標変換・日付スケール（DOM API依存のため lib/ とは別）
     linkedProjectFile.js   # ?schedule= 用のFileSystemFileHandle永続化（IndexedDB）
     embeddedProjectDom.js  # 共有用HTMLの埋め込みデータ読み取り（readEmbeddedProject）とHTML生成（buildSharedHtml）
+    localizedPageDom.js    # Live Demo の言語別ページの言語の読み取り・言語切り替え時の URL の置き換え・共有用HTMLからの印の除去
     ganttPngExport.js      # ガント表示範囲のPNGコピー（copyVisibleGanttAsPng）
   agent/                   # AIエージェント用SkillのCLI（Node実行。src/lib/ を再利用する薄い層）
     engine.js                # src/lib/ から必要な関数を再エクスポートするだけの集約点
@@ -78,7 +95,7 @@ src/
     IconBtn.jsx、Tab.jsx
 ```
 
-リポジトリ直下の `scripts/` は生成スクリプト（`build-html.mjs`・`build-json-doc.mjs`・`build-agent.mjs`）、`.github/workflows/pages.yml` は `master` への push 時に `npm ci`→`npm run test`→`npm run build` を実行し、`project_scheduler.html` を GitHub Pages（Live Demo）へ公開するワークフロー（Node 24）。開発・テストには Node.js `^20.19.0 || ^22.12.0 || >=24.0.0`（20.19以上の20.x、22.12以上の22.x、または24以上。vitest 4 と vite 8 の engines の共通範囲で、21・23は対象外）が必要。Skill の `cli.mjs` は `target: "node18"` でバンドルしているため、実行は Node 18 以上で動く。
+リポジトリ直下の `scripts/` は生成スクリプト（`build-html.mjs`・`build-json-doc.mjs`・`build-agent.mjs`・`build-readme.mjs`・`build-pages.mjs`）。`.github/workflows/pages.yml` は `master` への push 時に `npm ci`→`npm run test`→`npm run build`→`npm run build:pages`（`PAGES_BASE_URL` は `actions/configure-pages` の `base_url`）を実行し、Default・`ja/`・`en/` の3ページを GitHub Pages（Live Demo）へまとめて公開するワークフロー、`.github/workflows/ci.yml` は Pull Request で `npm ci`→`npm run test`→`npm run build`（生成物がコミット済みと一致するかの確認を含む）→`npm run build:pages` を実行するワークフロー（どちらも Node 24）。開発・テストには Node.js `^20.19.0 || ^22.12.0 || >=24.0.0`（20.19以上の20.x、22.12以上の22.x、または24以上。vitest 4 と vite 8 の engines の共通範囲で、21・23は対象外）が必要。Skill の `cli.mjs` は `target: "node18"` でバンドルしているため、実行は Node 18 以上で動く。
 
 新しい純粋ロジック（日付計算・依存関係解決・スケジューリング・データ変換など、Reactやブラウザ固有APIに依存しない処理）を追加する場合は `src/lib/` に置き、対応する `*.test.js` を書くこと。DOM/ブラウザAPI（`window`・`document`・ポインタイベント等）に依存するが React 非依存のヘルパーは `src/dom/` に置く。Reactコンポーネントは `src/components/` に1コンポーネント1ファイルで置く。
 
@@ -112,8 +129,9 @@ bee（`@nulab/bee` 1.1 以上、Backlog公式CLI）経由で保存JSONと Backlo
 - **`src/lib/` は表示用の文字列を組み立てない**。依存関係の矛盾（`{code, severity, ids, params, ...}`）・スプリント矛盾（`reasons: {code, params}[]`・`sprintNames`）・リソース平準化の警告（`LevelWarning`: `{code, taskId, params}`）・日付軸（月の数字と曜日番号）のように、**コードとパラメータ**を返す。文言にする関数（`formatDependencyIssueMessage`・`dependencyIssueLabel`・`formatSprintConflictReason`・`formatSprintConflictSprintNames`・`formatLevelWarning`）は `src/lib/i18n.js` に集め、App（`useI18n` の `t`）と CLI（`createAppTranslator("ja")`）の両方から使う。`src/dom/` のエラーも `code` を持たせ、UI 側でカタログの文言にする（例: `ganttPngExport.js` → `pngErrors.<code>`）。
   - `src/lib/` は React・`use-intl` に依存しない。`use-intl` の `createTranslator`（`use-intl/core`）はリッチテキスト対応のため `react` を import するので、React 以外の翻訳関数 `createAppTranslator` は、`use-intl` が内部で使う `intl-messageformat` を同じ書式設定で直接使う（`use-intl` の結果と全キーで一致することを `src/lib/i18n.test.js` で確認している）。
   - 表示言語に依存するデータを lib が作る必要がある場合は、翻訳関数を引数で受け取る（例: `taskCellText` の `context.t`。省略時は日本語）。
-- **言語の選択**: 初回は `navigator.language` から判定し（`ja*` なら日本語、それ以外は英語。`detectLocale`）、ヘッダーのセレクトで切り替える。選択は `window.storage` の `pm_ui_locale` に保存し、切り替え時に `<html lang>` も更新する。UIの設定なので **Project JSON のスキーマ（`PROJECT_JSON_SCHEMA`）・エクスポート・バージョンスナップショット・共有用HTMLの埋め込みJSONには含めない**。linked / embedded 起動でも保存する（「起動モード」参照）。`template.html` の `lang="ja"` は起動直後の初期値。
+- **言語の選択**: 初回は `navigator.language` から判定し（`ja*` なら日本語、それ以外は英語。`detectLocale`）、ヘッダーのセレクトで切り替える。起動時の言語は `resolveInitialLocale`（ページで固定した言語 → 保存済みの選択 → ブラウザの言語）で決める。選択は `window.storage` の `pm_ui_locale` に保存し、切り替え時に `<html lang>` も更新する。UIの設定なので **Project JSON のスキーマ（`PROJECT_JSON_SCHEMA`）・エクスポート・バージョンスナップショット・共有用HTMLの埋め込みJSONには含めない**。linked / embedded 起動でも保存する（「起動モード」参照）。`template.html` の `lang="ja"` は起動直後の初期値。
 - **翻訳しないもの**: ユーザーが入力したデータ（タスク名・担当者名など）、サンプルデータ（`seedData()`）、日本の祝日名（`calendar.js`。`holidayName` は文言の既定値を持たず、名称未入力の休日指定は空文字を返す。休日かどうかは `null` かどうかで判定する）、`PROJECT_JSON_SCHEMA` の `description`（`docs/json-format.md`）、Skill（CLI のレポート・`SKILL.md`）。新規作成時の既定名（「新規タスク」・「バージョン N」等）は作成時の表示言語で付ける。
+- **Live Demo の言語別ページ**（`src/lib/localizedPages.js`・`src/dom/localizedPageDom.js`・`scripts/build-pages.mjs`）: Default（`/project-scheduler/`、上記のとおり自動判定）・`/project-scheduler/ja/`・`/project-scheduler/en/` の3ページ。`ja`/`en` のページは `<meta name="project-scheduler-locale" content="ja">` と `<html lang>` で言語を固定し、保存済みの選択（`pm_ui_locale`）より優先して起動する（開いただけでは `pm_ui_locale` を書き換えない）。3ページとも `<meta charset>` の直後に hreflang 付きの `<link rel="alternate">`（Default は `x-default`）を持つ。言語を固定したページでヘッダーから言語を切り替えると、**その場で表示を切り替えて保存し、`history.replaceState` で URL を切り替え先の言語のページ（hreflang のリンク先。クエリ・ハッシュは引き継ぐ）に置き換える**（再読み込みしないので編集中の状態・Undo 履歴・linked の関連付けを失わない。別オリジンなら URL は変えない）。Default のページでは URL を変えない。3ページは同じオリジンなので `pm_project`・`pm_versions` を共有する（言語を変えても同じプロジェクトが表示される）。配布用の `project_scheduler.html` は言語を固定せず hreflang も持たない。共有用HTMLの書き出し（`buildSharedHtml`）は言語の固定と hreflang を取り除く（開いた人の言語で表示する）。
 - WBS表のコピー＆ペースト: 書き出すテキストは表示中の言語（マイルストーンの `固定`/`Fixed` 等）、貼り付けはどちらの言語の表記も受け付ける（表記はカタログから集める。`catalogValues`）。
 - 言語を追加する場合は、`src/messages/<locale>.json` を追加し、`src/lib/i18n.js` の `LOCALES`・`MESSAGES`・`buildFormats`・`detectLocale` と、`header.languageName.<locale>`（全カタログ）を更新する。
 
@@ -222,3 +240,4 @@ npm run test:watch  # watchモード（開発中）
 - ヘッダーで日本語・英語を切り替えられ、リロード後も選んだ言語が保持されること（英語表示でユーザー入力データ・祝日名以外に日本語が残っていないこと）
 - サンプルデータ（`seedData()`）を開いた状態でスプリント矛盾アラート・スプリント期間重複警告・依存関係の矛盾が出ないこと（リソース平準化のON/OFFとも、日本語・英語とも）
 - タスク編集後、リロードしても内容が保持されること（localStorage永続化）
+- Live Demo の言語別ページに関わる変更をした場合は、`PAGES_BASE_URL=http://localhost:<port>/project-scheduler/ npm run build:pages` で生成した `_site/` を `/project-scheduler/` 配下で配信し、`ja/`・`en/` がブラウザの言語・保存済みの選択に関わらずその言語で開くこと、そのページで言語を切り替えると URL が切り替え先のページに変わること（Default では変わらないこと）

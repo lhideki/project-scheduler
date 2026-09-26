@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 // UI（React）側の実行環境。テストでのみ使う（src/lib/ の実行時コードは use-intl・React に依存しない）。
 import { createTranslator } from "use-intl/core";
 import {
-  LOCALES, MESSAGES, FORMATS, TIME_ZONE, createAppTranslator, detectLocale, normalizeLocale, catalogValues, dateArg,
+  LOCALES, MESSAGES, FORMATS, TIME_ZONE, createAppTranslator, detectLocale, normalizeLocale, resolveInitialLocale, catalogValues, dateArg,
   formatDependencyIssueMessage, dependencyIssueLabel, formatSprintConflictReason, formatSprintConflictSprintNames,
   formatLevelWarning,
 } from "./i18n.js";
@@ -112,6 +112,15 @@ describe("言語の判定", () => {
     expect(normalizeLocale("fr")).toBe(null);
     expect(normalizeLocale(null)).toBe(null);
     expect(normalizeLocale({ locale: "ja" })).toBe(null);
+  });
+
+  it("起動時の言語は ページの固定 → 保存済みの選択 → ブラウザの言語 の順に決める", () => {
+    expect(resolveInitialLocale({ pageLocale: "en", savedLocale: "ja", browserLanguage: "ja-JP" })).toBe("en");
+    expect(resolveInitialLocale({ pageLocale: "ja", savedLocale: "en", browserLanguage: "en-US" })).toBe("ja");
+    expect(resolveInitialLocale({ pageLocale: null, savedLocale: "en", browserLanguage: "ja-JP" })).toBe("en");
+    expect(resolveInitialLocale({ pageLocale: "fr", savedLocale: "xx", browserLanguage: "ja-JP" })).toBe("ja");
+    expect(resolveInitialLocale({ browserLanguage: "en-GB" })).toBe("en");
+    expect(resolveInitialLocale()).toBe("en");
   });
 });
 

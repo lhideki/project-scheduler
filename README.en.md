@@ -1,5 +1,3 @@
-<!-- This file is generated from README.en.md by `npm run build:readme`. Edit README.en.md instead. -->
-
 [Default](README.md) | [English](README.en.md) | [日本語](README.ja.md)
 
 # Project Scheduler
@@ -8,7 +6,7 @@
 
 Project Scheduler helps you test project plans against dependencies, milestones, sprint windows, and resource capacity. It runs entirely in your browser from a single HTML file, with no server or account required.
 
-[Live Demo](https://lhideki.github.io/project-scheduler/) | [Downloadable HTML](project_scheduler.html) | [Feature Overview (Japanese)](https://www.inoue-kobo.com/webservice/project-scheduler/) | [Hands-on Tutorial (Japanese)](https://www.inoue-kobo.com/webservice/tutorial-project-scheduler/) | [JSON Format](docs/json-format.md)
+[Live Demo](https://lhideki.github.io/project-scheduler/en/) | [Downloadable HTML](project_scheduler.html) | [Feature Overview (Japanese)](https://www.inoue-kobo.com/webservice/project-scheduler/) | [Hands-on Tutorial (Japanese)](https://www.inoue-kobo.com/webservice/tutorial-project-scheduler/) | [JSON Format](docs/json-format.md)
 
 ![WBS and Gantt view](docs/images/en/wbs-gantt.png)
 
@@ -23,7 +21,7 @@ Project Scheduler is a planning simulator, not a replacement for collaborative t
 
 ## Try it in 3 minutes
 
-1. Open the [Live Demo](https://lhideki.github.io/project-scheduler/).
+1. Open the [Live Demo](https://lhideki.github.io/project-scheduler/en/).
 2. In the sample WBS, change the effort for `基本設計` (Basic Design) from `6` to `10`.
 3. Select `Run auto-scheduling` in the upper-right corner.
 4. Check how the downstream dates, projected completion date, and critical path change.
@@ -162,7 +160,7 @@ Imports currently accept only `schemaVersion: 1`. Older JSON formats are not sup
 
 `project_scheduler.html` is a generated artifact. The build bundles the React source from `src/entry.jsx` with [esbuild](https://esbuild.github.io/) and embeds it with the [Tailwind CSS](https://tailwindcss.com/) output into a single HTML file. Do not edit the generated HTML directly; rebuild it after changing the source.
 
-Pushing to `master` runs the tests and build in GitHub Actions, then publishes the generated HTML to the [Live Demo](https://lhideki.github.io/project-scheduler/) on GitHub Pages as the Default, English, and Japanese pages. Pull requests run the same tests and build, and fail if a generated file is not up to date.
+Pushing to `master` runs the tests and build in GitHub Actions, then publishes the generated HTML to the [Live Demo](https://lhideki.github.io/project-scheduler/en/) on GitHub Pages as the Default, English, and Japanese pages. Pull requests run the same tests and build, and fail if a generated file is not up to date.
 
 ### Requirements
 
