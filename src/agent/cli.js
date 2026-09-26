@@ -27,7 +27,13 @@ import {
   detectDependencyIssues, SCHEDULE_DEPENDENCY_ISSUE_CODES,
   normalizeImportedProject,
   buildFlatList, isGroupId, effectivePredecessors,
+  createAppTranslator, formatDependencyIssueMessage, formatLevelWarning,
+  formatSprintConflictReason, formatSprintConflictSprintNames,
 } from "./engine.js";
+
+// src/lib/ はメッセージをコード＋パラメータで返すため、レポートの文言はアプリと同じメッセージカタログ
+// （src/messages/ja.json）から作る。CLI のレポートは日本語のまま出す。
+const tJa = createAppTranslator("ja");
 
 /* -------------------------------------------------------------------------------------------
    入出力
@@ -129,12 +135,14 @@ export function computeSchedule(data, opts = {}) {
   const cpm = runCPM(tasks, cal, projectStart, sprints, { respectManualPins });
 
   // アプリの schedule useMemo と同じ組み立て（src/lib/scheduling.js の buildDisplaySchedule）。
-  const { schedule, levelWarnings } = buildDisplaySchedule(tasks, cpm.result, resources, cal, sprints, { leveling });
+  const display = buildDisplaySchedule(tasks, cpm.result, resources, cal, sprints, { leveling });
+  const { schedule } = display;
+  const levelWarnings = display.levelWarnings.map(w => formatLevelWarning(tJa, w));
 
   let projectEnd = cpm.projectEnd;
   schedule.forEach(v => { if (v.schedFinish && v.schedFinish > projectEnd) projectEnd = v.schedFinish; });
 
-  const sprintConflicts = detectSprintConflicts(tasks, sprints, schedule);
+  const sprintConflicts = detectSprintConflicts(tasks, sprints, schedule).map(formatSprintConflict);
   // アプリのヘッダー「依存関係の矛盾」・WBS表・ガントチャートと同じ判定（src/lib/dependencyIssues.js）。
   const dependencyIssues = detectDependencyIssues(tasks, schedule, cal).map(issue => formatDependencyIssue(issue, tasks));
 
@@ -177,9 +185,19 @@ function nameOf(tasks, id) {
 /** src/lib/dependencyIssues.js の判定結果を、CLI の issue 形式（severity/code/ids/message）へ整形する。
  *  lib のメッセージはアプリの行ツールチップ用に対象タスク自身の名前を含まないため、循環以外は先頭に付ける。 */
 function formatDependencyIssue(issue, tasks) {
-  const { code, severity, ids, message, ...detail } = issue;
+  const { code, severity, ids, params, ...detail } = issue;
   const subject = code === "dependency-cycle" ? "" : `「${nameOf(tasks, ids[0])}」: `;
-  return { severity, code, ids, message: `${subject}${message}`, ...detail };
+  return { severity, code, ids, message: `${subject}${formatDependencyIssueMessage(tJa, issue)}`, ...detail };
+}
+
+/** src/lib/sprints.js の判定結果（理由はコード＋パラメータ）を、レポート用の文言（sprintName・reasons）へ整形する。 */
+function formatSprintConflict(conflict) {
+  const { taskId, name, wbsNo, reasons } = conflict;
+  return {
+    taskId, name, wbsNo,
+    sprintName: formatSprintConflictSprintNames(tJa, conflict),
+    reasons: reasons.map(r => formatSprintConflictReason(tJa, r)),
+  };
 }
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;

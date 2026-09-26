@@ -1,13 +1,15 @@
 import React, { useState, useMemo } from "react";
 import { Save, RotateCcw, Trash2, ArrowLeftRight } from "lucide-react";
-import { toISO, parseISO, fmtJP } from "../lib/calendar.js";
+import { toISO, parseISO } from "../lib/calendar.js";
 import { makeDateScale } from "../dom/pointerDrag.js";
 import { IconBtn } from "./IconBtn.jsx";
+import { useI18n } from "./I18nProvider.jsx";
 
 /* =========================================================================================
    12. バージョン管理・比較ビュー
    ========================================================================================= */
 export function VersionsView({ versions, onSave, onDelete, onRename, onRestore, resources }) {
+  const { t, fmtDate, fmtDateTime } = useI18n();
   const [checked, setChecked] = useState([]);
   const [name, setName] = useState("");
 
@@ -16,16 +18,16 @@ export function VersionsView({ versions, onSave, onDelete, onRename, onRestore, 
   const selected = versions.filter(v => checked.includes(v.id));
   const allTaskIds = useMemo(() => {
     const map = new Map();
-    selected.forEach(v => v.tasks.forEach(t => { if (!map.has(t.id)) map.set(t.id, t.name); }));
+    selected.forEach(v => v.tasks.forEach(x => { if (!map.has(x.id)) map.set(x.id, x.name); }));
     return Array.from(map.entries());
   }, [selected]);
 
   const { minDate, maxDate } = useMemo(() => {
     let mn = null, mx = null;
-    selected.forEach(v => v.tasks.forEach(t => {
-      if (!t.schedStart) return;
-      if (!mn || t.schedStart < mn) mn = t.schedStart;
-      if (!mx || t.schedFinish > mx) mx = t.schedFinish;
+    selected.forEach(v => v.tasks.forEach(x => {
+      if (!x.schedStart) return;
+      if (!mn || x.schedStart < mn) mn = x.schedStart;
+      if (!mx || x.schedFinish > mx) mx = x.schedFinish;
     }));
     return { minDate: mn || toISO(new Date()), maxDate: mx || toISO(new Date()) };
   }, [selected]);
@@ -39,8 +41,8 @@ export function VersionsView({ versions, onSave, onDelete, onRename, onRestore, 
   return (
     <div className="h-full overflow-auto p-4 space-y-5">
       <div className="flex items-center gap-2">
-        <input value={name} onChange={e => setName(e.target.value)} placeholder="バージョン名（例: 初期計画）" className="text-xs border border-slate-200 rounded px-2 py-1.5 w-56" />
-        <IconBtn icon={Save} label="現在のスケジュールを保存" onClick={() => { onSave(name || `バージョン ${versions.length + 1}`); setName(""); }} small />
+        <input value={name} onChange={e => setName(e.target.value)} placeholder={t("versions.namePlaceholder")} aria-label={t("versions.nameLabel")} className="text-xs border border-slate-200 rounded px-2 py-1.5 w-56" />
+        <IconBtn icon={Save} label={t("versions.save")} onClick={() => { onSave(name || t("versions.defaultName", { n: versions.length + 1 })); setName(""); }} small />
       </div>
 
       <div className="border border-slate-200 rounded-lg overflow-hidden">
@@ -48,42 +50,43 @@ export function VersionsView({ versions, onSave, onDelete, onRename, onRestore, 
           <thead className="bg-slate-50 text-slate-500">
             <tr>
               <th className="w-8" />
-              <th className="text-left px-3 py-2 font-medium">名前</th>
-              <th className="text-left px-3 py-2 font-medium">保存日時</th>
-              <th className="text-left px-3 py-2 font-medium">タスク数</th>
-              <th className="text-left px-3 py-2 font-medium">完了予定</th>
+              <th className="text-left px-3 py-2 font-medium">{t("versions.columns.name")}</th>
+              <th className="text-left px-3 py-2 font-medium">{t("versions.columns.savedAt")}</th>
+              <th className="text-left px-3 py-2 font-medium">{t("versions.columns.taskCount")}</th>
+              <th className="text-left px-3 py-2 font-medium">{t("versions.columns.finish")}</th>
               <th className="w-24" />
             </tr>
           </thead>
           <tbody>
-            {versions.length === 0 && <tr><td colSpan={6} className="text-center text-slate-400 py-6">保存されたバージョンはありません</td></tr>}
+            {versions.length === 0 && <tr><td colSpan={6} className="text-center text-slate-400 py-6">{t("versions.empty")}</td></tr>}
             {versions.map(v => {
-              const end = v.tasks.reduce((mx, t) => (t.schedFinish && t.schedFinish > mx ? t.schedFinish : mx), "");
+              const end = v.tasks.reduce((mx, x) => (x.schedFinish && x.schedFinish > mx ? x.schedFinish : mx), "");
               return (
                 <tr key={v.id} className="border-t border-slate-100">
-                  <td className="px-2 py-1.5"><input type="checkbox" checked={checked.includes(v.id)} onChange={() => toggle(v.id)} /></td>
+                  <td className="px-2 py-1.5"><input type="checkbox" checked={checked.includes(v.id)} onChange={() => toggle(v.id)} aria-label={t("versions.compareCheck", { name: v.name })} /></td>
                   <td className="px-3 py-1.5">
                     <input
                       value={v.name}
                       onChange={e => onRename(v.id, e.target.value)}
-                      title="クリックしてバージョン名を変更"
+                      title={t("versions.renameTitle")}
                       className="bg-transparent outline-none w-full rounded px-1 py-0.5 -mx-1 hover:bg-slate-50 focus:bg-white focus:ring-1 focus:ring-indigo-300"
                     />
                   </td>
-                  <td className="px-3 py-1.5 font-mono text-slate-500">{new Date(v.createdAt).toLocaleString("ja-JP")}</td>
+                  <td className="px-3 py-1.5 font-mono text-slate-500">{fmtDateTime(v.createdAt)}</td>
                   <td className="px-3 py-1.5 font-mono">{v.tasks.length}</td>
-                  <td className="px-3 py-1.5 font-mono">{fmtJP(end)}</td>
+                  <td className="px-3 py-1.5 font-mono">{fmtDate(end)}</td>
                   <td className="px-1">
                     <div className="flex items-center justify-end gap-2">
                       <button
                         onClick={() => onRestore(v.id)}
                         disabled={!v.hasFullSnapshot}
-                        title={v.hasFullSnapshot ? "現在のタスク・担当者をこのバージョンの状態に戻します" : "古い形式で保存されたバージョンのため復元できません"}
+                        title={v.hasFullSnapshot ? t("versions.restoreTitle") : t("versions.restoreUnsupportedTitle")}
+                        aria-label={v.hasFullSnapshot ? t("versions.restoreTitle") : t("versions.restoreUnsupportedTitle")}
                         className={v.hasFullSnapshot ? "text-slate-300 hover:text-indigo-600" : "text-slate-200 cursor-not-allowed"}
                       >
                         <RotateCcw size={13} />
                       </button>
-                      <button onClick={() => onDelete(v.id)} title="削除" className="text-slate-300 hover:text-red-500"><Trash2 size={13} /></button>
+                      <button onClick={() => onDelete(v.id)} title={t("common.delete")} aria-label={t("common.delete")} className="text-slate-300 hover:text-red-500"><Trash2 size={13} /></button>
                     </div>
                   </td>
                 </tr>
@@ -96,7 +99,7 @@ export function VersionsView({ versions, onSave, onDelete, onRename, onRestore, 
       {selected.length > 0 && (
         <div>
           <div className="flex items-center gap-3 mb-2 flex-wrap">
-            <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-1"><ArrowLeftRight size={14} />バージョン比較</h3>
+            <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-1"><ArrowLeftRight size={14} />{t("versions.compare")}</h3>
             {selected.map((v, i) => (
               <span key={v.id} className="flex items-center gap-1 text-[11px] text-slate-500">
                 <span style={{ width: 10, height: 10, background: colors[i % colors.length], display: "inline-block", borderRadius: 2 }} />{v.name}
@@ -110,9 +113,9 @@ export function VersionsView({ versions, onSave, onDelete, onRename, onRestore, 
                   <div style={{ width: 220 }} className="text-[11px] text-slate-600 truncate px-2 flex-shrink-0">{name}</div>
                   <svg width={chartWidth} height={26}>
                     {selected.map((v, vi) => {
-                      const t = v.tasks.find(x => x.id === id);
-                      if (!t || !t.schedStart) return null;
-                      const x1 = xOf(t.schedStart), x2 = xOf(t.schedFinish) + dayWidth;
+                      const vt = v.tasks.find(x => x.id === id);
+                      if (!vt || !vt.schedStart) return null;
+                      const x1 = xOf(vt.schedStart), x2 = xOf(vt.schedFinish) + dayWidth;
                       const y = 4 + vi * 6;
                       return <rect key={v.id} x={x1} y={y} width={Math.max(2, x2 - x1)} height={4} fill={colors[vi % colors.length]} opacity={0.9} rx={1} />;
                     })}

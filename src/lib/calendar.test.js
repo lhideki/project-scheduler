@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  buildHolidayMap, makeCalendar, weekKey, monthKey, fmtJP, fmtMD, cal_addDaysISO,
+  buildHolidayMap, makeCalendar, weekKey, monthKey, cal_addDaysISO,
   isWeekend, isWeekendStr, normalizeCalendarExceptions, parseISO, nonWorkdaySegments,
 } from "./calendar.js";
 
@@ -152,7 +152,7 @@ describe("makeCalendar（非稼働日カレンダーの編集）", () => {
       { date: "2024-01-01", type: "workday", name: "元日出社" },
     ]);
     expect(cal.holidayName("2024-01-10")).toBe("創立記念日");
-    expect(cal.holidayName("2024-03-21")).toBe("休日"); // 名称未入力時のフォールバック
+    expect(cal.holidayName("2024-03-21")).toBe(""); // 名称未入力（表示側で「休日」に置き換える）
     expect(cal.holidayName("2024-05-03")).toBe("憲法記念日"); // 国民の祝日
     expect(cal.holidayName("2024-01-01")).toBe(null); // 稼働日指定
     expect(cal.holidayName("2024-01-11")).toBe(null); // 通常の平日
@@ -173,11 +173,6 @@ describe("日付フォーマット・週/月キー", () => {
   });
   it("monthKeyはYYYY-MMを返す", () => {
     expect(monthKey("2024-01-10")).toBe("2024-01");
-  });
-  it("fmtJP/fmtMDは表示用フォーマットを返す", () => {
-    expect(fmtJP("2024-01-09")).toBe("2024/01/09");
-    expect(fmtMD("2024-01-09")).toBe("01/09");
-    expect(fmtJP("")).toBe("");
   });
   it("cal_addDaysISOは暦日ベースでn日シフトする（稼働日は考慮しない）", () => {
     expect(cal_addDaysISO("2024-01-09", 5)).toBe("2024-01-14");

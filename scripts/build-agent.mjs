@@ -1,6 +1,7 @@
 // src/agent/cli.js を esbuild でバンドルし、Skill から単体で実行できる
 // .claude/skills/schedule-adjust/cli.mjs を生成する。
-// src/lib/ は外部npm依存を持たないため、生成物は Node 標準機能だけで動く（node_modules 不要）。
+// src/lib/ が使う外部npm依存（メッセージカタログの翻訳に使う use-intl/core）も含めて1ファイルにバンドルするため、
+// 生成物は Node 標準機能だけで動く（node_modules 不要）。
 // ロジックの正は src/lib/。この生成物を手で編集しないこと（次回ビルドで上書きされる）。
 import { build } from "esbuild";
 import { mkdirSync } from "node:fs";

@@ -7,9 +7,11 @@
    開始日との矛盾・期日超過は「画面に表示しているスケジュール（schedule Map）」の上で、各依存関係の
    条件を candidateFromDep（CPM のフォワードパスと同じ計算）で評価し直して判定する。
    CPM・平準化の計算そのものには手を入れないため、表示とのずれが生じない。
+
+   表示用の文言は組み立てず、種別（code）とパラメータ（params）を返す。文言は src/lib/i18n.js の
+   formatDependencyIssueMessage でメッセージカタログから作る（App は表示中の言語、CLI は日本語）。
    ========================================================================================= */
 
-import { fmtJP } from "./calendar.js";
 import { buildFlatList, effectivePredecessors } from "./taskTree.js";
 import { formatDepLabel } from "./deps.js";
 import { candidateFromDep } from "./scheduling.js";
@@ -21,15 +23,6 @@ export const DEPENDENCY_ISSUE_CODES = Object.freeze({
   missing: "predecessor-missing",
   violation: "dependency-violation",
   overrun: "fixed-milestone-overrun",
-});
-
-/** 種別の表示ラベル（WBS表のツールチップ・ヘッダーの一覧ダイアログ用）。 */
-export const DEPENDENCY_ISSUE_LABELS = Object.freeze({
-  [DEPENDENCY_ISSUE_CODES.cycle]: "循環参照",
-  [DEPENDENCY_ISSUE_CODES.self]: "循環参照（自己依存）",
-  [DEPENDENCY_ISSUE_CODES.missing]: "存在しない先行タスク",
-  [DEPENDENCY_ISSUE_CODES.violation]: "開始日との矛盾",
-  [DEPENDENCY_ISSUE_CODES.overrun]: "固定期日の超過",
 });
 
 /** スケジュール（表示日程）を使って判定する種別。CLI の validate で、スケジュール計算の結果から追加する。 */
@@ -51,16 +44,25 @@ const CODE_ORDER = [
  * @property {"dependency-cycle"|"self-dependency"|"predecessor-missing"|"dependency-violation"|"fixed-milestone-overrun"} code
  * @property {"error"|"warning"} severity - 循環（自己依存を含む）・存在しない先行は error、日程の矛盾は warning
  * @property {string[]} ids - 警告を表示するタスクのID（循環はその循環に含まれる全タスク、それ以外は1件）
- * @property {string} message - 表示用メッセージ（循環以外は、対象タスク自身の名前を含まない）
+ * @property {Object} params - 表示用メッセージのパラメータ（src/lib/i18n.js の formatDependencyIssueMessage が使う。
+ *   タスク名は名前が空なら null。循環以外は、対象タスク自身の名前を含まない）
+ *   - dependency-cycle: {route: {id, name}[], memberEdges: {childId, childName, parentId, parentName}[]}
+ *   - self-dependency: {}
+ *   - predecessor-missing: {predecessorId}
+ *   - dependency-violation: {side: "start"|"finish", predName, label, required, actual}
+ *     （FS/SS は開始日、FF/SF は終了日で条件を説明する。required・actual は side 側の日付）
+ *   - fixed-milestone-overrun: {predName, earliest, fixedDate}（先行から求めた最早日が超過）
+ *     または {actual, fixedDate}（表示中の日程が超過）
  * @property {string} [predecessorId] - 原因となった先行タスクのID（循環以外）
  * @property {string[]} [path] - 循環の経路（先頭と末尾が同じID）
  * @property {string} [requiredDate] - 依存関係の条件を満たすのに必要な日付（開始日との矛盾・期日超過）
  * @property {string} [actualDate] - 表示中の日付（開始日との矛盾・期日超過）
  */
 
+/** 表示用のタスク名。存在しないタスクはID、名前が空のタスクは null（表示側で「無題のタスク」に置き換える）。 */
 function taskName(task, id) {
   if (!task) return id;
-  return task.name && task.name.trim() ? task.name : "（無題のタスク）";
+  return task.name && task.name.trim() ? task.name : null;
 }
 
 function isFixedMilestone(t) {
@@ -229,23 +231,26 @@ export function findDependencyCycles(tasks) {
   return cycles;
 }
 
-/** 循環の表示用メッセージ（例: 循環参照: 「A」→「B」→「G」→「A」（「B」はグループ「G」の配下））。 */
-function cycleMessage(cycle, byId) {
-  const nameOf = id => `「${taskName(byId[id], id)}」`;
-  const route = cycle.path.map(nameOf).join("→");
-  const notes = cycle.memberEdges.map(([child, parent]) => `${nameOf(child)}はグループ${nameOf(parent)}の配下`);
-  return `循環参照: ${route}${notes.length ? `（${notes.join("、")}）` : ""}`;
+/** 循環の表示用パラメータ（例: 循環参照: 「A」→「B」→「G」→「A」（「B」はグループ「G」の配下））。 */
+function cycleParams(cycle, byId) {
+  return {
+    route: cycle.path.map(id => ({ id, name: taskName(byId[id], id) })),
+    memberEdges: cycle.memberEdges.map(([child, parent]) => ({
+      childId: child, childName: taskName(byId[child], child),
+      parentId: parent, parentName: taskName(byId[parent], parent),
+    })),
+  };
 }
 
-/** 開始日との矛盾の表示用メッセージ。FS/SS は開始日、FF/SF は終了日で条件を説明する。 */
-function violationMessage(cal, dep, predName, predDates, required, sched) {
+/** 開始日との矛盾の表示用パラメータ。FS/SS は開始日、FF/SF は終了日で条件を説明する。 */
+function violationParams(cal, dep, predName, predDates, required, sched) {
   const label = formatDepLabel(dep);
   if (dep.type === "FF" || dep.type === "SF") {
     const base = dep.type === "FF" ? predDates.finish : predDates.start;
     const requiredFinish = cal.shift(base, dep.lag);
-    return `先行「${predName}」（${label}）の条件では ${fmtJP(requiredFinish)} 以降に終了する必要がありますが、${fmtJP(sched.schedFinish)} に終了しています`;
+    return { side: "finish", predName, label, required: requiredFinish, actual: sched.schedFinish };
   }
-  return `先行「${predName}」（${label}）の条件では ${fmtJP(required)} 以降に開始する必要がありますが、${fmtJP(sched.schedStart)} に開始しています`;
+  return { side: "start", predName, label, required, actual: sched.schedStart };
 }
 
 /**
@@ -300,7 +305,7 @@ export function detectScheduleDependencyIssues(tasks, schedule, cal, opts = {}) 
           predecessorId: binding.dep.id,
           requiredDate: earliest,
           actualDate: s.schedFinish,
-          message: `先行「${taskName(byId[binding.dep.id], binding.dep.id)}」から求めた最早日（${fmtJP(earliest)}）が固定期日（${fmtJP(t.fixedDate)}）を超過しています`,
+          params: { predName: taskName(byId[binding.dep.id], binding.dep.id), earliest, fixedDate: t.fixedDate },
         });
         return;
       }
@@ -310,7 +315,7 @@ export function detectScheduleDependencyIssues(tasks, schedule, cal, opts = {}) 
           severity: "warning",
           ids: [t.id],
           actualDate: s.schedFinish,
-          message: `表示中の日程（${fmtJP(s.schedFinish)}）が固定期日（${fmtJP(t.fixedDate)}）を超過しています`,
+          params: { actual: s.schedFinish, fixedDate: t.fixedDate },
         });
         return;
       }
@@ -326,7 +331,7 @@ export function detectScheduleDependencyIssues(tasks, schedule, cal, opts = {}) 
         predecessorId: dep.id,
         requiredDate: required,
         actualDate: s.schedStart,
-        message: violationMessage(cal, dep, taskName(byId[dep.id], dep.id), predDates, required, s),
+        params: violationParams(cal, dep, taskName(byId[dep.id], dep.id), predDates, required, s),
       });
     });
   });
@@ -358,7 +363,7 @@ export function detectDependencyIssues(tasks, schedule = null, cal = null) {
       severity: "error",
       ids: cycle.ids,
       path: cycle.path,
-      message: cycleMessage(cycle, byId),
+      params: cycleParams(cycle, byId),
     });
   });
 
@@ -368,7 +373,7 @@ export function detectDependencyIssues(tasks, schedule = null, cal = null) {
       severity: "error",
       ids: [taskId],
       predecessorId: taskId,
-      message: "自分自身を先行タスクにしています（この依存関係は計算に使われていません）",
+      params: {},
     });
   });
 
@@ -378,7 +383,7 @@ export function detectDependencyIssues(tasks, schedule = null, cal = null) {
       severity: "error",
       ids: [taskId],
       predecessorId,
-      message: `先行タスク「${predecessorId}」が存在しません（削除済みのタスクを参照しているため、この依存関係は計算に使われていません）`,
+      params: { predecessorId },
     });
   });
 

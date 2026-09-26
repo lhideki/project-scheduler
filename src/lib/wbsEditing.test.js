@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   taskCellText, taskCellPatch, taskRowText, taskRowPatch, copiedTaskRowPatch,
 } from "./wbsEditing.js";
+import { createAppTranslator } from "./i18n.js";
 
 const resources = [{ id: "r1", name: "佐藤" }, { id: "r2", name: "鈴木" }];
 const sprints = [{ id: "s1", name: "Sprint 1" }, { id: "s2", name: "Sprint 2" }];
@@ -54,6 +55,7 @@ describe("WBSクリップボード変換", () => {
     expect(taskCellPatch(milestone, "progress", "完了", context).patch).toEqual({ progress: 100 });
 
     const flexible = task({ milestone: true, milestoneMode: "flexible", startDate: "2026-08-01", duration: 0 });
+    expect(taskCellText(flexible, "assignee", context)).toBe("柔軟");
     const schedule = new Map([[flexible.id, { schedStart: "2026-09-15" }]]);
     expect(taskCellText(flexible, "startDate", { ...context, schedule })).toBe("2026-09-15");
   });
@@ -84,5 +86,41 @@ describe("WBSクリップボード変換", () => {
       name: "グループ",
       predecessors: [{ id: "p1", type: "FS", lag: 0 }],
     });
+  });
+});
+
+describe("WBSクリップボード変換（多言語）", () => {
+  const tEn = createAppTranslator("en");
+  const milestone = task({ milestone: true, milestoneMode: "fixed", fixedDate: "2026-10-01", duration: 0 });
+
+  it("書き出すテキストは表示中の言語（context.t）に合わせる", () => {
+    expect(taskCellText(milestone, "assignee", { ...context, t: tEn })).toBe("Fixed");
+    expect(taskCellText({ ...milestone, milestoneMode: "flexible" }, "assignee", { ...context, t: tEn })).toBe("Flexible");
+    expect(taskRowText(milestone, { ...context, t: tEn }).split("\t")[3]).toBe("Fixed");
+    // 省略時は日本語
+    expect(taskRowText(milestone, context).split("\t")[3]).toBe("固定");
+  });
+
+  it("貼り付けはどちらの言語の表記も受け付ける（大文字・小文字は区別しない）", () => {
+    const flexible = { ...milestone, milestoneMode: "flexible" };
+    ["固定", "Fixed", "fixed", "FIXED"].forEach(text => {
+      expect(taskCellPatch(flexible, "assignee", text, context).patch, text).toEqual({ milestoneMode: "fixed" });
+    });
+    ["柔軟", "Flexible", "flexible", ""].forEach(text => {
+      expect(taskCellPatch(milestone, "assignee", text, context).patch, text).toEqual({ milestoneMode: "flexible" });
+    });
+    ["完了", "済", "Done", "done", "true", "yes"].forEach(text => {
+      expect(taskCellPatch(milestone, "progress", text, context).patch, text).toEqual({ progress: 100 });
+    });
+    ["未完了", "Not done", "not done", "false", "no", ""].forEach(text => {
+      expect(taskCellPatch(milestone, "progress", text, context).patch, text).toEqual({ progress: 0 });
+    });
+    expect(taskCellPatch(milestone, "assignee", "Fix", context).ok).toBe(false);
+  });
+
+  it("英語で書き出した行を日本語表示の行へ貼り付けられる（逆も同様）", () => {
+    const flexible = { ...milestone, milestoneMode: "flexible" };
+    expect(taskRowPatch(flexible, taskRowText(milestone, { ...context, t: tEn }), context).patch.milestoneMode).toBe("fixed");
+    expect(taskRowPatch(flexible, taskRowText(milestone, context), { ...context, t: tEn }).patch.milestoneMode).toBe("fixed");
   });
 });

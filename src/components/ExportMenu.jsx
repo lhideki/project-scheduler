@@ -1,10 +1,12 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Download, ChevronDown } from "lucide-react";
+import { useI18n } from "./I18nProvider.jsx";
 
 /* =========================================================================================
    書き出しメニュー（JSON書き出し・共有用HTML書き出し・Mermaidコピーをまとめたドロップダウン）
    ========================================================================================= */
 export function ExportMenu({ items }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const rootRef = useRef(null);
 
@@ -33,7 +35,7 @@ export function ExportMenu({ items }) {
         className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 hover:bg-slate-100 transition-colors"
       >
         <Download size={13} />
-        <span>書き出し</span>
+        <span>{t("header.export")}</span>
         <ChevronDown size={12} />
       </button>
       {open && (

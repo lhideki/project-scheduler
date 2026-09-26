@@ -1,4 +1,5 @@
 import { buildFlatList } from "./taskTree.js";
+import { MESSAGES, DEFAULT_LOCALE } from "./i18n.js";
 
 export const PROJECT_SCHEMA_VERSION = 1;
 
@@ -244,12 +245,15 @@ export async function copyTextToClipboard(text) {
   ta.select();
   const ok = document.execCommand("copy");
   document.body.removeChild(ta);
-  if (!ok) throw new Error("execCommand('copy') に失敗しました");
+  if (!ok) throw new Error("execCommand('copy') failed");
 }
 
-/** Mermaid のタスク名として問題になる記号（コロン・カンマ・改行）を除去する */
-export function escapeMermaidText(str) {
-  return String(str ?? "").replace(/[:,\n]/g, " ").replace(/\s+/g, " ").trim() || "（無題）";
+/** Mermaid のタイトル・名前が空のタスクの既定の表記（呼び出し側が表示中の言語の文言を渡さない場合。メッセージカタログの mermaid.*）。 */
+const DEFAULT_MERMAID_LABELS = MESSAGES[DEFAULT_LOCALE].mermaid;
+
+/** Mermaid のタスク名として問題になる記号（コロン・カンマ・改行）を除去する。空なら untitled（既定は「（無題）」）にする。 */
+export function escapeMermaidText(str, untitled = DEFAULT_MERMAID_LABELS.untitled) {
+  return String(str ?? "").replace(/[:,\n]/g, " ").replace(/\s+/g, " ").trim() || untitled;
 }
 
 /** Mermaid の task id として使える文字列に変換する（先頭は英字に揃える） */
@@ -263,14 +267,18 @@ export function toMermaidId(str) {
  * リソース平準化をすべて織り込んだ確定スケジュール）から Mermaid の gantt 記法テキストを生成する。
  * Mermaid 自身の依存解決（after）は使わず、schedStart/schedFinish をそのまま開始日・終了日として
  * 書き出すことで、このツールの計算結果を厳密に反映する。グループはセクション（section）として出力する。
+ * labels にはタイトルと名前が空のタスクの表記を、表示中の言語の文言で渡す（省略時は日本語）。
+ * @param {{title?: string, untitled?: string}} [labels]
  */
-export function generateMermaidGantt(tasks, schedule) {
+export function generateMermaidGantt(tasks, schedule, labels = {}) {
+  const title = labels.title ?? DEFAULT_MERMAID_LABELS.title;
+  const untitled = labels.untitled ?? DEFAULT_MERMAID_LABELS.untitled;
   const flatAll = buildFlatList(tasks, new Set());
-  const lines = ["gantt", "    title プロジェクトスケジュール", "    dateFormat YYYY-MM-DD", "    excludes weekends"];
+  const lines = ["gantt", `    title ${escapeMermaidText(title, untitled)}`, "    dateFormat YYYY-MM-DD", "    excludes weekends"];
   const usedIds = new Set();
   flatAll.forEach(t => {
     if (t.hasChildren) {
-      lines.push(`    section ${escapeMermaidText(t.name)}`);
+      lines.push(`    section ${escapeMermaidText(t.name, untitled)}`);
       return;
     }
     const s = schedule.get(t.id);
@@ -288,7 +296,7 @@ export function generateMermaidGantt(tasks, schedule) {
     if ((t.progress || 0) >= 100) tags.push("done");
     else if ((t.progress || 0) > 0) tags.push("active");
     const tagStr = tags.length ? `${tags.join(", ")}, ` : "";
-    const name = escapeMermaidText(t.name);
+    const name = escapeMermaidText(t.name, untitled);
     const endField = t.milestone ? "0d" : s.schedFinish;
     lines.push(`    ${name} :${tagStr}${id}, ${s.schedStart}, ${endField}`);
   });

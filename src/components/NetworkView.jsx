@@ -2,10 +2,10 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import { LayoutGrid, Trash2, X } from "lucide-react";
 import { buildFlatList } from "../lib/taskTree.js";
 import { formatDepLabel } from "../lib/deps.js";
-import { fmtJP } from "../lib/calendar.js";
 import { startPointerDrag, svgPointFromRef } from "../dom/pointerDrag.js";
 import { DEP_TYPES } from "../constants.js";
 import { IconBtn } from "./IconBtn.jsx";
+import { useI18n } from "./I18nProvider.jsx";
 
 /* =========================================================================================
    9. ネットワーク図（依存関係図）ビュー
@@ -13,6 +13,7 @@ import { IconBtn } from "./IconBtn.jsx";
 const NETWORK_PALETTE = ["#6366F1", "#F59E0B", "#10B981", "#EC4899", "#0EA5E9", "#8B5CF6", "#EF4444", "#14B8A6"];
 
 export function NetworkView({ tasks, setTasks, schedule, selectedId, setSelectedId }) {
+  const { t: tr, fmtDate } = useI18n();
   const byId = useMemo(() => Object.fromEntries(tasks.map(t => [t.id, t])), [tasks]);
   const hasChildrenOf = useMemo(() => {
     const s = new Set(); tasks.forEach(t => { if (t.parentId) s.add(t.parentId); }); return s;
@@ -169,7 +170,7 @@ export function NetworkView({ tasks, setTasks, schedule, selectedId, setSelected
     <div ref={containerRef} className="h-full overflow-auto bg-slate-50 relative">
       <div className="sticky top-0 z-10 bg-white border-b border-slate-200 px-3 py-2 text-xs text-slate-500 flex items-center gap-2 flex-wrap">
         <div className="flex items-center gap-2.5 flex-wrap ml-auto">
-          <IconBtn icon={LayoutGrid} label="整頓表示" onClick={tidyLayout} small />
+          <IconBtn icon={LayoutGrid} label={tr("network.tidy")} onClick={tidyLayout} small />
           {rootGroups.length > 1 && rootGroups.map(g => (
             <span key={g.id} className="flex items-center gap-1 text-[11px] text-slate-500 whitespace-nowrap">
               <span style={{ width: 8, height: 8, borderRadius: 2, background: outlineColor[g.id] }} className="flex-shrink-0" />
@@ -241,11 +242,13 @@ export function NetworkView({ tasks, setTasks, schedule, selectedId, setSelected
                 strokeDasharray={isGroup ? "4,2" : undefined} />
               <rect x={4} y={6} width={4} height={nodeH - 12} rx={2} fill={colorFor(t.id)} opacity={0.85} />
               <text x={16} y={20} fontSize={11.5} fontWeight={600} fill="#1E293B">{t.name.length > 15 ? t.name.slice(0, 15) + "…" : t.name}</text>
-              <text x={16} y={36} fontSize={9.5} fill="#64748B">{fmtJP(s?.schedStart)} 〜 {fmtJP(s?.schedFinish)}</text>
+              <text x={16} y={36} fontSize={9.5} fill="#64748B">{tr("gantt.tooltip.period", { start: fmtDate(s?.schedStart), finish: fmtDate(s?.schedFinish) })}</text>
               <text x={16} y={48} fontSize={9.5} fill={s?.critical ? "#DC2626" : "#94A3B8"}>
                 {isGroup
-                  ? `グループ（配下 ${countDescendantLeaves(t.id)}件）`
-                  : t.milestone ? (t.milestoneMode === "fixed" ? "固定マイルストーン" : "マイルストーン") : `フロート ${s?.float ?? "-"}日`}
+                  ? tr("network.group", { count: countDescendantLeaves(t.id) })
+                  : t.milestone
+                    ? (t.milestoneMode === "fixed" ? tr("network.fixedMilestone") : tr("network.milestone"))
+                    : tr("network.float", { days: String(s?.float ?? "-") })}
               </text>
               <circle cx={nodeW} cy={nodeH / 2} r={5} fill="white" stroke="#4F46E5" strokeWidth={1.5}
                 style={{ cursor: "crosshair" }}
@@ -263,9 +266,9 @@ export function NetworkView({ tasks, setTasks, schedule, selectedId, setSelected
           <select value={edgeEdit.type} onChange={e => { updateEdge(edgeEdit.from, edgeEdit.to, { type: e.target.value }); setEdgeEdit({ ...edgeEdit, type: e.target.value }); }} className="text-xs border border-slate-200 rounded px-1 py-0.5">
             {DEP_TYPES.map(dt => <option key={dt} value={dt}>{dt}</option>)}
           </select>
-          <input type="number" value={edgeEdit.lag} onChange={e => { const v = parseInt(e.target.value || "0", 10); updateEdge(edgeEdit.from, edgeEdit.to, { lag: v }); setEdgeEdit({ ...edgeEdit, lag: v }); }} className="w-14 text-xs border border-slate-200 rounded px-1 py-0.5 font-mono" title="ラグ（workday）" />
-          <button onClick={() => removeEdge(edgeEdit.from, edgeEdit.to)} className="text-red-500 hover:text-red-700"><Trash2 size={13} /></button>
-          <button onClick={() => setEdgeEdit(null)} className="text-slate-400 hover:text-slate-700"><X size={13} /></button>
+          <input type="number" value={edgeEdit.lag} onChange={e => { const v = parseInt(e.target.value || "0", 10); updateEdge(edgeEdit.from, edgeEdit.to, { lag: v }); setEdgeEdit({ ...edgeEdit, lag: v }); }} className="w-14 text-xs border border-slate-200 rounded px-1 py-0.5 font-mono" title={tr("network.lagTitle")} aria-label={tr("network.lagTitle")} />
+          <button onClick={() => removeEdge(edgeEdit.from, edgeEdit.to)} title={tr("network.removeEdge")} aria-label={tr("network.removeEdge")} className="text-red-500 hover:text-red-700"><Trash2 size={13} /></button>
+          <button onClick={() => setEdgeEdit(null)} title={tr("common.close")} aria-label={tr("common.close")} className="text-slate-400 hover:text-slate-700"><X size={13} /></button>
         </div>
       )}
     </div>

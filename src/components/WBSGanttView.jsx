@@ -4,11 +4,11 @@ import {
   AlertTriangle, ArrowLeftRight, Info, Diamond, GripVertical, Zap, Flame,
   Undo2, Redo2, Copy, ClipboardPaste,
 } from "lucide-react";
-import { toISO, parseISO, fmtJP, fmtMD, cal_addDaysISO, isWeekend, nonWorkdaySegments } from "../lib/calendar.js";
+import { toISO, parseISO, cal_addDaysISO, isWeekend, nonWorkdaySegments } from "../lib/calendar.js";
 import { idleSegments, consecutiveDateRuns, allocationProgressPoint, DAILY_CAPACITY } from "../lib/workAllocation.js";
 import { uid, buildFlatList, allDescendantIds } from "../lib/taskTree.js";
 import { sprintColorForId } from "../lib/sprints.js";
-import { DEPENDENCY_ISSUE_LABELS } from "../lib/dependencyIssues.js";
+import { formatDependencyIssueMessage, dependencyIssueLabel } from "../lib/i18n.js";
 import { copyTextToClipboard } from "../lib/exportUtils.js";
 import { copyVisibleGanttAsPng, escapeXmlText } from "../dom/ganttPngExport.js";
 import {
@@ -26,6 +26,7 @@ import { DepInput } from "./DepInput.jsx";
 import { GanttDeps } from "./GanttDeps.jsx";
 import { InazumaLine } from "./InazumaLine.jsx";
 import { TaskDetailModal } from "./TaskDetailModal.jsx";
+import { useI18n } from "./I18nProvider.jsx";
 
 /* =========================================================================================
    8. WBS + ガントチャート ビュー
@@ -56,6 +57,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
   onRedo,
   onNotify,
 }, ref) {
+  const { t: tr, format, fmtDate, fmtDateCompact, fmtMonthDay } = useI18n();
   const flat = useMemo(() => buildFlatList(tasks, collapsed), [tasks, collapsed]);
   // WBS表の列幅合計（左ペインの実表示幅）。列幅を変更するとここも連動して再計算される。
   const wbsTotalWidth = useMemo(() => Object.values(colWidths).reduce((a, b) => a + b, 0), [colWidths]);
@@ -203,11 +205,13 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
   // 非割当日（稼働上限により割当のない稼働日）の理由の表示文言。週次・月次上限は「上限に達したため割当なし」と
   // 表し、特定の曜日に休んでいるように読める表現は避ける（早い日から割り当てた計画上の割当にすぎないため）。
   function idleReasonLabel(seg, resource) {
-    if (seg.reason === "weekly") return `週次上限（${resource?.weeklyCapacity ?? "-"}人日/週）に到達`;
-    if (seg.reason === "monthly") return `月次上限（${resource?.monthlyCapacity ?? "-"}人日/月）に到達`;
-    const names = seg.taskIds.map(id => `「${taskNameById.get(id) || id}」`);
-    const shown = names.length > 2 ? `${names.slice(0, 2).join("")}ほか${names.length - 2}件` : names.join("");
-    return `他タスク${shown}に割当済み（日次${DAILY_CAPACITY}人日）`;
+    if (seg.reason === "weekly") return tr("gantt.idle.weekly", { value: String(resource?.weeklyCapacity ?? "-") });
+    if (seg.reason === "monthly") return tr("gantt.idle.monthly", { value: String(resource?.monthlyCapacity ?? "-") });
+    const names = seg.taskIds.map(id => tr("gantt.idle.taskName", { name: taskNameById.get(id) || id }));
+    const shown = names.length > 2
+      ? tr("gantt.idle.namesAndMore", { names: names.slice(0, 2).join(tr("gantt.idle.nameSeparator")), count: names.length - 2 })
+      : names.join(tr("gantt.idle.nameSeparator"));
+    return tr("gantt.idle.daily", { names: shown, value: DAILY_CAPACITY });
   }
   // 日別割当（schedule の allocation）の要約。非割当の区間は多くても3区間まで表示する。
   function allocationTooltipLines(t, allocation) {
@@ -215,40 +219,47 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
     const lines = [];
     const resource = resourceById.get(t.assigneeId);
     if (allocation.idle.length > 0) {
-      lines.push(`稼働上限により割当のない稼働日: ${allocation.idle.length}日（割当 ${allocation.alloc.length}日）`);
+      lines.push(tr("gantt.tooltip.idleDays", { idle: allocation.idle.length, allocated: allocation.alloc.length }));
       const segs = idleSegments(allocation.idle, allocation.alloc);
+      const bullet = tr("common.bullet");
       segs.slice(0, 3).forEach(seg => {
-        const range = seg.start === seg.end ? fmtMD(seg.start) : `${fmtMD(seg.start)}〜${fmtMD(seg.end)}`;
-        lines.push(`・${range} ${idleReasonLabel(seg, resource)}`);
+        const range = seg.start === seg.end
+          ? fmtMonthDay(seg.start)
+          : tr("gantt.tooltip.range", { start: fmtMonthDay(seg.start), end: fmtMonthDay(seg.end) });
+        lines.push(`${bullet}${range} ${idleReasonLabel(seg, resource)}`);
       });
-      if (segs.length > 3) lines.push(`・ほか${segs.length - 3}区間`);
+      if (segs.length > 3) lines.push(`${bullet}${tr("gantt.tooltip.moreSegments", { count: segs.length - 3 })}`);
     }
     const partial = allocation.alloc.filter(a => a.limitedBy);
     if (partial.length > 0) {
-      const shown = partial.slice(0, 3).map(a => `${fmtMD(a.date)}（${Math.round(a.load * 100) / 100}人日）`).join("、");
-      lines.push(`一部のみ割当: ${shown}${partial.length > 3 ? ` ほか${partial.length - 3}日` : ""}`);
+      const shown = partial.slice(0, 3)
+        .map(a => tr("gantt.tooltip.partialDay", { date: fmtMonthDay(a.date), load: String(Math.round(a.load * 100) / 100) }))
+        .join(tr("common.listSeparator"));
+      lines.push(partial.length > 3
+        ? tr("gantt.tooltip.partialMore", { days: shown, count: partial.length - 3 })
+        : tr("gantt.tooltip.partial", { days: shown }));
     }
-    if (allocation.overCapacity) lines.push("稼働上限内に割り当てきれず、上限を超過しています");
+    if (allocation.overCapacity) lines.push(tr("gantt.tooltip.overCapacity"));
     return lines;
   }
   // バー本体のホバー情報（開始日・期日・担当者・進捗率等）を、TaskDetailModalの要約としてテキスト化する。
   function buildBarTooltipLines(t, s) {
     const lines = [`${t.wbsNo ? `${t.wbsNo} ` : ""}${t.name}`];
-    lines.push(`${fmtJP(s.schedStart)} 〜 ${fmtJP(s.schedFinish)}`);
+    lines.push(tr("gantt.tooltip.period", { start: fmtDate(s.schedStart), finish: fmtDate(s.schedFinish) }));
     if (t.milestone) {
-      lines.push(t.milestoneMode === "fixed" ? `固定マイルストーン（期日 ${fmtJP(t.fixedDate)}）` : "柔軟マイルストーン");
-      lines.push((t.progress || 0) >= 100 ? "完了済み" : "未完了");
-      if (t.assigneeId) lines.push(`担当: ${resourceNameById.get(t.assigneeId) || ""}`);
+      lines.push(t.milestoneMode === "fixed" ? tr("gantt.tooltip.fixedMilestone", { date: fmtDate(t.fixedDate) }) : tr("gantt.tooltip.flexibleMilestone"));
+      lines.push((t.progress || 0) >= 100 ? tr("taskDetail.completed") : tr("common.notDone"));
+      if (t.assigneeId) lines.push(tr("gantt.tooltip.assignee", { name: resourceNameById.get(t.assigneeId) || "" }));
     } else {
-      lines.push(`工数 ${t.duration ?? 0}人日 ・ 進捗 ${Math.max(0, Math.min(100, t.progress || 0))}%`);
-      if (t.assigneeId) lines.push(`担当: ${resourceNameById.get(t.assigneeId) || ""}`);
+      lines.push(tr("gantt.tooltip.effortProgress", { duration: String(t.duration ?? 0), progress: Math.max(0, Math.min(100, t.progress || 0)) }));
+      if (t.assigneeId) lines.push(tr("gantt.tooltip.assignee", { name: resourceNameById.get(t.assigneeId) || "" }));
       lines.push(...allocationTooltipLines(t, s.allocation));
-      if (nonWorkdaySegments(cal, s.schedStart, s.schedFinish).length > 0) lines.push("この期間に非稼働日を含みます");
+      if (nonWorkdaySegments(cal, s.schedStart, s.schedFinish).length > 0) lines.push(tr("gantt.tooltip.includesNonWorkdays"));
     }
     if (t.sprintIds && t.sprintIds.length > 0) {
-      lines.push(`スプリント: ${t.sprintIds.map(id => sprintNameById.get(id)).filter(Boolean).join("・")}`);
+      lines.push(tr("gantt.tooltip.sprints", { names: t.sprintIds.map(id => sprintNameById.get(id)).filter(Boolean).join(tr("gantt.tooltip.sprintSeparator")) }));
     }
-    lines.push(`余裕 ${s.float}日${s.critical ? "（クリティカル）" : ""}`);
+    lines.push(tr(s.critical ? "gantt.tooltip.floatCritical" : "gantt.tooltip.float", { days: String(s.float) }));
     return lines;
   }
 
@@ -463,7 +474,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
   const WBS_CLIPBOARD_TYPE = "application/x-project-scheduler-wbs";
   function clipboardContextFor(taskId) {
     return {
-      resources, sprints, idToNo, noToId, schedule,
+      resources, sprints, idToNo, noToId, schedule, t: tr,
       hasChildren: !!flat.find(t => t.id === taskId)?.hasChildren,
     };
   }
@@ -504,7 +515,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
     setHasClipboard(true);
     e.clipboardData.setData("text/plain", payload.text);
     try { e.clipboardData.setData(WBS_CLIPBOARD_TYPE, JSON.stringify(payload)); } catch (err) { /* text/plainのみで継続 */ }
-    onNotify?.(payload.kind === "row" ? "行をクリップボードにコピーしました" : "セルをクリップボードにコピーしました");
+    onNotify?.(payload.kind === "row" ? tr("wbs.toast.rowCopied") : tr("wbs.toast.cellCopied"));
   }
   function payloadFromPasteEvent(e) {
     const custom = e.clipboardData?.getData(WBS_CLIPBOARD_TYPE);
@@ -540,12 +551,12 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
       patch = parsed.patch;
     }
     if (!Object.keys(patch).length) {
-      onNotify?.("貼り付けできる値がありません");
+      onNotify?.(tr("wbs.toast.nothingToPaste"));
       return false;
     }
     updateTask(target.id, patch);
-    if (errors.length) onNotify?.("互換性のないセルを除いて貼り付けました");
-    else onNotify?.(payload.kind === "row" || selection.kind === "row" ? "行を貼り付けました" : "セルを貼り付けました");
+    if (errors.length) onNotify?.(tr("wbs.toast.pastedPartially"));
+    else onNotify?.(payload.kind === "row" || selection.kind === "row" ? tr("wbs.toast.rowPasted") : tr("wbs.toast.cellPasted"));
     return true;
   }
   function handleClipboardPaste(e) {
@@ -560,9 +571,9 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
     setHasClipboard(true);
     try {
       await copyTextToClipboard(payload.text);
-      onNotify?.(payload.kind === "row" ? "行をクリップボードにコピーしました" : "セルをクリップボードにコピーしました");
+      onNotify?.(payload.kind === "row" ? tr("wbs.toast.rowCopied") : tr("wbs.toast.cellCopied"));
     } catch (err) {
-      onNotify?.("クリップボードへのコピーに失敗しました");
+      onNotify?.(tr("toast.copyFailed"));
     }
   }
   function pasteSelection() {
@@ -698,7 +709,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
     const id = uid("t");
     const today = toISO(new Date());
     const newTask = {
-      id, name: asMilestone ? "新規マイルストーン" : "新規タスク", parentId, order: 0,
+      id, name: asMilestone ? tr("wbs.newMilestoneName") : tr("wbs.newTaskName"), parentId, order: 0,
       startDate: today, duration: asMilestone ? 0 : 1, assigneeId: null, progress: 0,
       milestone: !!asMilestone, milestoneMode: asMilestone ? "flexible" : undefined,
       fixedDate: asMilestone ? today : undefined, predecessors: [],
@@ -742,7 +753,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
     if (!id) return;
     const t = tasks.find(x => x.id === id);
     if (!t) return;
-    requestConfirm(`「${t.name}」を削除します。子タスクがある場合はまとめて削除されます。よろしいですか？`, () => {
+    requestConfirm(tr("wbs.confirmDelete", { name: t.name }), () => {
       const toRemove = new Set([id, ...allDescendantIds(tasks, id)]);
       setTasks(prev =>
         prev
@@ -750,7 +761,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
           .map(x => ({ ...x, predecessors: (x.predecessors || []).filter(d => !toRemove.has(d.id)) }))
       );
       if (selectedId === id || toRemove.has(selectedId)) setSelectedId(null);
-    }, "削除する");
+    }, tr("common.deleteConfirm"));
   }
   // id を明示指定できるようにする（Tabキー操作は選択状態の更新を待たずに対象行へ直接適用するため）
   function indentTask(explicitId) {
@@ -838,7 +849,8 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
       cells.push({
         iso, x: xOf(iso),
         weekend: !working && weekend,
-        holiday: !working ? (cal.holidayName(iso) || undefined) : undefined,
+        // 名称未入力の休日指定は holidayName が空文字を返すため、null かどうかで判定する
+        holiday: !working && cal.holidayName(iso) != null,
         // 稼働日指定で稼働扱いにした日（土日・祝日・休日指定を上書きした日を含む）
         workdayOverride: working && forcedWorkdays.has(iso),
       });
@@ -860,6 +872,17 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
       .filter(Boolean);
   }, [sprints, minDate, dayWidth, chartWidth]);
 
+  // 日付軸の目盛りの表示。月名・曜日は表示中の言語で書式化する（lib の timeAxis は数字と曜日番号だけを返す）。
+  function minorLabel(m) {
+    return tier === "month" ? format.dateTime(parseISO(m.key), "month") : m.label;
+  }
+  function minorSubLabel(m) {
+    return m.weekday != null ? format.dateTime(parseISO(m.key), "weekdayNarrow") : "";
+  }
+  function sprintBandLabel(sprint) {
+    return sprint.theme ? tr("gantt.sprintBandLabel", { name: sprint.name, theme: sprint.theme }) : sprint.name;
+  }
+
   // PNGコピー用に日付ヘッダー（スプリント帯・日付軸）をSVGネイティブ要素だけで組み立てる。
   // 画面上のヘッダーはTailwind CSSクラスのHTML要素で描画しているが、そちらをそのままPNG化に
   // 使うと（foreignObject経由になるため）Chromeがcanvasを「tainted」として扱いエクスポートを
@@ -878,7 +901,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
     let s = `<rect x="0" y="0" width="${chartWidth}" height="${GANTT_HEADER_H}" fill="#F8FAFC" />`;
     sprintBands.forEach(({ sprint, x, w }) => {
       const c = sprintColorForId(sprint.id);
-      const label = sprint.theme ? `${sprint.name}・${sprint.theme}` : sprint.name;
+      const label = sprintBandLabel(sprint);
       const clipId = clipRect(x, 0, w, bandH);
       s += `<rect x="${x}" y="0" width="${w}" height="${bandH}" fill="${c.band}" />`;
       s += `<text clip-path="url(#${clipId})" x="${x + w / 2}" y="${bandH - 5}" font-size="9" font-weight="500" text-anchor="middle" fill="${c.text}">${escapeXmlText(label)}</text>`;
@@ -898,8 +921,9 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
       const textX = tier === "day" ? m.x + m.w / 2 : m.x + 4;
       const anchor = tier === "day" ? "middle" : "start";
       const clipId = clipRect(m.x, bandH + majorH, m.w, GANTT_HEADER_H - (bandH + majorH));
-      s += `<text clip-path="url(#${clipId})" x="${textX}" y="${bandH + majorH + 10}" font-size="9" text-anchor="${anchor}" fill="${color}">${escapeXmlText(m.label)}</text>`;
-      if (m.sub) s += `<text clip-path="url(#${clipId})" x="${textX}" y="${bandH + majorH + 20}" font-size="9" text-anchor="${anchor}" fill="${color}">${escapeXmlText(m.sub)}</text>`;
+      s += `<text clip-path="url(#${clipId})" x="${textX}" y="${bandH + majorH + 10}" font-size="9" text-anchor="${anchor}" fill="${color}">${escapeXmlText(minorLabel(m))}</text>`;
+      const sub = minorSubLabel(m);
+      if (sub) s += `<text clip-path="url(#${clipId})" x="${textX}" y="${bandH + majorH + 20}" font-size="9" text-anchor="${anchor}" fill="${color}">${escapeXmlText(sub)}</text>`;
     });
     return `<defs>${clipDefs}</defs>` + s;
   }
@@ -918,46 +942,47 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
   return (
     <div className="flex flex-col h-full" onKeyDown={handleViewKeyDown}>
       <div className="flex items-center gap-2 px-3 py-2 border-b border-slate-200 bg-white flex-wrap">
-        <IconBtn icon={Plus} label="タスク" onClick={() => addTask(false)} small />
-        <IconBtn icon={Diamond} label="マイルストーン" onClick={() => addTask(true)} small />
+        <IconBtn icon={Plus} label={tr("wbs.toolbar.task")} onClick={() => addTask(false)} small />
+        <IconBtn icon={Diamond} label={tr("wbs.toolbar.milestone")} onClick={() => addTask(true)} small />
         <div className="w-px h-5 bg-slate-200 mx-1" />
-        <IconBtn icon={ChevronRight} label="インデント" onClick={() => indentTask()} small disabled={!selectedId} />
-        <IconBtn icon={ChevronDown} label="アウトデント" onClick={() => outdentTask()} small disabled={!selectedId} />
+        <IconBtn icon={ChevronRight} label={tr("wbs.toolbar.indent")} onClick={() => indentTask()} small disabled={!selectedId} />
+        <IconBtn icon={ChevronDown} label={tr("wbs.toolbar.outdent")} onClick={() => outdentTask()} small disabled={!selectedId} />
         <div className="w-px h-5 bg-slate-200 mx-1" />
-        <IconBtn icon={Trash2} label="削除" onClick={() => deleteTask()} small danger disabled={!selectedId} iconOnly />
+        <IconBtn icon={Trash2} label={tr("common.delete")} onClick={() => deleteTask()} small danger disabled={!selectedId} iconOnly />
         <div className="w-px h-5 bg-slate-200 mx-1" />
-        <IconBtn icon={Info} label="詳細" onClick={() => selectedId && setDetailId(selectedId)} small disabled={!selectedId} iconOnly />
+        <IconBtn icon={Info} label={tr("wbs.toolbar.details")} onClick={() => selectedId && setDetailId(selectedId)} small disabled={!selectedId} iconOnly />
         <div className="w-px h-5 bg-slate-200 mx-1" />
-        <IconBtn icon={Copy} label="コピー" onClick={copySelection} small disabled={!selectedId} iconOnly />
-        <IconBtn icon={ClipboardPaste} label="貼り付け" onClick={pasteSelection} small disabled={!selectedId || !hasClipboard} iconOnly />
+        <IconBtn icon={Copy} label={tr("wbs.toolbar.copy")} onClick={copySelection} small disabled={!selectedId} iconOnly />
+        <IconBtn icon={ClipboardPaste} label={tr("wbs.toolbar.paste")} onClick={pasteSelection} small disabled={!selectedId || !hasClipboard} iconOnly />
         <div className="w-px h-5 bg-slate-200 mx-1" />
-        <IconBtn icon={Undo2} label="元に戻す" onClick={onUndo} small disabled={!canUndo} iconOnly />
-        <IconBtn icon={Redo2} label="やり直す" onClick={onRedo} small disabled={!canRedo} iconOnly />
+        <IconBtn icon={Undo2} label={tr("wbs.toolbar.undo")} onClick={onUndo} small disabled={!canUndo} iconOnly />
+        <IconBtn icon={Redo2} label={tr("wbs.toolbar.redo")} onClick={onRedo} small disabled={!canRedo} iconOnly />
         <div className="flex-1" />
         <div className="flex items-center gap-1">
           <ArrowLeftRight size={13} className="text-slate-400 flex-shrink-0" />
           <select
             value={baselineVersionId || ""}
             onChange={e => setBaselineVersionId(e.target.value || null)}
-            title="指定したバージョンをWBS番号で突き合わせ、各タスクの下に基準バージョンの行を重ねて表示します"
+            title={tr("wbs.compare.title")}
+            aria-label={tr("wbs.compare.title")}
             className="text-[11px] border border-slate-200 rounded px-1.5 py-1 bg-white text-slate-600 max-w-[150px]"
           >
-            <option value="">比較しない</option>
+            <option value="">{tr("wbs.compare.none")}</option>
             {versions.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
           </select>
           {baselineUnsupported && (
-            <span className="text-[10px] text-amber-600 flex items-center gap-0.5" title="このバージョンはWBS番号を保存していないため比較できません（再保存すると比較できるようになります）">
-              <AlertTriangle size={11} />非対応
+            <span className="text-[10px] text-amber-600 flex items-center gap-0.5" title={tr("wbs.compare.unsupportedTitle")}>
+              <AlertTriangle size={11} />{tr("wbs.compare.unsupported")}
             </span>
           )}
         </div>
         <div className="w-px h-5 bg-slate-200 mx-1" />
-        <IconBtn icon={Zap} label="稲妻線" onClick={() => setShowInazuma(v => !v)} small active={showInazuma} />
+        <IconBtn icon={Zap} label={tr("gantt.toolbar.inazuma")} onClick={() => setShowInazuma(v => !v)} small active={showInazuma} />
         {showInazuma && (
-          <div className="flex items-center gap-1" title="進捗基準日（稲妻線・今日の縦線の基準）">
+          <div className="flex items-center gap-1" title={tr("gantt.toolbar.baseDate")}>
             <input
               type="date"
-              aria-label="進捗基準日（稲妻線・今日の縦線の基準）"
+              aria-label={tr("gantt.toolbar.baseDate")}
               value={baseDateISO}
               onChange={e => setBaseDateOverride(e.target.value || null)}
               className="text-[11px] border border-slate-200 rounded px-1.5 py-1 bg-white text-slate-600"
@@ -967,17 +992,17 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                 type="button"
                 onClick={() => setBaseDateOverride(null)}
                 className="text-[10px] text-indigo-600 hover:underline whitespace-nowrap"
-                title="本日に戻す"
-              >今日</button>
+                title={tr("gantt.toolbar.resetBaseDateTitle")}
+              >{tr("gantt.toolbar.today")}</button>
             )}
           </div>
         )}
-        <IconBtn icon={Flame} label="クリティカルパス" onClick={() => setShowCritical(v => !v)} small active={showCritical} />
+        <IconBtn icon={Flame} label={tr("gantt.toolbar.criticalPath")} onClick={() => setShowCritical(v => !v)} small active={showCritical} />
         <div className="w-px h-5 bg-slate-200 mx-1" />
-        <IconBtn icon={Save} label="バージョンを保存" onClick={() => onSaveVersion(`バージョン ${versions.length + 1}`)} small />
+        <IconBtn icon={Save} label={tr("wbs.toolbar.saveVersion")} onClick={() => onSaveVersion(tr("versions.defaultName", { n: versions.length + 1 }))} small />
         <div className="w-px h-5 bg-slate-200 mx-1" />
-        <IconBtn icon={ZoomOut} label="ズームアウト（日→週→月へ縮約）" iconOnly onClick={() => setDayWidth(w => stepDayWidth(w, -1))} small disabled={dayWidth <= MIN_DAY_WIDTH} />
-        <IconBtn icon={ZoomIn} label="ズームイン" iconOnly onClick={() => setDayWidth(w => stepDayWidth(w, +1))} small disabled={dayWidth >= MAX_DAY_WIDTH} />
+        <IconBtn icon={ZoomOut} label={tr("gantt.toolbar.zoomOut")} iconOnly onClick={() => setDayWidth(w => stepDayWidth(w, -1))} small disabled={dayWidth <= MIN_DAY_WIDTH} />
+        <IconBtn icon={ZoomIn} label={tr("gantt.toolbar.zoomIn")} iconOnly onClick={() => setDayWidth(w => stepDayWidth(w, +1))} small disabled={dayWidth >= MAX_DAY_WIDTH} />
       </div>
 
       <div className="flex flex-1 min-h-0">
@@ -995,16 +1020,16 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
           <div style={{ width: wbsTotalWidth, minWidth: "100%" }}>
           <div className="sticky top-0 z-10 bg-slate-50 border-b border-slate-200 flex text-[11px] font-medium text-slate-500" style={{ height: GANTT_HEADER_H }}>
             <div style={{ width: colWidths.grip }} className="relative flex items-end justify-center"><ColResizeHandle onResizeStart={e => startColResize(e, "grip")} onReset={e => { e.stopPropagation(); resetColWidth("grip"); }} /></div>
-            <div style={{ width: colWidths.wbs }} className="relative px-2 py-2 flex items-end font-mono" title="WBS番号をクリックして行を選び、コピー／貼り付けできます">WBS<ColResizeHandle onResizeStart={e => startColResize(e, "wbs")} onReset={e => { e.stopPropagation(); resetColWidth("wbs"); }} /></div>
-            <div style={{ width: colWidths.name }} className="relative px-2 py-2 flex items-end">タスク名<ColResizeHandle onResizeStart={e => startColResize(e, "name")} onReset={e => { e.stopPropagation(); resetColWidth("name"); }} /></div>
-            <div style={{ width: colWidths.start }} className="relative px-1 py-2 flex items-end">開始日<ColResizeHandle onResizeStart={e => startColResize(e, "start")} onReset={e => { e.stopPropagation(); resetColWidth("start"); }} /></div>
-            <div style={{ width: colWidths.duration }} className="relative px-1 py-2 flex items-end" title="工数（人日）。小数可（例: 0.5, 2.5）">工数<ColResizeHandle onResizeStart={e => startColResize(e, "duration")} onReset={e => { e.stopPropagation(); resetColWidth("duration"); }} /></div>
-            <div style={{ width: colWidths.finish }} className="relative px-1 py-2 flex items-end">終了日<ColResizeHandle onResizeStart={e => startColResize(e, "finish")} onReset={e => { e.stopPropagation(); resetColWidth("finish"); }} /></div>
-            <div style={{ width: colWidths.assignee }} className="relative px-1 py-2 flex items-end" title="通常タスクは担当者、マイルストーンは固定/柔軟を選択">担当<ColResizeHandle onResizeStart={e => startColResize(e, "assignee")} onReset={e => { e.stopPropagation(); resetColWidth("assignee"); }} /></div>
-            <div style={{ width: colWidths.sprint }} className="relative px-1 py-2 flex items-end" title="紐付けるスプリント（グループには設定できません）">スプリント<ColResizeHandle onResizeStart={e => startColResize(e, "sprint")} onReset={e => { e.stopPropagation(); resetColWidth("sprint"); }} /></div>
-            <div style={{ width: colWidths.progress }} className="relative px-1 py-2 flex items-end" title="進捗率（%）。グループはその配下タスクの進捗率の平均を自動表示します">進捗<ColResizeHandle onResizeStart={e => startColResize(e, "progress")} onReset={e => { e.stopPropagation(); resetColWidth("progress"); }} /></div>
-            <div style={{ width: colWidths.deps }} className="relative px-1 py-2 flex items-end" title="WBS番号で指定します（例: 1.2FS+1）。グループの行に設定すると配下の全タスクに適用されます">先行<ColResizeHandle onResizeStart={e => startColResize(e, "deps")} onReset={e => { e.stopPropagation(); resetColWidth("deps"); }} /></div>
-            <div style={{ width: colWidths.actions }} className="relative px-1 py-2 flex items-end justify-center" title="削除"><ColResizeHandle onResizeStart={e => startColResize(e, "actions")} onReset={e => { e.stopPropagation(); resetColWidth("actions"); }} /></div>
+            <div style={{ width: colWidths.wbs }} className="relative px-2 py-2 flex items-end font-mono" title={tr("wbs.columns.wbsTitle")}>WBS<ColResizeHandle onResizeStart={e => startColResize(e, "wbs")} onReset={e => { e.stopPropagation(); resetColWidth("wbs"); }} /></div>
+            <div style={{ width: colWidths.name }} className="relative px-2 py-2 flex items-end">{tr("wbs.columns.name")}<ColResizeHandle onResizeStart={e => startColResize(e, "name")} onReset={e => { e.stopPropagation(); resetColWidth("name"); }} /></div>
+            <div style={{ width: colWidths.start }} className="relative px-1 py-2 flex items-end">{tr("wbs.columns.start")}<ColResizeHandle onResizeStart={e => startColResize(e, "start")} onReset={e => { e.stopPropagation(); resetColWidth("start"); }} /></div>
+            <div style={{ width: colWidths.duration }} className="relative px-1 py-2 flex items-end" title={tr("wbs.columns.durationTitle")}>{tr("wbs.columns.duration")}<ColResizeHandle onResizeStart={e => startColResize(e, "duration")} onReset={e => { e.stopPropagation(); resetColWidth("duration"); }} /></div>
+            <div style={{ width: colWidths.finish }} className="relative px-1 py-2 flex items-end">{tr("wbs.columns.finish")}<ColResizeHandle onResizeStart={e => startColResize(e, "finish")} onReset={e => { e.stopPropagation(); resetColWidth("finish"); }} /></div>
+            <div style={{ width: colWidths.assignee }} className="relative px-1 py-2 flex items-end" title={tr("wbs.columns.assigneeTitle")}>{tr("wbs.columns.assignee")}<ColResizeHandle onResizeStart={e => startColResize(e, "assignee")} onReset={e => { e.stopPropagation(); resetColWidth("assignee"); }} /></div>
+            <div style={{ width: colWidths.sprint }} className="relative px-1 py-2 flex items-end" title={tr("wbs.columns.sprintTitle")}>{tr("wbs.columns.sprint")}<ColResizeHandle onResizeStart={e => startColResize(e, "sprint")} onReset={e => { e.stopPropagation(); resetColWidth("sprint"); }} /></div>
+            <div style={{ width: colWidths.progress }} className="relative px-1 py-2 flex items-end" title={tr("wbs.columns.progressTitle")}>{tr("wbs.columns.progress")}<ColResizeHandle onResizeStart={e => startColResize(e, "progress")} onReset={e => { e.stopPropagation(); resetColWidth("progress"); }} /></div>
+            <div style={{ width: colWidths.deps }} className="relative px-1 py-2 flex items-end" title={tr("wbs.columns.depsTitle")}>{tr("wbs.columns.deps")}<ColResizeHandle onResizeStart={e => startColResize(e, "deps")} onReset={e => { e.stopPropagation(); resetColWidth("deps"); }} /></div>
+            <div style={{ width: colWidths.actions }} className="relative px-1 py-2 flex items-end justify-center" title={tr("common.delete")}><ColResizeHandle onResizeStart={e => startColResize(e, "actions")} onReset={e => { e.stopPropagation(); resetColWidth("actions"); }} /></div>
           </div>
           {rowDrag && (() => {
             const resolved = resolveDropTarget(rowDrag.dragId, rowDrag.insertIndex);
@@ -1043,7 +1068,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                 <div style={{ width: colWidths.grip }} className="flex items-center justify-center">
                   <span
                     onPointerDown={e => startRowDrag(e, t.id)}
-                    title="ドラッグで並べ替え"
+                    title={tr("wbs.row.dragTitle")}
                     className="text-slate-300 hover:text-slate-500"
                     style={{ cursor: "grab", touchAction: "none" }}
                   >
@@ -1055,7 +1080,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                     type="button"
                     data-wbs-row-id={t.id}
                     onFocus={() => { activeSelectionRef.current = { kind: "row", taskId: t.id }; setSelectedId(t.id); }}
-                    title="行を選択（コピー／貼り付け対象）"
+                    title={tr("wbs.row.selectTitle")}
                     className="w-full text-left rounded px-1 outline-none focus:bg-indigo-100 focus:ring-1 focus:ring-indigo-300"
                   >
                     {t.wbsNo}
@@ -1074,7 +1099,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                     {!t.hasChildren && (
                       <button
                         onClick={(e) => { e.stopPropagation(); toggleMilestone(t.id); }}
-                        title={t.milestone ? "クリックでタスクに変更" : "クリックでマイルストーンに変更"}
+                        title={t.milestone ? tr("wbs.row.toTask") : tr("wbs.row.toMilestone")}
                         className="flex-shrink-0"
                       >
                         <Diamond size={10} className={t.milestone ? "text-amber-500" : "text-slate-300 hover:text-slate-400"} fill={t.milestone ? "#F59E0B" : "none"} />
@@ -1117,7 +1142,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                       <span
                         data-dependency-issue={severity}
                         role="img"
-                        aria-label={`依存関係の矛盾（${rowIssues.length + hiddenIssues.length}件）`}
+                        aria-label={tr("dependencyIssues.rowIconLabel", { count: rowIssues.length + hiddenIssues.length })}
                         onPointerEnter={e => showBarTooltipAfterDelay(t.id, e.clientX, e.clientY, "issues")}
                         onPointerMove={e => moveBarTooltip(t.id, e.clientX, e.clientY)}
                         onPointerLeave={hideBarTooltip}
@@ -1128,11 +1153,12 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                     );
                   })()}
                   {compareOn && !baselineRow && (
-                    <span className="flex-shrink-0 text-[9px] leading-none px-1 py-0.5 rounded bg-emerald-50 text-emerald-600 border border-emerald-200" title="基準バージョンには存在しないタスクです">新規</span>
+                    <span className="flex-shrink-0 text-[9px] leading-none px-1 py-0.5 rounded bg-emerald-50 text-emerald-600 border border-emerald-200" title={tr("wbs.compare.newTaskTitle")}>{tr("wbs.compare.newTask")}</span>
                   )}
                   <button
                     onClick={(e) => { e.stopPropagation(); setDetailId(t.id); }}
-                    title="詳細を開く"
+                    title={tr("wbs.row.openDetails")}
+                    aria-label={tr("wbs.row.openDetails")}
                     className="flex-shrink-0 text-slate-300 hover:text-indigo-600"
                   >
                     <Info size={11} />
@@ -1153,28 +1179,28 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                         className={"bg-transparent outline-none w-full rounded font-mono text-[11px] focus:bg-indigo-100 focus:ring-1 focus:ring-indigo-300 " + (autoScheduleHighlightIds.has(t.id) ? "font-bold" : "")} />
                     )
                   )}
-                  {isSummary && <span className="font-mono text-[11px] text-slate-400">{fmtJP(sched?.schedStart)}</span>}
+                  {isSummary && <span className="font-mono text-[11px] text-slate-400">{fmtDateCompact(sched?.schedStart)}</span>}
                 </div>
                 <div style={{ width: colWidths.duration }} className="px-1">
                   {!isSummary && !t.hasChildren && !t.milestone && (
-                    <input type="number" min={0} step={0.5} value={t.duration} title="人日（小数可）"
+                    <input type="number" min={0} step={0.5} value={t.duration} title={tr("wbs.row.durationTitle")}
                       onChange={e => updateTask(t.id, { duration: Math.max(0, Math.round(parseFloat(e.target.value || "0") * 100) / 100) })}
                       ref={cellRefCallback(t.id, "duration")} {...cellInputProps(t.id, "duration")}
                       onKeyDown={e => handleGridCellKeyDown(e, t.id, "duration")}
                       className="bg-transparent outline-none w-full rounded font-mono text-[11px] focus:bg-indigo-100 focus:ring-1 focus:ring-indigo-300" />
                   )}
                 </div>
-                <div style={{ width: colWidths.finish }} className="px-1 font-mono text-[11px] text-slate-500">{fmtJP(sched?.schedFinish)}</div>
+                <div style={{ width: colWidths.finish }} className="px-1 font-mono text-[11px] text-slate-500">{fmtDateCompact(sched?.schedFinish)}</div>
                 <div style={{ width: colWidths.assignee }} className="px-1">
                   {!isSummary && !t.hasChildren && (
                     t.milestone ? (
                       <select value={t.milestoneMode || "flexible"} onChange={e => updateTask(t.id, { milestoneMode: e.target.value })}
-                        title="固定：期日から逆算してスケジュール / 柔軟：依存関係から順算"
+                        title={tr("wbs.row.milestoneModeTitle")}
                         ref={cellRefCallback(t.id, "assignee")} {...cellInputProps(t.id, "assignee")}
                         onKeyDown={e => handleGridCellKeyDown(e, t.id, "assignee")}
                         className="bg-transparent outline-none w-full rounded text-[11px] focus:bg-indigo-100 focus:ring-1 focus:ring-indigo-300">
-                        <option value="flexible">柔軟</option>
-                        <option value="fixed">固定</option>
+                        <option value="flexible">{tr("wbs.milestoneMode.flexible")}</option>
+                        <option value="fixed">{tr("wbs.milestoneMode.fixed")}</option>
                       </select>
                     ) : (
                       <select value={t.assigneeId || ""} onChange={e => updateTask(t.id, { assigneeId: e.target.value || null })}
@@ -1199,7 +1225,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                   {!isSummary && !t.hasChildren ? (
                     t.milestone ? (
                       <input type="checkbox" checked={(t.progress || 0) >= 100}
-                        title="完了チェック（未チェック：0% / チェック済み：100%）"
+                        title={tr("wbs.row.doneCheckTitle")}
                         onChange={e => updateTask(t.id, { progress: e.target.checked ? 100 : 0 })}
                         ref={cellRefCallback(t.id, "progress")} {...cellInputProps(t.id, "progress")}
                         onKeyDown={e => handleGridCellKeyDown(e, t.id, "progress")}
@@ -1207,7 +1233,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                     ) : (
                       <div className="flex items-center gap-0.5">
                         <input type="number" min={0} max={100} step={5} value={t.progress || 0}
-                          title="進捗率（%）"
+                          title={tr("wbs.row.progressTitle")}
                           onChange={e => updateTask(t.id, { progress: Math.max(0, Math.min(100, Math.round(parseFloat(e.target.value || "0")))) })}
                           ref={cellRefCallback(t.id, "progress")} {...cellInputProps(t.id, "progress")}
                           onKeyDown={e => handleGridCellKeyDown(e, t.id, "progress")}
@@ -1227,7 +1253,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                 <div style={{ width: colWidths.actions }} className="px-1 flex items-center justify-center">
                   <button
                     onClick={(e) => { e.stopPropagation(); deleteTask(t.id); }}
-                    title="削除"
+                    title={tr("common.delete")}
                     className="text-slate-300 hover:text-red-500"
                   >
                     <Trash2 size={12} />
@@ -1241,28 +1267,28 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                   <div style={{ width: colWidths.name }} className="px-1 flex items-center gap-1.5 min-w-0">
                     <span style={{ marginLeft: t.level * 12 + 12 }} className="w-[3px] self-stretch my-0.5 rounded-sm bg-slate-300 flex-shrink-0" />
                     {baselineRow ? (
-                      <span className="truncate italic text-slate-400" title={`基準: ${baselineVersion.name}`}>{baselineVersion.name}</span>
+                      <span className="truncate italic text-slate-400" title={tr("wbs.compare.baselineTitle", { name: baselineVersion.name })}>{baselineVersion.name}</span>
                     ) : (
-                      <span className="truncate text-slate-300">（基準になし）</span>
+                      <span className="truncate text-slate-300">{tr("wbs.compare.notInBaseline")}</span>
                     )}
                   </div>
-                  <div style={{ width: colWidths.start }} className="px-1 font-mono text-slate-400" title={baselineRow ? fmtJP(baselineRow.schedStart) : ""}>
-                    {baselineRow ? fmtJP(baselineRow.schedStart) : ""}
+                  <div style={{ width: colWidths.start }} className="px-1 font-mono text-slate-400" title={baselineRow ? fmtDateCompact(baselineRow.schedStart) : ""}>
+                    {baselineRow ? fmtDateCompact(baselineRow.schedStart) : ""}
                   </div>
                   <div style={{ width: colWidths.duration }} className="px-1 font-mono text-slate-400">
                     {baselineRow && !baselineRow.hasChildren && !baselineRow.milestone ? baselineRow.duration : ""}
                   </div>
-                  <div style={{ width: colWidths.finish }} className="px-1 font-mono text-slate-400 flex items-center gap-1 truncate" title={baselineRow ? fmtJP(baselineRow.schedFinish) : ""}>
-                    <span>{baselineRow ? fmtJP(baselineRow.schedFinish) : ""}</span>
+                  <div style={{ width: colWidths.finish }} className="px-1 font-mono text-slate-400 flex items-center gap-1 truncate" title={baselineRow ? fmtDateCompact(baselineRow.schedFinish) : ""}>
+                    <span>{baselineRow ? fmtDateCompact(baselineRow.schedFinish) : ""}</span>
                     {diffDays != null && diffDays !== 0 && (
                       <span
                         className={"font-sans font-medium flex-shrink-0 " + (diffDays > 0 ? "text-orange-600" : "text-emerald-600")}
-                        title={diffDays > 0 ? `現在は基準より${diffDays}日遅い` : `現在は基準より${-diffDays}日早い`}
+                        title={diffDays > 0 ? tr("wbs.compare.later", { days: diffDays }) : tr("wbs.compare.earlier", { days: -diffDays })}
                       >
                         {diffDays > 0 ? `+${diffDays}` : `${diffDays}`}
                       </span>
                     )}
-                    {diffDays === 0 && <span className="font-sans text-slate-300 flex-shrink-0" title="基準と同じ終了日">±0</span>}
+                    {diffDays === 0 && <span className="font-sans text-slate-300 flex-shrink-0" title={tr("wbs.compare.same")}>±0</span>}
                   </div>
                   <div style={{ width: colWidths.assignee }} className="px-1 text-slate-400 truncate">
                     {baselineRow && !baselineRow.hasChildren && baselineRow.assigneeId
@@ -1295,7 +1321,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                   e.preventDefault();
                   addQuickTask();
                 }}
-                placeholder="新しいタスクを追加して Enter"
+                placeholder={tr("wbs.newTaskPlaceholder")}
                 className="flex-1 min-w-0 bg-transparent outline-none text-slate-700 placeholder-slate-400 truncate"
               />
             </div>
@@ -1315,7 +1341,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
         <div
           onPointerDown={startPaneResize}
           onDoubleClick={resetPaneWidth}
-          title="ドラッグでペイン幅を調整（ダブルクリックで自動幅に戻す）"
+          title={tr("wbs.paneResizeTitle")}
           className="w-1.5 flex-shrink-0 cursor-col-resize bg-slate-200 hover:bg-indigo-400/60 active:bg-indigo-500/70"
           style={{ touchAction: "none" }}
         />
@@ -1329,11 +1355,11 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                   const c = sprintColorForId(sprint.id);
                   return (
                     <div key={sprint.id}
-                      title={sprint.theme ? `${sprint.name}・${sprint.theme}` : sprint.name}
+                      title={sprintBandLabel(sprint)}
                       style={{ position: "absolute", left: x, width: w, height: 16, background: c.band }}
                       className="flex items-center justify-center text-[9px] font-medium overflow-hidden whitespace-nowrap">
                       <span style={{ color: c.text }} className="truncate px-1">
-                        {sprint.name}{sprint.theme ? `・${sprint.theme}` : ""}
+                        {sprintBandLabel(sprint)}
                       </span>
                     </div>
                   );
@@ -1355,8 +1381,8 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                       (m.muted ? "text-red-400" : "")
                     }
                   >
-                    <div>{m.label}</div>
-                    {m.sub && <div>{m.sub}</div>}
+                    <div>{minorLabel(m)}</div>
+                    {m.weekday != null && <div>{minorSubLabel(m)}</div>}
                   </div>
                 ))}
               </div>
@@ -1436,7 +1462,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                         >
                           <rect x={cx - 6} y={cy - 6} width={12} height={12} fill={color} transform={`rotate(45 ${cx} ${cy})`} stroke="white" strokeWidth={1} />
                           {issueOutline && <rect x={cx - 9.5} y={cy - 9.5} width={19} height={19} transform={`rotate(45 ${cx} ${cy})`} {...issueOutline} />}
-                          <text x={cx + 12} y={cy + 4} fontSize={10} fill="#475569">{t.name}{t.milestoneMode === "fixed" ? ` (固定 ${fmtJP(t.fixedDate)})` : ""}</text>
+                          <text x={cx + 12} y={cy + 4} fontSize={10} fill="#475569">{t.name}{t.milestoneMode === "fixed" ? tr("gantt.fixedMilestoneSuffix", { date: fmtDate(t.fixedDate) }) : ""}</text>
                           {handle(cx + 9, cy)}
                         </g>
                         {baselineEl}
@@ -1480,7 +1506,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                         // キーボード・スクリーンリーダーからも、ツールチップと同じ内容（非割当日の理由を含む）を確認できるようにする
                         tabIndex={0}
                         role="group"
-                        aria-label={buildBarTooltipLines(t, s).join("。")}
+                        aria-label={buildBarTooltipLines(t, s).join(tr("gantt.tooltip.ariaSeparator"))}
                         onFocus={e => showBarTooltipOnFocus(e, t.id)}
                         onBlur={hideBarTooltip}
                       >
@@ -1544,11 +1570,11 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
         const lines = issuesOnly ? [`${tt.wbsNo ? `${tt.wbsNo} ` : ""}${tt.name}`] : buildBarTooltipLines(tt, ts);
         const issueLines = (issuesByTask.get(tt.id) || []).map(issue => ({
           severity: issue.severity,
-          text: `${DEPENDENCY_ISSUE_LABELS[issue.code] || issue.code}: ${issue.message}`,
+          text: tr("dependencyIssues.tooltipLine", { label: dependencyIssueLabel(tr, issue.code), message: formatDependencyIssueMessage(tr, issue) }),
         }));
         const hiddenIssues = issuesOnly ? (hiddenIssuesByGroup.get(tt.id) || []) : [];
         if (hiddenIssues.length) {
-          issueLines.push({ severity: issueSeverityOf(hiddenIssues), text: `配下のタスクに依存関係の矛盾が${hiddenIssues.length}件あります（グループを展開すると確認できます）` });
+          issueLines.push({ severity: issueSeverityOf(hiddenIssues), text: tr("dependencyIssues.hiddenInGroup", { count: hiddenIssues.length }) });
         }
         // 初期位置はポインタ位置基準の仮置き。実サイズ確定後に useLayoutEffect が画面内へクランプし直す。
         return (
@@ -1559,7 +1585,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
               // 画面右端の近くでも内容に合わせた幅で測れるようにする（既定の幅だと右端までの残り幅に縮んで折り返してしまい、
               // 位置確定の useLayoutEffect が縮んだ幅を測る）。非割当の区間など行が長い場合は最大幅を広げる。
               width: "max-content",
-              maxWidth: (issueLines.length || lines.some(l => l.startsWith("・"))) ? 340 : 260,
+              maxWidth: (issueLines.length || lines.some(l => l.startsWith(tr("common.bullet")))) ? 340 : 260,
             }}
             className="bg-slate-800 text-white text-[11px] leading-relaxed rounded-md shadow-lg px-3 py-2"
           >

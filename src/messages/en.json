@@ -1,0 +1,412 @@
+{
+  "common": {
+    "close": "Close",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "deleteConfirm": "Delete",
+    "untitledTask": "(untitled task)",
+    "untitledSprint": "(untitled sprint)",
+    "listSeparator": ", ",
+    "bullet": "• ",
+    "done": "Done",
+    "notDone": "Not done"
+  },
+  "header": {
+    "import": "Import",
+    "export": "Export",
+    "exportJson": "Export JSON",
+    "exportSharedHtml": "Export shareable HTML",
+    "copyMermaid": "Copy as Mermaid",
+    "copyPng": "Copy as PNG (visible area)",
+    "leveling": "Enable resource leveling",
+    "runScheduling": "Run auto-scheduling",
+    "sprintConflictsTitle": "{count, plural, one {# task conflicts} other {# tasks conflict}} with sprint periods (click for details)",
+    "dependencyIssuesTitle": "There {count, plural, one {is # dependency issue} other {are # dependency issues}} (click for details)",
+    "dependencyIssuesButton": "Dependency issues {count}",
+    "projectEnd": "Finish {date}",
+    "critical": "Critical {count}",
+    "language": "Display language",
+    "languageName": {
+      "ja": "日本語",
+      "en": "English"
+    }
+  },
+  "tabs": {
+    "gantt": "WBS / Gantt",
+    "network": "Network",
+    "resource": "Resources",
+    "sprints": "Sprints",
+    "calendar": "Calendar",
+    "versions": "Versions"
+  },
+  "linked": {
+    "fileInputLabel": "Linked JSON file",
+    "loading": "Checking the linked JSON...",
+    "selectionRequired": "Select the JSON specified in the query (only the first time).",
+    "permissionRequired": "Allow access to the linked JSON again.",
+    "error": "Could not load the linked JSON: {message}",
+    "errors": {
+      "invalidFormat": "The file format is invalid",
+      "parseFailed": "The JSON could not be parsed",
+      "readFailed": "The linked file could not be read",
+      "pickFailed": "The file picker could not be opened"
+    },
+    "loaded": "Showing <file>{fileName}</file>. Changes on this screen are not saved automatically.",
+    "loadedWithDate": "Showing <file>{fileName}</file> (last modified {lastModified}). Changes on this screen are not saved automatically.",
+    "key": "Link key:",
+    "notPersistent": " (you will need to select the file again next time in this browser)",
+    "reload": "Reload latest",
+    "selectOther": "Select another JSON",
+    "allowAccess": "Allow access",
+    "reselect": "Select JSON again",
+    "select": "Select JSON"
+  },
+  "embedded": {
+    "banner": "Showing the schedule exported on <b>{exportedAt}</b>. Changes on this screen are not saved to this HTML file (reloading restores the exported state).",
+    "loadFailed": "Could not load the schedule data embedded in this HTML."
+  },
+  "toast": {
+    "linkSaveFailed": "The JSON was loaded, but the link could not be saved in this browser",
+    "linkedReloaded": "Reloaded the linked JSON",
+    "scheduleNotConverged": "Start dates were recalculated, but some tasks may not match the displayed schedule. Please run it again",
+    "scheduledWithLeveling": "Recalculated start dates based on dependencies and resource leveling",
+    "scheduled": "Rescheduled based on dependencies",
+    "versionSaved": "Saved version \"{name}\"",
+    "versionRestoreUnsupported": "This version cannot be restored (it was saved in an old format)",
+    "versionRestored": "Restored version \"{name}\"",
+    "exportedJson": "Exported the project to a JSON file",
+    "exportedSharedHtml": "Exported a shareable HTML file (opening it shows the schedule as of the export)",
+    "exportSharedHtmlFailed": "Failed to export the shareable HTML",
+    "mermaidCopied": "Copied the Gantt chart in Mermaid syntax to the clipboard",
+    "copyFailed": "Failed to copy to the clipboard",
+    "pngNeedsGantt": "Open the WBS / Gantt view first",
+    "pngCopied": "Copied the Gantt chart (visible area) to the clipboard as PNG",
+    "pngDownloaded": "Copying images to the clipboard is not supported, so the PNG file was downloaded",
+    "pngFailed": "Failed to copy as PNG: {message}",
+    "importFailedFormat": "Import failed (the file format is invalid)",
+    "importFailedParse": "Import failed (the JSON could not be parsed)",
+    "imported": "Imported the project from the JSON file"
+  },
+  "pngErrors": {
+    "gantt-dom-missing": "Could not read the structure of the Gantt view",
+    "svg-image-failed": "Failed to render the Gantt view as an SVG image",
+    "png-encode-failed": "Failed to generate the PNG"
+  },
+  "confirm": {
+    "defaultLabel": "Run",
+    "restoreVersion": "Discard the current contents and restore version \"{name}\" ({createdAt})?",
+    "restoreLabel": "Restore",
+    "import": "Replace the current tasks and assignees with the imported contents?",
+    "importLabel": "Import"
+  },
+  "mermaid": {
+    "title": "Project schedule",
+    "untitled": "(untitled)"
+  },
+  "sprintConflicts": {
+    "title": "Sprint conflicts ({count})",
+    "description": "These tasks do not fit within their assigned sprints because dependency and fixed milestone dates take precedence.",
+    "sprintNames": "({names})",
+    "reason": {
+      "startBeforeSprint": "The start date ({start, date, ymd}) is before the sprint start date ({sprintStart, date, ymd})",
+      "finishAfterSprint": "The finish date ({finish, date, ymd}) is after the sprint end date ({sprintEnd, date, ymd})",
+      "governed": "It cannot fit within the sprint because a fixed milestone's due date takes precedence"
+    }
+  },
+  "dependencyIssues": {
+    "label": {
+      "dependency-cycle": "Circular dependency",
+      "self-dependency": "Circular dependency (self)",
+      "predecessor-missing": "Missing predecessor",
+      "dependency-violation": "Start date conflict",
+      "fixed-milestone-overrun": "Fixed date overrun"
+    },
+    "dialogTitle": "Dependency issues ({count})",
+    "dialogDescription": "Dates are not corrected automatically. Start date conflicts can be resolved with \"Run auto-scheduling\". For circular dependencies and missing predecessors, fix the predecessors field. Click an item to show the task.",
+    "cycleTargets": "{count, plural, one {# task or group} other {# tasks and groups}}",
+    "rowIconLabel": "Dependency issues ({count})",
+    "hiddenInGroup": "{count, plural, one {# dependency issue} other {# dependency issues}} in tasks under this group (expand the group to see them)",
+    "quoted": "\"{name}\"",
+    "arrow": " → ",
+    "cycleMemberNote": "\"{child}\" is in group \"{parent}\"",
+    "message": {
+      "cycle": "Circular dependency: {route}",
+      "cycleWithNotes": "Circular dependency: {route} ({notes})",
+      "self": "The task is its own predecessor (this dependency is not used in the calculation)",
+      "missing": "Predecessor \"{predecessorId}\" does not exist (it refers to a deleted task, so this dependency is not used in the calculation)",
+      "violationStart": "Predecessor \"{predName}\" ({label}) requires a start on or after {required, date, ymd}, but the task starts on {actual, date, ymd}",
+      "violationFinish": "Predecessor \"{predName}\" ({label}) requires a finish on or after {required, date, ymd}, but the task finishes on {actual, date, ymd}",
+      "overrunEarliest": "The earliest date from predecessor \"{predName}\" ({earliest, date, ymd}) is after the fixed date ({fixedDate, date, ymd})",
+      "overrunDisplay": "The displayed date ({actual, date, ymd}) is after the fixed date ({fixedDate, date, ymd})"
+    },
+    "tooltipLine": "{label}: {message}"
+  },
+  "levelWarnings": {
+    "limit": {
+      "daily": "{value, plural, one {# person-day} other {# person-days}} daily",
+      "weekly": "{value, plural, one {# person-day} other {# person-days}} weekly",
+      "monthly": "{value, plural, one {# person-day} other {# person-days}} monthly"
+    },
+    "limitSeparator": ", ",
+    "capacityExceeded": "\"{taskName}\" (assignee: {resourceName}, effort: {duration} person-days) could not be allocated within the capacity limits ({limits}; search limit: {searchWorkdays, number} workdays). It is placed on consecutive workdays starting {start, date, ymd} and exceeds the capacity limits. Review the effort or the capacity limits."
+  },
+  "taskDetail": {
+    "groupBadge": "(group)",
+    "name": "Task name",
+    "kind": "Type",
+    "kindMilestone": "Milestone (click to change to a task)",
+    "kindTask": "Task (click to change to a milestone)",
+    "dueDate": "Due date",
+    "mode": "Mode",
+    "modeFlexible": "Flexible (forward)",
+    "modeFixed": "Fixed (backward from due date)",
+    "startDate": "Start date",
+    "duration": "Effort (person-days)",
+    "assignee": "Assignee",
+    "unassigned": "Unassigned",
+    "sprints": "Sprints (multiple allowed)",
+    "noSprints": "No sprints have been created",
+    "sprintRange": " ({start} – {end})",
+    "progress": "Progress",
+    "progressSummaryNote": " — average of child tasks (read-only)",
+    "completed": "Completed",
+    "predecessors": "Predecessors (WBS no.[type][±lag], e.g. 1.2FS+1)",
+    "predecessorsSummaryNote": " — applies to all child tasks",
+    "successors": "Successors",
+    "schedStart": "Start",
+    "schedFinish": "Finish",
+    "float": "Float",
+    "floatDays": "{days} d",
+    "floatDaysCritical": "{days} d (critical)",
+    "governed": "Backward",
+    "governedDescription": "Scheduled backward from a fixed milestone's due date",
+    "notes": "Notes",
+    "notesPlaceholder": "Enter notes about this task"
+  },
+  "wbs": {
+    "depsPlaceholder": "e.g. 1.2FS+1",
+    "colResizeTitle": "Drag to resize the column (double-click to reset)",
+    "sprintSelectTitle": "Sprints to link",
+    "noSprints": "No sprints",
+    "milestoneMode": {
+      "fixed": "Fixed",
+      "flexible": "Flexible"
+    },
+    "newTaskName": "New task",
+    "newMilestoneName": "New milestone",
+    "newTaskPlaceholder": "Type a new task and press Enter",
+    "confirmDelete": "Delete \"{name}\"? Its child tasks, if any, will also be deleted.",
+    "paneResizeTitle": "Drag to resize the pane (double-click to reset to auto width)",
+    "toast": {
+      "rowCopied": "Copied the row to the clipboard",
+      "cellCopied": "Copied the cell to the clipboard",
+      "nothingToPaste": "Nothing to paste",
+      "pastedPartially": "Pasted, skipping incompatible cells",
+      "rowPasted": "Pasted the row",
+      "cellPasted": "Pasted the cell"
+    },
+    "toolbar": {
+      "task": "Task",
+      "milestone": "Milestone",
+      "indent": "Indent",
+      "outdent": "Outdent",
+      "details": "Details",
+      "copy": "Copy",
+      "paste": "Paste",
+      "undo": "Undo",
+      "redo": "Redo",
+      "saveVersion": "Save version"
+    },
+    "compare": {
+      "title": "Match the selected version by WBS number and show its row under each task as a baseline",
+      "none": "No comparison",
+      "unsupported": "Unsupported",
+      "unsupportedTitle": "This version cannot be compared because it has no WBS numbers (save it again to enable comparison)",
+      "newTask": "New",
+      "newTaskTitle": "This task does not exist in the baseline version",
+      "baselineTitle": "Baseline: {name}",
+      "notInBaseline": "(not in baseline)",
+      "later": "{days, plural, one {# day} other {# days}} later than the baseline",
+      "earlier": "{days, plural, one {# day} other {# days}} earlier than the baseline",
+      "same": "Same finish date as the baseline"
+    },
+    "columns": {
+      "wbsTitle": "Click a WBS number to select the row for copy/paste",
+      "name": "Task name",
+      "start": "Start",
+      "duration": "Effort",
+      "durationTitle": "Effort (person-days). Decimals allowed (e.g. 0.5, 2.5)",
+      "finish": "Finish",
+      "assignee": "Assignee",
+      "assigneeTitle": "Assignee for tasks; fixed/flexible for milestones",
+      "sprint": "Sprint",
+      "sprintTitle": "Linked sprints (not available for groups)",
+      "progress": "Progress",
+      "progressTitle": "Progress (%). Groups show the average of their child tasks",
+      "deps": "Pred.",
+      "depsTitle": "Specify by WBS number (e.g. 1.2FS+1). Set on a group row to apply to all its child tasks"
+    },
+    "row": {
+      "dragTitle": "Drag to reorder",
+      "selectTitle": "Select the row (for copy/paste)",
+      "toTask": "Click to change to a task",
+      "toMilestone": "Click to change to a milestone",
+      "openDetails": "Open details",
+      "durationTitle": "Person-days (decimals allowed)",
+      "milestoneModeTitle": "Fixed: schedule backward from the due date / Flexible: schedule forward from dependencies",
+      "doneCheckTitle": "Done (unchecked: 0% / checked: 100%)",
+      "progressTitle": "Progress (%)"
+    }
+  },
+  "gantt": {
+    "toolbar": {
+      "inazuma": "Progress line",
+      "baseDate": "Status date (for the progress line and the today line)",
+      "resetBaseDateTitle": "Reset to today",
+      "today": "Today",
+      "criticalPath": "Critical path",
+      "zoomOut": "Zoom out (day → week → month)",
+      "zoomIn": "Zoom in"
+    },
+    "sprintBandLabel": "{name} · {theme}",
+    "fixedMilestoneSuffix": " (fixed {date})",
+    "idle": {
+      "weekly": "weekly limit reached ({value} person-days/week)",
+      "monthly": "monthly limit reached ({value} person-days/month)",
+      "taskName": "\"{name}\"",
+      "nameSeparator": ", ",
+      "namesAndMore": "{names} and {count} more",
+      "daily": "allocated to other tasks {names} ({value} person-day daily)"
+    },
+    "tooltip": {
+      "period": "{start} – {finish}",
+      "range": "{start}–{end}",
+      "fixedMilestone": "Fixed milestone (due {date})",
+      "flexibleMilestone": "Flexible milestone",
+      "assignee": "Assignee: {name}",
+      "effortProgress": "Effort {duration} person-days · Progress {progress}%",
+      "includesNonWorkdays": "This period includes non-working days",
+      "sprints": "Sprints: {names}",
+      "sprintSeparator": ", ",
+      "float": "Float {days}d",
+      "floatCritical": "Float {days}d (critical)",
+      "idleDays": "Workdays without allocation due to capacity limits: {idle} (allocated: {allocated})",
+      "moreSegments": "{count, plural, one {# more period} other {# more periods}}",
+      "partialDay": "{date} ({load} person-days)",
+      "partial": "Partially allocated: {days}",
+      "partialMore": "Partially allocated: {days} and {count, plural, one {# more day} other {# more days}}",
+      "overCapacity": "Could not be allocated within the capacity limits and exceeds them",
+      "ariaSeparator": ". "
+    }
+  },
+  "calendar": {
+    "weekdaySuffix": " ({weekday})",
+    "exceptions": {
+      "title": "Non-working day calendar",
+      "add": "Add exception",
+      "thisRow": "this row",
+      "confirmDeleteHoliday": "Delete the holiday on {date}?",
+      "confirmDeleteWorkday": "Delete the working day on {date}?",
+      "columns": {
+        "date": "Date",
+        "type": "Type",
+        "name": "Name"
+      },
+      "empty": "No exceptions yet (weekends and Japanese public holidays are used)",
+      "invalidType": "(invalid type)",
+      "type": {
+        "holiday": "Holiday",
+        "workday": "Working day"
+      },
+      "placeholder": {
+        "holiday": "e.g. Foundation Day",
+        "workday": "e.g. Weekend work"
+      },
+      "hint": {
+        "noDate": "Enter a date",
+        "invalidType": "Invalid type (this row is not applied to the schedule; select the type again)",
+        "duplicate": "There are multiple rows for the same date (working day takes precedence)",
+        "alreadyWeekend": "This date is already a weekend (no need to specify)",
+        "alreadyHoliday": "This date is already a public holiday (no need to specify)",
+        "alreadyWorkday": "This date is already a working day (no need to specify)"
+      },
+      "note": "Priority: working day > holiday > Japanese public holiday > weekend. A \"working day\" makes the date a working day even on weekends and public holidays, and a \"holiday\" makes a weekday a non-working day. Changes here apply to CPM, resource leveling and the planned finish date.",
+      "recent": "Upcoming exceptions: {items}",
+      "recentHoliday": " (holiday)",
+      "recentWorkday": " (working)"
+    },
+    "upcoming": {
+      "title": "Upcoming public holidays (calculated automatically, read-only)",
+      "empty": "No upcoming calculated public holidays.",
+      "note": "Japanese public holidays (including substitute and citizens' holidays) are treated as non-working days automatically. Add only other holidays (such as company holidays) and working days on weekends or public holidays in the table above."
+    }
+  },
+  "sprints": {
+    "title": "Sprints",
+    "add": "Add sprint",
+    "confirmDelete": "Delete this sprint? (Linked tasks will be unassigned from it)",
+    "overlapWarning": "Some sprints overlap. They can be saved, but please check them.",
+    "columns": {
+      "name": "Name",
+      "theme": "Theme",
+      "start": "Start",
+      "end": "End",
+      "taskCount": "Tasks"
+    },
+    "empty": "No sprints yet",
+    "themePlaceholder": "Theme of this sprint (optional)",
+    "invalidRange": "The end date is before the start date",
+    "overlapping": "Overlaps with another sprint",
+    "taskCount": "{count}",
+    "note": "Start and end dates can be set freely (about one week is typical). Sprints cannot be set on groups (summary tasks).",
+    "timeline": "Sprint timeline"
+  },
+  "resources": {
+    "newName": "New assignee",
+    "confirmDelete": "Delete this assignee? (Their tasks will become unassigned)",
+    "title": "Assignees and capacity limits",
+    "add": "Add assignee",
+    "columns": {
+      "name": "Name",
+      "capacityTitle": "0 means no limit (only the 1 person-day per day limit applies)",
+      "weekly": "Weekly limit (days/week, 0 = none)",
+      "monthly": "Monthly limit (days/month, 0 = none)"
+    },
+    "weeklyLoad": "Weekly workload",
+    "selectAssignee": "Assignee",
+    "chart": {
+      "value": "{value} person-days",
+      "series": "Allocated effort",
+      "week": "Week: {week}",
+      "limit": "Limit"
+    },
+    "note": "The red dashed line is the weekly capacity limit (0 = none). The chart sums the same daily allocations as the Gantt chart. With resource leveling on, effort is allocated from the earliest days within the limits, and tasks are extended across days where the limit is reached."
+  },
+  "versions": {
+    "defaultName": "Version {n}",
+    "namePlaceholder": "Version name (e.g. Initial plan)",
+    "nameLabel": "Version name",
+    "save": "Save current schedule",
+    "columns": {
+      "name": "Name",
+      "savedAt": "Saved at",
+      "taskCount": "Tasks",
+      "finish": "Planned finish"
+    },
+    "empty": "No saved versions",
+    "compareCheck": "Compare \"{name}\"",
+    "renameTitle": "Click to rename the version",
+    "restoreTitle": "Restore the current tasks and assignees to this version",
+    "restoreUnsupportedTitle": "This version was saved in an old format and cannot be restored",
+    "compare": "Version comparison"
+  },
+  "network": {
+    "tidy": "Auto layout",
+    "group": "Group ({count, plural, one {# task} other {# tasks}})",
+    "fixedMilestone": "Fixed milestone",
+    "milestone": "Milestone",
+    "float": "Float {days}d",
+    "lagTitle": "Lag (workdays)",
+    "removeEdge": "Remove dependency"
+  }
+}
