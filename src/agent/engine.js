@@ -6,7 +6,7 @@
    esbuild で .claude/skills/schedule-adjust/cli.mjs へバンドルする際のエントリの一部。
    ========================================================================================= */
 
-export { toISO, parseISO, buildHolidayMap, makeCalendar, fmtJP } from "../lib/calendar.js";
+export { toISO, parseISO, buildHolidayMap, makeCalendar } from "../lib/calendar.js";
 export {
   runCPM, levelResources, rollupSummaries, deriveProjectStart,
   candidateFromDep, earliestSprintFloor, autoScheduleStartDates, computeAutoSchedule, buildDisplaySchedule,
@@ -24,3 +24,7 @@ export {
 export {
   buildFlatList, isGroupId, migrateSprintIds, effectivePredecessors,
 } from "../lib/taskTree.js";
+export {
+  createAppTranslator, formatDependencyIssueMessage, formatLevelWarning,
+  formatSprintConflictReason, formatSprintConflictSprintNames,
+} from "../lib/i18n.js";

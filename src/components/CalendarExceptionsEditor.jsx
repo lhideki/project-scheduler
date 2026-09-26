@@ -1,7 +1,8 @@
 import React, { useMemo } from "react";
 import { Plus, Trash2, AlertTriangle } from "lucide-react";
-import { toISO, parseISO, fmtJP, WEEKDAY_JA, isWeekendStr } from "../lib/calendar.js";
+import { toISO, isWeekendStr } from "../lib/calendar.js";
 import { IconBtn } from "./IconBtn.jsx";
+import { useI18n } from "./I18nProvider.jsx";
 
 /* =========================================================================================
    非稼働日カレンダー編集（カレンダービュー内に併設）
@@ -11,6 +12,7 @@ import { IconBtn } from "./IconBtn.jsx";
    calendarExceptions の CRUD UI のみ。
    ========================================================================================= */
 export function CalendarExceptionsEditor({ exceptions, setExceptions, cal, requestConfirm }) {
+  const { t, fmtDate, fmtWeekday } = useI18n();
   function update(index, patch) {
     setExceptions(prev => prev.map((e, i) => (i === index ? { ...e, ...patch } : e)));
   }
@@ -20,9 +22,11 @@ export function CalendarExceptionsEditor({ exceptions, setExceptions, cal, reque
   function remove(index) {
     const target = exceptions[index];
     requestConfirm(
-      `${target?.date || "この行"} の${target?.type === "workday" ? "稼働日" : "休日"}指定を削除しますか？`,
+      t(target?.type === "workday" ? "calendar.exceptions.confirmDeleteWorkday" : "calendar.exceptions.confirmDeleteHoliday", {
+        date: target?.date || t("calendar.exceptions.thisRow"),
+      }),
       () => setExceptions(prev => prev.filter((_, i) => i !== index)),
-      "削除する"
+      t("common.deleteConfirm")
     );
   }
 
@@ -45,48 +49,48 @@ export function CalendarExceptionsEditor({ exceptions, setExceptions, cal, reque
   }, [exceptions]);
 
   function hintFor(e) {
-    if (!e.date) return "日付を入力してください";
+    if (!e.date) return t("calendar.exceptions.hint.noDate");
     // 未知の種別（不正なJSONのインポート等）。makeCalendar 側では無視されるため、
     // 画面にも「この行は効いていない」ことを明示する。
     if (e.type !== "holiday" && e.type !== "workday") {
-      return "種別が不正です（この行はスケジュールに反映されません。種別を選び直してください）";
+      return t("calendar.exceptions.hint.invalidType");
     }
-    if (dupDates.has(e.date)) return "同じ日付の行が複数あります（稼働日が優先されます）";
+    if (dupDates.has(e.date)) return t("calendar.exceptions.hint.duplicate");
     const weekend = isWeekendStr(e.date);
     const isNationalHoliday = cal.holidayMap.has(e.date);
     if (e.type === "holiday" && (weekend || isNationalHoliday)) {
-      return weekend ? "この日は元々土日です（指定は不要）" : "この日は元々祝日です（指定は不要）";
+      return weekend ? t("calendar.exceptions.hint.alreadyWeekend") : t("calendar.exceptions.hint.alreadyHoliday");
     }
     if (e.type === "workday" && !weekend && !isNationalHoliday) {
-      return "この日は元々稼働日です（指定は不要）";
+      return t("calendar.exceptions.hint.alreadyWorkday");
     }
     return null;
   }
 
   function dowLabel(dateStr) {
     if (!dateStr) return "";
-    return `（${WEEKDAY_JA[parseISO(dateStr).getUTCDay()]}）`;
+    return t("calendar.weekdaySuffix", { weekday: fmtWeekday(dateStr) });
   }
 
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
-        <h3 className="text-sm font-semibold text-slate-700">非稼働日カレンダー</h3>
-        <IconBtn icon={Plus} label="例外日を追加" onClick={add} small />
+        <h3 className="text-sm font-semibold text-slate-700">{t("calendar.exceptions.title")}</h3>
+        <IconBtn icon={Plus} label={t("calendar.exceptions.add")} onClick={add} small />
       </div>
       <div className="border border-slate-200 rounded-lg overflow-hidden">
         <table className="w-full text-xs">
           <thead className="bg-slate-50 text-slate-500">
             <tr>
-              <th className="text-left px-3 py-2 font-medium w-40">日付</th>
-              <th className="text-left px-3 py-2 font-medium w-32">種別</th>
-              <th className="text-left px-3 py-2 font-medium">名称</th>
+              <th className="text-left px-3 py-2 font-medium w-40">{t("calendar.exceptions.columns.date")}</th>
+              <th className="text-left px-3 py-2 font-medium w-32">{t("calendar.exceptions.columns.type")}</th>
+              <th className="text-left px-3 py-2 font-medium">{t("calendar.exceptions.columns.name")}</th>
               <th className="w-10" />
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 && (
-              <tr><td colSpan={4} className="text-center text-slate-400 py-6">例外はまだありません（土日＋日本の祝日で計算します）</td></tr>
+              <tr><td colSpan={4} className="text-center text-slate-400 py-6">{t("calendar.exceptions.empty")}</td></tr>
             )}
             {rows.map(({ e, index }) => {
               const hint = hintFor(e);
@@ -104,26 +108,26 @@ export function CalendarExceptionsEditor({ exceptions, setExceptions, cal, reque
                       onChange={ev => update(index, { type: ev.target.value })}
                       className="bg-transparent outline-none">
                       {e.type !== "workday" && e.type !== "holiday" && (
-                        <option value="" disabled>（不正な種別）</option>
+                        <option value="" disabled>{t("calendar.exceptions.invalidType")}</option>
                       )}
-                      <option value="holiday">休日</option>
-                      <option value="workday">稼働日</option>
+                      <option value="holiday">{t("calendar.exceptions.type.holiday")}</option>
+                      <option value="workday">{t("calendar.exceptions.type.workday")}</option>
                     </select>
                   </td>
                   <td className="px-3 py-1.5">
                     <div className="flex items-center gap-1.5">
                       <input value={e.name || ""} onChange={ev => update(index, { name: ev.target.value })}
-                        placeholder={e.type === "workday" ? "例: 休日出勤" : "例: 創立記念日"}
+                        placeholder={e.type === "workday" ? t("calendar.exceptions.placeholder.workday") : t("calendar.exceptions.placeholder.holiday")}
                         className="bg-transparent outline-none w-full placeholder-slate-300" />
                       {hint && (
-                        <span title={hint}>
+                        <span title={hint} role="img" aria-label={hint}>
                           <AlertTriangle size={12} className="text-amber-500 flex-shrink-0" />
                         </span>
                       )}
                     </div>
                   </td>
                   <td className="px-1">
-                    <button onClick={() => remove(index)} className="text-slate-300 hover:text-red-500"><Trash2 size={13} /></button>
+                    <button onClick={() => remove(index)} title={t("common.delete")} aria-label={t("common.delete")} className="text-slate-300 hover:text-red-500"><Trash2 size={13} /></button>
                   </td>
                 </tr>
               );
@@ -132,12 +136,15 @@ export function CalendarExceptionsEditor({ exceptions, setExceptions, cal, reque
         </table>
       </div>
       <p className="text-[11px] text-slate-400 mt-1">
-        優先順位: 稼働日 ＞ 休日 ＞ 日本の祝日 ＞ 土日。
-        「稼働日」は土日・祝日でもその日を稼働日として扱い、「休日」は平日を非稼働日にします。ここでの変更はCPM・リソース平準化・完了予定日に反映されます。
+        {t("calendar.exceptions.note")}
       </p>
       {rows.length > 0 && (
         <p className="text-[11px] text-slate-400 mt-0.5">
-          直近の例外: {rows.slice(0, 5).map(({ e }) => `${fmtJP(e.date)}${e.type === "workday" ? "(稼働)" : "(休)"}`).join(" / ")}
+          {t("calendar.exceptions.recent", {
+            items: rows.slice(0, 5)
+              .map(({ e }) => `${fmtDate(e.date)}${e.type === "workday" ? t("calendar.exceptions.recentWorkday") : t("calendar.exceptions.recentHoliday")}`)
+              .join(" / "),
+          })}
         </p>
       )}
     </div>

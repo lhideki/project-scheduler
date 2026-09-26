@@ -23,7 +23,7 @@ Project Scheduler is a planning simulator, not a replacement for collaborative t
 
 1. Open the [Live Demo](https://lhideki.github.io/project-scheduler/).
 2. In the sample WBS, change the effort for `基本設計` (Basic Design) from `6` to `10`.
-3. Select `自動スケジューリング実行` (Run Auto Scheduling) in the upper-right corner.
+3. Select `Run auto-scheduling` in the upper-right corner.
 4. Check how the downstream dates, projected completion date, and critical path change.
 
 No build or installation is required. For offline use, open [project_scheduler.html](project_scheduler.html), select `Download raw file` on GitHub, and open the downloaded file in your browser.
@@ -34,13 +34,13 @@ To move a plan between devices, or between the Live Demo and the downloaded HTML
 
 - Edit a WBS as an outline and view its Gantt chart against a working-day calendar that accounts for weekends and Japanese public holidays.
 - Navigate cells with the arrow keys, copy and paste individual cells or rows, and undo or redo task edits.
-- Add company holidays or extra working days in the `カレンダー編集` (Calendar) tab to override weekends and public holidays.
+- Add company holidays or extra working days in the `Calendar` tab to override weekends and public holidays.
 - Zoom the Gantt chart from days to weeks and months, hatch non-working days inside task bars, draw a progress line (inazuma line) against a chosen status date, and hover over or focus a bar to see its details in a tooltip.
 - Model all four dependency types (FS, SS, FF, and SF) with lead and lag offsets.
 - Calculate and visualize float and the critical path with the Critical Path Method (CPM).
 - Switch milestones between flexible mode, scheduled forward from dependencies, and fixed mode, scheduled backward from a due date.
 - Automatically level resources against weekly and monthly capacity limits. Work is allocated day by day from the earliest date with free capacity, so a task's duration stretches over the days its assignee is at capacity. Those unallocated days are hatched in the Gantt chart, and the tooltip explains why.
-- Check each assignee's weekly workload against their capacity in the `リソース` (Resources) tab.
+- Check each assignee's weekly workload against their capacity in the `Resources` tab.
 - Define sprints with start dates, end dates, and themes, and assign multiple sprints to a task.
 - Flag conflicts between sprint windows and calculated task dates.
 - Flag dependency problems in the WBS table and Gantt chart: circular dependencies (including cycles through groups), start dates that break a dependency, fixed milestones pushed past their due date, and links to deleted tasks.
@@ -48,6 +48,7 @@ To move a plan between devices, or between the Live Demo and the downloaded HTML
 - Copy the calculated schedule as a Mermaid Gantt chart, or copy the visible part of the Gantt chart as a PNG image.
 - Save snapshots, compare multiple versions on a Gantt-style timeline, and restore an earlier state.
 - Export and import the complete project, including tasks, resources, sprints, calendar overrides, the resource leveling setting, and version history, as JSON.
+- Switch the interface between English and Japanese from the header. The first visit follows your browser's language, and your choice is remembered in the browser (it is not saved in the project JSON). Sample data and Japanese public holiday names stay in Japanese.
 - Export a shared HTML file that embeds the current plan. See [Share a snapshot as HTML](#share-a-snapshot-as-html).
 - Use the included Claude Code Skill to let an AI agent adjust an exported plan directly. See [AI-assisted replanning](#ai-assisted-replanning).
 
@@ -76,7 +77,7 @@ Private browsing or clearing site data may delete the saved plan. Export importa
 
 ## Share a snapshot as HTML
 
-Select `共有用HTML書き出し` (Export shared HTML) from the `書き出し` (Export) menu to download a self-contained HTML file with the current plan embedded. Anyone can open it in a browser without the JSON file. It shows the plan as it was when you exported it.
+Select `Export shareable HTML` from the `Export` menu to download a self-contained HTML file with the current plan embedded. Anyone can open it in a browser without the JSON file. It shows the plan as it was when you exported it.
 
 The shared HTML does not save changes to `localStorage`. You can still edit the plan after opening it, but reloading the page restores the exported state. To keep your changes, export them as JSON.
 
@@ -89,9 +90,9 @@ project_scheduler.html?schedule=%2FUsers%2Ftaro%2FDropbox%2Fschedules%2Fproject-
 ```
 
 1. URL-encode the user's local path and pass it as the `schedule` query value.
-2. On the first visit, select `JSONを選択` (Choose JSON) and choose the local file associated with that query.
+2. On the first visit, select `Select JSON` and choose the local file associated with that query.
 3. In browsers that support the File System Access API, the app stores the file association in IndexedDB. It can reopen the file on later visits while permission remains available.
-4. Select `最新版を再読込` (Reload Latest) to reopen the synchronized file after it changes.
+4. Select `Reload latest` to reopen the synchronized file after it changes.
 
 While a linked JSON file is open, edits are not automatically saved to `localStorage`. You must select the file again if the browser does not support the File System Access API or if permission is lost. A real local path in an HTTP(S) URL may appear in access logs, so use a logical key such as a project name if the path is sensitive.
 
@@ -116,7 +117,7 @@ When Claude Code is opened in this repository, `.claude/skills/schedule-adjust/`
 
 ### Move changes between the agent and the app
 
-If you linked a local JSON file as described in [Link a JSON file from a synced folder](#link-a-json-file-from-a-synced-folder), select `最新版を再読込` (Reload Latest) after the agent edits it. Otherwise, export a JSON file, have the agent edit it, and import the result back into the app.
+If you linked a local JSON file as described in [Link a JSON file from a synced folder](#link-a-json-file-from-a-synced-folder), select `Reload latest` after the agent edits it. Otherwise, export a JSON file, have the agent edit it, and import the result back into the app.
 
 ### Sync with Backlog
 
@@ -194,7 +195,7 @@ npm run build
 ## Known limitations
 
 - Real-time multi-user editing and automatic cross-device synchronization are not supported. Use JSON export and import to share or transfer a plan.
-- The working-day calendar uses a simplified implementation of Japanese public holidays. Use the `カレンダー編集` (Calendar) tab to correct individual dates or add company-specific holidays.
+- The working-day calendar uses a simplified implementation of Japanese public holidays. Use the `Calendar` tab to correct individual dates or add company-specific holidays.
 - Undo and Redo apply only to task edits, not to changes to resources, sprints, or the calendar.
 
 ## Feedback

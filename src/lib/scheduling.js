@@ -1,4 +1,4 @@
-import { toISO, fmtJP } from "./calendar.js";
+import { toISO } from "./calendar.js";
 import { isGroupId, buildFlatList, effectivePredecessors } from "./taskTree.js";
 import {
   dailyLoads, createCapacityLedger, allocateWork, commitAllocation,
@@ -363,6 +363,7 @@ export function rollupSummaries(tasks, result) {
  *  探索上限（2,000稼働日）内に割り当てきれない場合は、探索開始日（着手済みは開始日）からの連続配置に
  *  戻して負荷を登録し、稼働上限を満たしていないことを警告する（探索終端の日付を確定しない）。
  *  warnings は稼働上限内での割当不成立だけを返す（固定マイルストーンの期日超過は dependencyIssues.js が扱う）。
+ *  warnings の各要素は文言ではなくコード＋パラメータ（LevelWarning）で、文言は src/lib/i18n.js の formatLevelWarning で作る。
  *  resources に空配列を渡すと稼働上限を一切見ないため、「依存関係・手入力開始日・スプリントの下限を
  *  すべて満たす最短の配置」を求める用途にも使える（autoScheduleStartDates の平準化OFF時）。
  * @param {import("./taskTree.js").Task[]} tasks
@@ -370,7 +371,7 @@ export function rollupSummaries(tasks, result) {
  * @param {import("./taskTree.js").Resource[]} resources
  * @param {import("./calendar.js").Calendar} cal
  * @param {import("./taskTree.js").Sprint[]} sprints
- * @returns {{placed: Record<string, {start: string, finish: string}>, warnings: string[], allocations: Record<string, import("./workAllocation.js").TaskAllocation>}}
+ * @returns {{placed: Record<string, {start: string, finish: string}>, warnings: LevelWarning[], allocations: Record<string, import("./workAllocation.js").TaskAllocation>}}
  *   allocations: 工数が正のリーフの日別割当（担当者の稼働上限を見ないタスクは連続配分）
  */
 export function levelResources(tasks, cpmResult, resources, cal, sprints) {
@@ -459,10 +460,15 @@ export function levelResources(tasks, cpmResult, resources, cal, sprints) {
     commitAllocation(ledger, resource.id, task.id, alloc);
     placed[task.id] = { start, finish: cal.endFromStart(start, task.duration) };
     allocations[task.id] = { alloc, idle: [], overCapacity: true };
-    const limits = [`日次${DAILY_CAPACITY}人日`];
-    if (resource.weeklyCapacity) limits.push(`週次${resource.weeklyCapacity}人日`);
-    if (resource.monthlyCapacity) limits.push(`月次${resource.monthlyCapacity}人日`);
-    warnings.push(`「${task.name}」（担当者: ${resource.name}、工数: ${task.duration}人日）は、${limits.join("・")}の稼働上限内で割り当てきれませんでした（探索上限: ${ALLOCATION_SEARCH_WORKDAYS.toLocaleString("en-US")}稼働日）。開始日を${fmtJP(start)}とし、連続する稼働日に配置していますが、稼働上限を超過しています。工数または稼働上限の見直しが必要です。`);
+    warnings.push({
+      code: "capacity-exceeded",
+      taskId: task.id,
+      params: {
+        taskName: task.name, resourceName: resource.name, duration: task.duration,
+        dailyCapacity: DAILY_CAPACITY, weeklyCapacity: resource.weeklyCapacity || 0, monthlyCapacity: resource.monthlyCapacity || 0,
+        searchWorkdays: ALLOCATION_SEARCH_WORKDAYS, start,
+      },
+    });
   }
 
   let guardOuter = 0;
@@ -530,6 +536,16 @@ export function levelResources(tasks, cpmResult, resources, cal, sprints) {
 }
 
 /**
+ * @typedef {Object} LevelWarning
+ * リソース平準化の警告（稼働上限内での割当不成立）。
+ * @property {"capacity-exceeded"} code
+ * @property {string} taskId
+ * @property {{taskName: string, resourceName: string, duration: number, dailyCapacity: number,
+ *   weeklyCapacity: number, monthlyCapacity: number, searchWorkdays: number, start: string}} params
+ *   weeklyCapacity・monthlyCapacity は上限なし（未設定・0）なら 0
+ */
+
+/**
  * 表示スケジュール（App の schedule useMemo・CLI computeSchedule の schedule）を組み立てる。
  * 平準化OFFでは runCPM の結果に、開始日からの連続配分の日別割当を付ける。平準化ONでは
  * levelResources の配置日と日別割当で各リーフを上書きし、グループを再ロールアップする。
@@ -541,7 +557,7 @@ export function levelResources(tasks, cpmResult, resources, cal, sprints) {
  * @param {import("./calendar.js").Calendar} cal
  * @param {import("./taskTree.js").Sprint[]} sprints
  * @param {{leveling?: boolean}} [opts]
- * @returns {{schedule: Map<string, ScheduleEntry>, levelWarnings: string[]}}
+ * @returns {{schedule: Map<string, ScheduleEntry>, levelWarnings: LevelWarning[]}}
  */
 export function buildDisplaySchedule(tasks, cpmResult, resources, cal, sprints, opts = {}) {
   const schedule = new Map(cpmResult);

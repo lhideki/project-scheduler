@@ -42,7 +42,7 @@ describe("buildTimeAxis", () => {
     const { tier, minor } = buildTimeAxis({ minDate, maxDate, dayWidth, tier: axisTier(dayWidth), cal });
     expect(tier).toBe("day");
     expect(minor).toHaveLength(86); // 1/15〜4/10 の日数（両端含む）
-    expect(minor[0]).toMatchObject({ key: "2026-01-15", label: "15", sub: "木", x: 0, w: 20 });
+    expect(minor[0]).toMatchObject({ key: "2026-01-15", label: "15", weekday: 4, x: 0, w: 20 });
     const jan17 = minor.find(m => m.key === "2026-01-17"); // 土曜
     expect(jan17.x).toBe(2 * 20);
     expect(jan17.muted).toBe(true);
@@ -73,7 +73,7 @@ describe("buildTimeAxis", () => {
     const dayWidth = 3;
     const { tier, minor, major } = buildTimeAxis({ minDate, maxDate, dayWidth, tier: axisTier(dayWidth), cal });
     expect(tier).toBe("month");
-    expect(minor.map(m => m.label)).toEqual(["1月", "2月", "3月", "4月"]);
+    expect(minor.map(m => m.label)).toEqual(["1", "2", "3", "4"]);
     for (const m of minor) {
       expect(parseISO(m.key).getUTCDate()).toBe(1);
     }
@@ -100,7 +100,7 @@ describe("buildTimeAxis", () => {
     const monthTier = buildTimeAxis({
       minDate: "2026-08-01", maxDate: "2026-10-02", dayWidth: 3, tier: "month", cal,
     });
-    expect(monthTier.minor.map(m => m.label)).toEqual(["8月", "9月"]);
+    expect(monthTier.minor.map(m => m.label)).toEqual(["8", "9"]);
 
     // week tier（dayWidth 12）でも、中段の月帯に "2026-10" の断片を出さない。
     const weekTier = buildTimeAxis({

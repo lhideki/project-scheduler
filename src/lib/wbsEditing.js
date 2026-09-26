@@ -1,4 +1,5 @@
 import { formatDeps, parseDepString } from "./deps.js";
+import { catalogValues, createAppTranslator, DEFAULT_LOCALE } from "./i18n.js";
 
 export const WBS_EDITABLE_COLUMNS = [
   "name", "startDate", "duration", "assignee", "sprint", "progress", "predecessors",
@@ -15,6 +16,25 @@ function emptyMark(value) {
   return value === "" || value === "—" || value === "-";
 }
 
+// 貼り付けでは、表示中の言語に関わらずどちらの言語の表記（例: 「固定」/Fixed、「完了」/Done）も受け付ける。
+// 表記はメッセージカタログから集める（カタログと二重管理しない）。比較は小文字化して行う。
+const lowerValues = key => catalogValues(key).map(v => v.toLowerCase());
+const FIXED_TOKENS = [...lowerValues("wbs.milestoneMode.fixed"), "fixed"];
+const FLEXIBLE_TOKENS = [...lowerValues("wbs.milestoneMode.flexible"), "flexible"];
+const DONE_TOKENS = [...lowerValues("common.done"), "済", "true", "yes"];
+const NOT_DONE_TOKENS = [...lowerValues("common.notDone"), "false", "no"];
+
+let defaultTranslator = null;
+function translatorOf(context) {
+  if (context.t) return context.t;
+  if (!defaultTranslator) defaultTranslator = createAppTranslator(DEFAULT_LOCALE);
+  return defaultTranslator;
+}
+
+/**
+ * タスクの1セルをテキスト化する（コピー用）。マイルストーンの固定/柔軟など、言語に依存する表記は
+ * context.t（表示中の言語の翻訳関数。省略時は日本語）でメッセージカタログから作る。
+ */
 export function taskCellText(task, column, context) {
   const { resources = [], sprints = [], idToNo = {}, schedule } = context;
   switch (column) {
@@ -26,7 +46,7 @@ export function taskCellText(task, column, context) {
     }
     case "duration": return task.milestone ? "" : String(task.duration ?? "");
     case "assignee": {
-      if (task.milestone) return task.milestoneMode === "fixed" ? "固定" : "柔軟";
+      if (task.milestone) return translatorOf(context)(task.milestoneMode === "fixed" ? "wbs.milestoneMode.fixed" : "wbs.milestoneMode.flexible");
       return resources.find(r => r.id === task.assigneeId)?.name || "";
     }
     case "sprint": return sprints.filter(sp => (task.sprintIds || []).includes(sp.id)).map(sp => sp.name).join(", ");
@@ -58,8 +78,8 @@ export function taskCellPatch(task, column, rawText, context) {
       if (hasChildren) return { ok: false, patch: {} };
       if (task.milestone) {
         const normalized = text.toLowerCase();
-        if (["固定", "fixed"].includes(normalized)) return { ok: true, patch: { milestoneMode: "fixed" } };
-        if (["柔軟", "flexible", ""].includes(normalized) || emptyMark(text)) return { ok: true, patch: { milestoneMode: "flexible" } };
+        if (FIXED_TOKENS.includes(normalized)) return { ok: true, patch: { milestoneMode: "fixed" } };
+        if (FLEXIBLE_TOKENS.includes(normalized) || emptyMark(text)) return { ok: true, patch: { milestoneMode: "flexible" } };
         return { ok: false, patch: {} };
       }
       if (emptyMark(text)) return { ok: true, patch: { assigneeId: null } };
@@ -77,8 +97,8 @@ export function taskCellPatch(task, column, rawText, context) {
     case "progress": {
       if (hasChildren) return { ok: false, patch: {} };
       const normalized = text.toLowerCase();
-      if (task.milestone && ["完了", "済", "true", "yes"].includes(normalized)) return { ok: true, patch: { progress: 100 } };
-      if (task.milestone && ["未完了", "false", "no", ""].includes(normalized)) return { ok: true, patch: { progress: 0 } };
+      if (task.milestone && DONE_TOKENS.includes(normalized)) return { ok: true, patch: { progress: 100 } };
+      if (task.milestone && (NOT_DONE_TOKENS.includes(normalized) || normalized === "")) return { ok: true, patch: { progress: 0 } };
       const value = Number(text.replace(/%$/, ""));
       if (!Number.isFinite(value) || value < 0 || value > 100) return { ok: false, patch: {} };
       return { ok: true, patch: { progress: Math.round(value) } };

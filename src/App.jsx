@@ -2,14 +2,18 @@ import React, { useState, useEffect, useMemo, useRef, useReducer, useCallback } 
 import {
   Play, X, AlertTriangle, Check, Clock, GitBranch, Users, Table2,
   History, Download, Upload, CalendarRange, CalendarOff, Copy, RefreshCw, Link,
-  Share2, Camera, Image as ImageIcon,
+  Share2, Camera, Image as ImageIcon, Languages,
 } from "lucide-react";
 
-import { toISO, parseISO, buildHolidayMap, makeCalendar, fmtJP } from "./lib/calendar.js";
+import { toISO, parseISO, buildHolidayMap, makeCalendar } from "./lib/calendar.js";
 import { uid, migrateSprintIds, isGroupId, buildFlatList, ancestorChain } from "./lib/taskTree.js";
 import { runCPM, buildDisplaySchedule, deriveProjectStart, computeAutoSchedule } from "./lib/scheduling.js";
 import { detectSprintConflicts } from "./lib/sprints.js";
-import { detectDependencyIssues, groupDependencyIssuesByTask, DEPENDENCY_ISSUE_LABELS } from "./lib/dependencyIssues.js";
+import { detectDependencyIssues, groupDependencyIssuesByTask } from "./lib/dependencyIssues.js";
+import {
+  LOCALES, formatDependencyIssueMessage, dependencyIssueLabel,
+  formatSprintConflictReason, formatSprintConflictSprintNames, formatLevelWarning,
+} from "./lib/i18n.js";
 import {
   downloadJSON, downloadTextFile, copyTextToClipboard, generateMermaidGantt,
   buildProjectExport, normalizeImportedProject, normalizeProjectVersions,
@@ -34,19 +38,19 @@ import { ResourceView } from "./components/ResourceView.jsx";
 import { SprintsView } from "./components/SprintsView.jsx";
 import { CalendarView } from "./components/CalendarView.jsx";
 import { VersionsView } from "./components/VersionsView.jsx";
+import { useI18n, useLocaleSetting } from "./components/I18nProvider.jsx";
 
 /* =========================================================================================
    13. アプリ本体
    ========================================================================================= */
-function fmtDateTimeJP(iso) {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return String(iso || "");
-  return d.toLocaleString("ja-JP", {
-    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
-  });
-}
-
 export default function App() {
+  const { t, format, fmtDate, fmtDateTime } = useI18n();
+  const { locale, setLocale } = useLocaleSetting();
+  // 共有用HTMLの書き出し日時（日本語は「2026/09/26 09:41」）。解釈できない値はそのまま表示する。
+  function fmtExportedAt(iso) {
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? String(iso || "") : format.dateTime(d, "dateTimeShort");
+  }
   const seed = useMemo(() => seedData(), []);
   // 「共有用HTML」に埋め込まれたプロジェクトデータ（embedded 起動）。
   // linked（?schedule=）と同様に「原本と切り離されたデータを表示中」というセマンティクスを持ち、
@@ -168,7 +172,7 @@ export default function App() {
   const revealTaskSeqRef = useRef(0);
   // window.confirm はアーティファクトのサンドボックス化された iframe 内では許可されず
   // 常に false を返す（＝何も起きない）ことがあるため、自前の確認モーダルを使う。
-  function requestConfirm(message, onConfirm, confirmLabel = "実行する", danger = true) {
+  function requestConfirm(message, onConfirm, confirmLabel = t("confirm.defaultLabel"), danger = true) {
     setConfirmState({ message, onConfirm, confirmLabel, danger });
   }
 
@@ -234,9 +238,8 @@ export default function App() {
         ...(prev || {}),
         status: "error",
         persistent,
-        message: err?.message === "invalid_project_json"
-          ? "ファイル形式が正しくありません"
-          : "JSONを解析できません",
+        // message は linked.errors.* のキー（表示時に翻訳する。言語を切り替えても追従させるため）
+        message: err?.message === "invalid_project_json" ? "invalidFormat" : "parseFailed",
       }));
       return false;
     }
@@ -260,7 +263,7 @@ export default function App() {
       return loadedFromFile;
     } catch (e) {
       setLinkedProjectState(prev => ({
-        ...(prev || {}), status: "error", persistent: true, message: "関連付けたファイルを読み込めません",
+        ...(prev || {}), status: "error", persistent: true, message: "readFailed",
       }));
       return false;
     }
@@ -355,12 +358,12 @@ export default function App() {
         await saveLinkedFileHandle(linkedProjectKey, handle);
       } catch (e) {
         setLinkedProjectState(prev => ({ ...(prev || {}), persistent: false }));
-        showToast("JSONは読み込みましたが、関連付けをブラウザに保存できませんでした");
+        showToast(t("toast.linkSaveFailed"));
       }
     } catch (e) {
       if (e?.name === "AbortError") return;
       setLinkedProjectState(prev => ({
-        ...(prev || {}), status: "error", message: "ファイル選択を開始できません",
+        ...(prev || {}), status: "error", message: "pickFailed",
       }));
     }
   }
@@ -373,7 +376,7 @@ export default function App() {
     }
     setLinkedProjectState(prev => ({ ...(prev || {}), status: "loading", message: null }));
     const loadedFromFile = await loadLinkedProjectHandle(handle, { requestPermission: true });
-    if (loadedFromFile) showToast("連携JSONを再読み込みしました");
+    if (loadedFromFile) showToast(t("toast.linkedReloaded"));
   }
 
   async function handleLinkedFileInput(e) {
@@ -410,10 +413,10 @@ export default function App() {
     setAutoScheduleHighlightIds(changedIds);
     // 平準化ONで、書き戻しと表示の一致を上限回数内に確認できなかった場合は成功扱いにせず知らせる
     showToast(!converged
-      ? "開始日を再計算しましたが、一部のタスクで表示と開始日が一致していない可能性があります。もう一度実行してください"
+      ? t("toast.scheduleNotConverged")
       : levelingOn
-        ? "依存関係とリソース平準化に基づき開始日を再計算しました"
-        : "依存関係に基づき再スケジューリングしました");
+        ? t("toast.scheduledWithLeveling")
+        : t("toast.scheduled"));
   }
 
   async function saveVersion(name) {
@@ -442,7 +445,7 @@ export default function App() {
     const next = [v, ...versions];
     setVersions(next);
     if (!autoSaveDisabled) await storageSet("pm_versions", next);
-    showToast(`バージョン「${name}」を保存しました`);
+    showToast(t("toast.versionSaved", { name }));
   }
   async function deleteVersion(id) {
     const next = versions.filter(v => v.id !== id);
@@ -454,20 +457,20 @@ export default function App() {
     const v = versions.find(x => x.id === id);
     if (!v) return;
     if (!v.hasFullSnapshot) {
-      showToast("このバージョンは復元に対応していません（古い形式で保存されています）");
+      showToast(t("toast.versionRestoreUnsupported"));
       return;
     }
     requestConfirm(
-      `現在の内容を破棄し、バージョン「${v.name}」（${new Date(v.createdAt).toLocaleString("ja-JP")}）の状態に戻します。よろしいですか？`,
+      t("confirm.restoreVersion", { name: v.name, createdAt: fmtDateTime(v.createdAt) }),
       () => {
         setTasks(migrateSprintIds(JSON.parse(JSON.stringify(v.rawTasks))));
         setResources(JSON.parse(JSON.stringify(v.rawResources)));
         setSprints(Array.isArray(v.rawSprints) ? JSON.parse(JSON.stringify(v.rawSprints)) : []);
         setCalendarExceptions(Array.isArray(v.rawCalendarExceptions) ? JSON.parse(JSON.stringify(v.rawCalendarExceptions)) : []);
         setSelectedId(null);
-        showToast(`バージョン「${v.name}」の状態に戻しました`);
+        showToast(t("toast.versionRestored", { name: v.name }));
       },
-      "元に戻す",
+      t("confirm.restoreLabel"),
       false
     );
   }
@@ -475,39 +478,41 @@ export default function App() {
   function exportProject() {
     const data = buildProjectExport(tasks, resources, sprints, versions, levelingOn, calendarExceptions);
     downloadJSON(`project-scheduler_${toISO(new Date())}.json`, data);
-    showToast("プロジェクトをJSONファイルに書き出しました");
+    showToast(t("toast.exportedJson"));
   }
   function exportSharedHtml() {
     try {
       const data = buildProjectExport(tasks, resources, sprints, versions, levelingOn, calendarExceptions);
       const html = buildSharedHtml(data);
       downloadTextFile(`project-scheduler-share_${toISO(new Date())}.html`, html, "text/html");
-      showToast("共有用HTMLを書き出しました（このファイルを開くと書き出し時点のスケジュールが表示されます）");
+      showToast(t("toast.exportedSharedHtml"));
     } catch (e) {
-      showToast("共有用HTMLの書き出しに失敗しました");
+      showToast(t("toast.exportSharedHtmlFailed"));
     }
   }
   async function copyMermaidGantt() {
-    const text = generateMermaidGantt(tasks, schedule);
+    const text = generateMermaidGantt(tasks, schedule, {
+      title: t("mermaid.title"), untitled: t("mermaid.untitled"),
+    });
     try {
       await copyTextToClipboard(text);
-      showToast("Mermaid記法のガントチャートをクリップボードにコピーしました");
+      showToast(t("toast.mermaidCopied"));
     } catch (e) {
-      showToast("クリップボードへのコピーに失敗しました");
+      showToast(t("toast.copyFailed"));
     }
   }
   async function copyGanttPng() {
     if (!ganttViewRef.current) {
-      showToast("WBS / ガント画面を表示してから実行してください");
+      showToast(t("toast.pngNeedsGantt"));
       return;
     }
     try {
       const result = await ganttViewRef.current.copyVisiblePng();
-      showToast(result === "copied"
-        ? "ガントチャート（表示範囲）をPNGとしてクリップボードにコピーしました"
-        : "クリップボードへの画像コピーに対応していないため、PNGファイルをダウンロードしました");
+      showToast(result === "copied" ? t("toast.pngCopied") : t("toast.pngDownloaded"));
     } catch (e) {
-      showToast("PNGのコピーに失敗しました: " + e.message);
+      // src/dom/ganttPngExport.js のエラーは code を持つので表示中の言語で出す（それ以外はブラウザのメッセージ）
+      const detail = e?.code && t.has(`pngErrors.${e.code}`) ? t(`pngErrors.${e.code}`) : String(e?.message || e);
+      showToast(t("toast.pngFailed", { message: detail }));
     }
   }
   function triggerImport() { fileInputRef.current && fileInputRef.current.click(); }
@@ -521,11 +526,11 @@ export default function App() {
       data = normalizeImportedProject(JSON.parse(text));
     } catch (err) {
       showToast(err?.message === "invalid_project_json"
-        ? "読み込みに失敗しました（ファイル形式が正しくありません）"
-        : "読み込みに失敗しました（JSONを解析できません）");
+        ? t("toast.importFailedFormat")
+        : t("toast.importFailedParse"));
       return;
     }
-    requestConfirm("現在のタスク・担当者を、読み込んだ内容で置き換えます。よろしいですか？", async () => {
+    requestConfirm(t("confirm.import"), async () => {
       setTasks(data.tasks);
       setResources(data.resources);
       setSprints(data.sprints);
@@ -541,8 +546,8 @@ export default function App() {
         setVersions(merged);
         if (!autoSaveDisabled) await storageSet("pm_versions", merged);
       }
-      showToast("JSONファイルからプロジェクトを読み込みました");
-    }, "読み込む", false);
+      showToast(t("toast.imported"));
+    }, t("confirm.importLabel"), false);
   }
 
   const criticalCount = useMemo(() => { let c = 0; schedule.forEach(v => { if (v.critical && !v.isSummary) c++; }); return c; }, [schedule]);
@@ -596,32 +601,33 @@ export default function App() {
             ref={linkedFileInputRef}
             type="file"
             accept="application/json,.json"
-            aria-label="連携JSONファイル"
+            aria-label={t("linked.fileInputLabel")}
             onChange={handleLinkedFileInput}
             className="sr-only"
           />
         )}
-        <IconBtn icon={Upload} label="読み込み" onClick={triggerImport} small />
+        <IconBtn icon={Upload} label={t("header.import")} onClick={triggerImport} small />
         <ExportMenu
           items={[
-            { icon: Download, label: "JSON書き出し", onClick: exportProject },
-            { icon: Share2, label: "共有用HTML書き出し", onClick: exportSharedHtml },
-            { icon: Copy, label: "Mermaidコピー", onClick: copyMermaidGantt },
+            { icon: Download, label: t("header.exportJson"), onClick: exportProject },
+            { icon: Share2, label: t("header.exportSharedHtml"), onClick: exportSharedHtml },
+            { icon: Copy, label: t("header.copyMermaid"), onClick: copyMermaidGantt },
             ...(tab === "gantt"
-              ? [{ icon: ImageIcon, label: "PNGとしてコピー（表示範囲）", onClick: copyGanttPng }]
+              ? [{ icon: ImageIcon, label: t("header.copyPng"), onClick: copyGanttPng }]
               : []),
           ]}
         />
         <div className="w-px h-5 bg-slate-200 mx-1" />
         <label className="flex items-center gap-1.5 text-xs text-slate-500 mr-1">
           <input type="checkbox" checked={levelingOn} onChange={e => setLevelingOn(e.target.checked)} />
-          リソース平準化を有効にする
+          {t("header.leveling")}
         </label>
-        <IconBtn icon={Play} label="自動スケジューリング実行" onClick={runScheduling} />
+        <IconBtn icon={Play} label={t("header.runScheduling")} onClick={runScheduling} />
         {sprintConflicts.length > 0 && (
           <button
             onClick={() => setSprintConflictOpen(true)}
-            title={`スプリントの期間と矛盾しているタスクが${sprintConflicts.length}件あります（クリックで詳細を表示）`}
+            title={t("header.sprintConflictsTitle", { count: sprintConflicts.length })}
+            aria-label={t("header.sprintConflictsTitle", { count: sprintConflicts.length })}
             className="w-6 h-6 -ml-1.5 flex items-center justify-center rounded-md text-amber-600 hover:bg-amber-50"
           >
             <AlertTriangle size={15} />
@@ -630,7 +636,7 @@ export default function App() {
         {dependencyIssues.length > 0 && (
           <button
             onClick={() => setDependencyIssuesOpen(true)}
-            title={`依存関係に矛盾があります（${dependencyIssues.length}件。クリックで詳細を表示）`}
+            title={t("header.dependencyIssuesTitle", { count: dependencyIssues.length })}
             className={
               "h-6 px-1.5 flex items-center gap-1 rounded-md text-[11px] font-medium border " +
               (dependencyIssueErrorCount > 0
@@ -639,15 +645,26 @@ export default function App() {
             }
           >
             <AlertTriangle size={13} />
-            依存関係の矛盾 {dependencyIssues.length}
+            {t("header.dependencyIssuesButton", { count: dependencyIssues.length })}
           </button>
         )}
         <div className="text-xs font-mono text-slate-500 flex items-center gap-1 border-l border-slate-200 pl-3 ml-1">
-          <Clock size={13} /> 完了予定 {fmtJP(projectEnd)}
+          <Clock size={13} /> {t("header.projectEnd", { date: fmtDate(projectEnd) })}
         </div>
         <div className={"text-xs font-mono flex items-center gap-1 " + (criticalCount ? "text-red-600" : "text-slate-400")}>
-          <AlertTriangle size={13} /> クリティカル {criticalCount}
+          <AlertTriangle size={13} /> {t("header.critical", { count: criticalCount })}
         </div>
+        <label className="flex items-center gap-1 text-xs text-slate-500 border-l border-slate-200 pl-3" title={t("header.language")}>
+          <Languages size={13} aria-hidden="true" />
+          <select
+            value={locale}
+            onChange={e => setLocale(e.target.value)}
+            aria-label={t("header.language")}
+            className="text-xs border border-slate-200 rounded px-1 py-0.5 bg-white"
+          >
+            {LOCALES.map(l => <option key={l} value={l}>{t(`header.languageName.${l}`)}</option>)}
+          </select>
+        </label>
       </div>
 
       {linkedProjectKey && linkedProjectState && (
@@ -656,29 +673,37 @@ export default function App() {
           <div className="min-w-0 flex-1">
             <div className="text-indigo-900 flex items-center gap-2 flex-wrap">
               {linkedProjectState.status === "loading" && (
-                <><RefreshCw size={12} className="animate-spin" /> 連携JSONを確認しています...</>
+                <><RefreshCw size={12} className="animate-spin" /> {t("linked.loading")}</>
               )}
               {linkedProjectState.status === "selection-required" && (
-                <span>queryで指定されたJSONを初回だけ選択してください。</span>
+                <span>{t("linked.selectionRequired")}</span>
               )}
               {linkedProjectState.status === "permission-required" && (
-                <span>関連付け済みJSONへのアクセスを再許可してください。</span>
+                <span>{t("linked.permissionRequired")}</span>
               )}
               {linkedProjectState.status === "error" && (
-                <span className="text-red-700">連携JSONを読み込めませんでした: {linkedProjectState.message}</span>
+                <span className="text-red-700">
+                  {t("linked.error", {
+                    message: linkedProjectState.message && t.has(`linked.errors.${linkedProjectState.message}`)
+                      ? t(`linked.errors.${linkedProjectState.message}`)
+                      : String(linkedProjectState.message || ""),
+                  })}
+                </span>
               )}
               {linkedProjectState.status === "loaded" && (
                 <span>
-                  <span className="font-medium">{linkedProjectState.fileName}</span>
-                  {linkedProjectState.lastModified ? `（最終更新 ${new Date(linkedProjectState.lastModified).toLocaleString("ja-JP")}）` : ""}
-                  を表示しています。この画面での変更は自動保存されません。
+                  {t.rich(linkedProjectState.lastModified ? "linked.loadedWithDate" : "linked.loaded", {
+                    file: chunks => <span className="font-medium">{chunks}</span>,
+                    fileName: linkedProjectState.fileName || "",
+                    lastModified: linkedProjectState.lastModified ? fmtDateTime(linkedProjectState.lastModified) : "",
+                  })}
                 </span>
               )}
             </div>
             <div className="text-[11px] text-indigo-600 truncate mt-0.5" title={linkedProjectKey}>
-              関連付けキー: <code>{linkedProjectKey}</code>
+              {t("linked.key")} <code>{linkedProjectKey}</code>
               {linkedProjectState.status === "loaded" && !linkedProjectState.persistent
-                ? "（このブラウザでは次回もファイル選択が必要です）"
+                ? t("linked.notPersistent")
                 : ""}
             </div>
           </div>
@@ -689,7 +714,7 @@ export default function App() {
                 onClick={reloadLinkedProject}
                 className="px-2.5 py-1 rounded-md border border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-100 flex items-center gap-1"
               >
-                <RefreshCw size={12} /> 最新版を再読込
+                <RefreshCw size={12} /> {t("linked.reload")}
               </button>
             )}
             {linkedProjectState.status !== "loading" && (
@@ -699,12 +724,12 @@ export default function App() {
                 className="px-2.5 py-1 rounded-md bg-indigo-600 text-white hover:bg-indigo-700"
               >
                 {linkedProjectState.status === "loaded"
-                  ? "別のJSONを選択"
+                  ? t("linked.selectOther")
                   : linkedProjectState.status === "permission-required"
-                    ? "アクセスを許可"
+                    ? t("linked.allowAccess")
                     : linkedProjectState.status === "error"
-                      ? "JSONを選び直す"
-                      : "JSONを選択"}
+                      ? t("linked.reselect")
+                      : t("linked.select")}
               </button>
             )}
           </div>
@@ -716,13 +741,12 @@ export default function App() {
           <Camera size={14} className="text-amber-600 flex-shrink-0" />
           <div className="min-w-0 flex-1 text-amber-900">
             {embeddedProject.ok ? (
-              <>
-                <span className="font-medium">{fmtDateTimeJP(embeddedProject.data.exportedAt)}</span>
-                {" に書き出されたスケジュールを表示中です。"}
-                この画面での変更はこのHTMLファイルには保存されません（再読み込みすると書き出し時点の状態に戻ります）。
-              </>
+              t.rich("embedded.banner", {
+                b: chunks => <span className="font-medium">{chunks}</span>,
+                exportedAt: fmtExportedAt(embeddedProject.data.exportedAt),
+              })
             ) : (
-              <span className="text-red-700">このHTMLに埋め込まれたスケジュールデータを読み込めませんでした。</span>
+              <span className="text-red-700">{t("embedded.loadFailed")}</span>
             )}
           </div>
         </div>
@@ -731,17 +755,17 @@ export default function App() {
       {levelWarnings.length > 0 && (
         <div className="bg-amber-50 border-b border-amber-200 text-amber-800 text-xs px-4 py-1.5 flex items-center gap-2">
           <AlertTriangle size={13} className="flex-shrink-0" />
-          <span>{levelWarnings.join(" / ")}</span>
+          <span>{levelWarnings.map(w => formatLevelWarning(t, w)).join(" / ")}</span>
         </div>
       )}
 
       <div className="flex bg-white border-b border-slate-200 px-3">
-        <Tab icon={Table2} label="WBS / ガント" active={tab === "gantt"} onClick={() => setTab("gantt")} />
-        <Tab icon={GitBranch} label="ネットワーク図" active={tab === "network"} onClick={() => setTab("network")} />
-        <Tab icon={Users} label="リソース" active={tab === "resource"} onClick={() => setTab("resource")} />
-        <Tab icon={CalendarRange} label="スプリント" active={tab === "sprints"} onClick={() => setTab("sprints")} count={sprints.length || null} />
-        <Tab icon={CalendarOff} label="カレンダー編集" active={tab === "calendar"} onClick={() => setTab("calendar")} count={calendarExceptions.length || null} />
-        <Tab icon={History} label="バージョン" active={tab === "versions"} onClick={() => setTab("versions")} count={versions.length || null} />
+        <Tab icon={Table2} label={t("tabs.gantt")} active={tab === "gantt"} onClick={() => setTab("gantt")} />
+        <Tab icon={GitBranch} label={t("tabs.network")} active={tab === "network"} onClick={() => setTab("network")} />
+        <Tab icon={Users} label={t("tabs.resource")} active={tab === "resource"} onClick={() => setTab("resource")} />
+        <Tab icon={CalendarRange} label={t("tabs.sprints")} active={tab === "sprints"} onClick={() => setTab("sprints")} count={sprints.length || null} />
+        <Tab icon={CalendarOff} label={t("tabs.calendar")} active={tab === "calendar"} onClick={() => setTab("calendar")} count={calendarExceptions.length || null} />
+        <Tab icon={History} label={t("tabs.versions")} active={tab === "versions"} onClick={() => setTab("versions")} count={versions.length || null} />
       </div>
 
       <div className="flex-1 min-h-0">
@@ -798,7 +822,7 @@ export default function App() {
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-5" onClick={e => e.stopPropagation()}>
             <p className="text-sm text-slate-700 mb-5 whitespace-pre-wrap">{confirmState.message}</p>
             <div className="flex justify-end gap-2">
-              <IconBtn label="キャンセル" onClick={() => setConfirmState(null)} small />
+              <IconBtn label={t("common.cancel")} onClick={() => setConfirmState(null)} small />
               <IconBtn
                 label={confirmState.confirmLabel}
                 danger={confirmState.danger}
@@ -816,33 +840,33 @@ export default function App() {
             <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 flex-shrink-0">
               <div className="flex items-center gap-2 text-sm font-semibold text-amber-700">
                 <AlertTriangle size={15} />
-                スプリントとの矛盾（{sprintConflicts.length}件）
+                {t("sprintConflicts.title", { count: sprintConflicts.length })}
               </div>
-              <button onClick={() => setSprintConflictOpen(false)} className="text-slate-400 hover:text-slate-700">
+              <button onClick={() => setSprintConflictOpen(false)} aria-label={t("common.close")} className="text-slate-400 hover:text-slate-700">
                 <X size={16} />
               </button>
             </div>
             <div className="p-4 space-y-3 overflow-y-auto">
               <p className="text-xs text-slate-500">
-                依存関係や固定マイルストーンの日程が優先されるため、割り当てられたスプリントの期間内に収まらなかったタスクです。
+                {t("sprintConflicts.description")}
               </p>
               {sprintConflicts.map(c => (
                 <div key={c.taskId} className="border border-amber-200 bg-amber-50 rounded-lg px-3 py-2">
                   <div className="text-xs font-medium text-slate-700">
                     {c.wbsNo && <span className="font-mono text-slate-400 mr-1">{c.wbsNo}</span>}
                     {c.name}
-                    <span className="ml-1 text-slate-400 font-normal">（{c.sprintName}）</span>
+                    <span className="ml-1 text-slate-400 font-normal">{t("sprintConflicts.sprintNames", { names: formatSprintConflictSprintNames(t, c) })}</span>
                   </div>
                   <ul className="mt-1 space-y-0.5">
                     {c.reasons.map((r, i) => (
-                      <li key={i} className="text-[11px] text-amber-700">・{r}</li>
+                      <li key={i} className="text-[11px] text-amber-700">{t("common.bullet")}{formatSprintConflictReason(t, r)}</li>
                     ))}
                   </ul>
                 </div>
               ))}
             </div>
             <div className="flex justify-end gap-2 px-4 py-3 border-t border-slate-100 flex-shrink-0">
-              <IconBtn label="閉じる" onClick={() => setSprintConflictOpen(false)} small />
+              <IconBtn label={t("common.close")} onClick={() => setSprintConflictOpen(false)} small />
             </div>
           </div>
         </div>
@@ -859,20 +883,19 @@ export default function App() {
             <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 flex-shrink-0">
               <div id="dependency-issues-dialog-title" className={"flex items-center gap-2 text-sm font-semibold " + (dependencyIssueErrorCount > 0 ? "text-red-700" : "text-amber-700")}>
                 <AlertTriangle size={15} />
-                依存関係の矛盾（{dependencyIssues.length}件）
+                {t("dependencyIssues.dialogTitle", { count: dependencyIssues.length })}
               </div>
-              <button onClick={() => setDependencyIssuesOpen(false)} aria-label="閉じる" className="text-slate-400 hover:text-slate-700">
+              <button onClick={() => setDependencyIssuesOpen(false)} aria-label={t("common.close")} className="text-slate-400 hover:text-slate-700">
                 <X size={16} />
               </button>
             </div>
             <div className="p-4 space-y-3 overflow-y-auto">
               <p className="text-xs text-slate-500">
-                {"日程は自動では修正されません。開始日との矛盾は「自動スケジューリング実行」で解消できます。"
-                  + "循環参照・存在しない先行タスクは、先行タスク欄を修正してください。項目をクリックすると該当タスクを表示します。"}
+                {t("dependencyIssues.dialogDescription")}
               </p>
               {dependencyIssues.map((issue, idx) => {
                 const isError = issue.severity === "error";
-                const kind = DEPENDENCY_ISSUE_LABELS[issue.code] || issue.code;
+                const kind = dependencyIssueLabel(t, issue.code);
                 const target = issue.ids.map(id => tasks.find(t => t.id === id)).filter(Boolean);
                 return (
                   <button
@@ -887,7 +910,7 @@ export default function App() {
                     <div className="text-xs font-medium text-slate-700 flex items-center gap-1.5 flex-wrap">
                       <span className={"text-[10px] leading-none px-1.5 py-0.5 rounded border " + (isError ? "bg-white text-red-700 border-red-200" : "bg-white text-amber-700 border-amber-200")}>{kind}</span>
                       {issue.code === "dependency-cycle"
-                        ? <span>{target.length}件のタスク・グループ</span>
+                        ? <span>{t("dependencyIssues.cycleTargets", { count: target.length })}</span>
                         : target.map(t => (
                           <span key={t.id}>
                             {wbsNoById.get(t.id) && <span className="font-mono text-slate-400 mr-1">{wbsNoById.get(t.id)}</span>}
@@ -895,13 +918,13 @@ export default function App() {
                           </span>
                         ))}
                     </div>
-                    <div className={"mt-1 text-[11px] " + (isError ? "text-red-700" : "text-amber-700")}>{issue.message}</div>
+                    <div className={"mt-1 text-[11px] " + (isError ? "text-red-700" : "text-amber-700")}>{formatDependencyIssueMessage(t, issue)}</div>
                   </button>
                 );
               })}
             </div>
             <div className="flex justify-end gap-2 px-4 py-3 border-t border-slate-100 flex-shrink-0">
-              <IconBtn label="閉じる" onClick={() => setDependencyIssuesOpen(false)} small />
+              <IconBtn label={t("common.close")} onClick={() => setDependencyIssuesOpen(false)} small />
             </div>
           </div>
         </div>

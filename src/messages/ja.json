@@ -1,0 +1,412 @@
+{
+  "common": {
+    "close": "閉じる",
+    "cancel": "キャンセル",
+    "delete": "削除",
+    "deleteConfirm": "削除する",
+    "untitledTask": "（無題のタスク）",
+    "untitledSprint": "（無題のスプリント）",
+    "listSeparator": "、",
+    "bullet": "・",
+    "done": "完了",
+    "notDone": "未完了"
+  },
+  "header": {
+    "import": "読み込み",
+    "export": "書き出し",
+    "exportJson": "JSON書き出し",
+    "exportSharedHtml": "共有用HTML書き出し",
+    "copyMermaid": "Mermaidコピー",
+    "copyPng": "PNGとしてコピー（表示範囲）",
+    "leveling": "リソース平準化を有効にする",
+    "runScheduling": "自動スケジューリング実行",
+    "sprintConflictsTitle": "スプリントの期間と矛盾しているタスクが{count}件あります（クリックで詳細を表示）",
+    "dependencyIssuesTitle": "依存関係に矛盾があります（{count}件。クリックで詳細を表示）",
+    "dependencyIssuesButton": "依存関係の矛盾 {count}",
+    "projectEnd": "完了予定 {date}",
+    "critical": "クリティカル {count}",
+    "language": "表示言語",
+    "languageName": {
+      "ja": "日本語",
+      "en": "English"
+    }
+  },
+  "tabs": {
+    "gantt": "WBS / ガント",
+    "network": "ネットワーク図",
+    "resource": "リソース",
+    "sprints": "スプリント",
+    "calendar": "カレンダー編集",
+    "versions": "バージョン"
+  },
+  "linked": {
+    "fileInputLabel": "連携JSONファイル",
+    "loading": "連携JSONを確認しています...",
+    "selectionRequired": "queryで指定されたJSONを初回だけ選択してください。",
+    "permissionRequired": "関連付け済みJSONへのアクセスを再許可してください。",
+    "error": "連携JSONを読み込めませんでした: {message}",
+    "errors": {
+      "invalidFormat": "ファイル形式が正しくありません",
+      "parseFailed": "JSONを解析できません",
+      "readFailed": "関連付けたファイルを読み込めません",
+      "pickFailed": "ファイル選択を開始できません"
+    },
+    "loaded": "<file>{fileName}</file>を表示しています。この画面での変更は自動保存されません。",
+    "loadedWithDate": "<file>{fileName}</file>（最終更新 {lastModified}）を表示しています。この画面での変更は自動保存されません。",
+    "key": "関連付けキー:",
+    "notPersistent": "（このブラウザでは次回もファイル選択が必要です）",
+    "reload": "最新版を再読込",
+    "selectOther": "別のJSONを選択",
+    "allowAccess": "アクセスを許可",
+    "reselect": "JSONを選び直す",
+    "select": "JSONを選択"
+  },
+  "embedded": {
+    "banner": "<b>{exportedAt}</b> に書き出されたスケジュールを表示中です。この画面での変更はこのHTMLファイルには保存されません（再読み込みすると書き出し時点の状態に戻ります）。",
+    "loadFailed": "このHTMLに埋め込まれたスケジュールデータを読み込めませんでした。"
+  },
+  "toast": {
+    "linkSaveFailed": "JSONは読み込みましたが、関連付けをブラウザに保存できませんでした",
+    "linkedReloaded": "連携JSONを再読み込みしました",
+    "scheduleNotConverged": "開始日を再計算しましたが、一部のタスクで表示と開始日が一致していない可能性があります。もう一度実行してください",
+    "scheduledWithLeveling": "依存関係とリソース平準化に基づき開始日を再計算しました",
+    "scheduled": "依存関係に基づき再スケジューリングしました",
+    "versionSaved": "バージョン「{name}」を保存しました",
+    "versionRestoreUnsupported": "このバージョンは復元に対応していません（古い形式で保存されています）",
+    "versionRestored": "バージョン「{name}」の状態に戻しました",
+    "exportedJson": "プロジェクトをJSONファイルに書き出しました",
+    "exportedSharedHtml": "共有用HTMLを書き出しました（このファイルを開くと書き出し時点のスケジュールが表示されます）",
+    "exportSharedHtmlFailed": "共有用HTMLの書き出しに失敗しました",
+    "mermaidCopied": "Mermaid記法のガントチャートをクリップボードにコピーしました",
+    "copyFailed": "クリップボードへのコピーに失敗しました",
+    "pngNeedsGantt": "WBS / ガント画面を表示してから実行してください",
+    "pngCopied": "ガントチャート（表示範囲）をPNGとしてクリップボードにコピーしました",
+    "pngDownloaded": "クリップボードへの画像コピーに対応していないため、PNGファイルをダウンロードしました",
+    "pngFailed": "PNGのコピーに失敗しました: {message}",
+    "importFailedFormat": "読み込みに失敗しました（ファイル形式が正しくありません）",
+    "importFailedParse": "読み込みに失敗しました（JSONを解析できません）",
+    "imported": "JSONファイルからプロジェクトを読み込みました"
+  },
+  "pngErrors": {
+    "gantt-dom-missing": "ガント画面のDOM構造を取得できませんでした",
+    "svg-image-failed": "ガント画面のSVG画像化に失敗しました",
+    "png-encode-failed": "PNGの生成に失敗しました"
+  },
+  "confirm": {
+    "defaultLabel": "実行する",
+    "restoreVersion": "現在の内容を破棄し、バージョン「{name}」（{createdAt}）の状態に戻します。よろしいですか？",
+    "restoreLabel": "元に戻す",
+    "import": "現在のタスク・担当者を、読み込んだ内容で置き換えます。よろしいですか？",
+    "importLabel": "読み込む"
+  },
+  "mermaid": {
+    "title": "プロジェクトスケジュール",
+    "untitled": "（無題）"
+  },
+  "sprintConflicts": {
+    "title": "スプリントとの矛盾（{count}件）",
+    "description": "依存関係や固定マイルストーンの日程が優先されるため、割り当てられたスプリントの期間内に収まらなかったタスクです。",
+    "sprintNames": "（{names}）",
+    "reason": {
+      "startBeforeSprint": "開始日（{start, date, ymd}）がスプリント開始日（{sprintStart, date, ymd}）より前になっています",
+      "finishAfterSprint": "終了日（{finish, date, ymd}）がスプリント終了日（{sprintEnd, date, ymd}）を超えています",
+      "governed": "固定マイルストーンの期日が優先されているため、スプリント期間内に収まりません"
+    }
+  },
+  "dependencyIssues": {
+    "label": {
+      "dependency-cycle": "循環参照",
+      "self-dependency": "循環参照（自己依存）",
+      "predecessor-missing": "存在しない先行タスク",
+      "dependency-violation": "開始日との矛盾",
+      "fixed-milestone-overrun": "固定期日の超過"
+    },
+    "dialogTitle": "依存関係の矛盾（{count}件）",
+    "dialogDescription": "日程は自動では修正されません。開始日との矛盾は「自動スケジューリング実行」で解消できます。循環参照・存在しない先行タスクは、先行タスク欄を修正してください。項目をクリックすると該当タスクを表示します。",
+    "cycleTargets": "{count}件のタスク・グループ",
+    "rowIconLabel": "依存関係の矛盾（{count}件）",
+    "hiddenInGroup": "配下のタスクに依存関係の矛盾が{count}件あります（グループを展開すると確認できます）",
+    "quoted": "「{name}」",
+    "arrow": "→",
+    "cycleMemberNote": "「{child}」はグループ「{parent}」の配下",
+    "message": {
+      "cycle": "循環参照: {route}",
+      "cycleWithNotes": "循環参照: {route}（{notes}）",
+      "self": "自分自身を先行タスクにしています（この依存関係は計算に使われていません）",
+      "missing": "先行タスク「{predecessorId}」が存在しません（削除済みのタスクを参照しているため、この依存関係は計算に使われていません）",
+      "violationStart": "先行「{predName}」（{label}）の条件では {required, date, ymd} 以降に開始する必要がありますが、{actual, date, ymd} に開始しています",
+      "violationFinish": "先行「{predName}」（{label}）の条件では {required, date, ymd} 以降に終了する必要がありますが、{actual, date, ymd} に終了しています",
+      "overrunEarliest": "先行「{predName}」から求めた最早日（{earliest, date, ymd}）が固定期日（{fixedDate, date, ymd}）を超過しています",
+      "overrunDisplay": "表示中の日程（{actual, date, ymd}）が固定期日（{fixedDate, date, ymd}）を超過しています"
+    },
+    "tooltipLine": "{label}: {message}"
+  },
+  "levelWarnings": {
+    "limit": {
+      "daily": "日次{value}人日",
+      "weekly": "週次{value}人日",
+      "monthly": "月次{value}人日"
+    },
+    "limitSeparator": "・",
+    "capacityExceeded": "「{taskName}」（担当者: {resourceName}、工数: {duration}人日）は、{limits}の稼働上限内で割り当てきれませんでした（探索上限: {searchWorkdays, number}稼働日）。開始日を{start, date, ymd}とし、連続する稼働日に配置していますが、稼働上限を超過しています。工数または稼働上限の見直しが必要です。"
+  },
+  "taskDetail": {
+    "groupBadge": "（グループ）",
+    "name": "タスク名",
+    "kind": "種別",
+    "kindMilestone": "マイルストーン（クリックでタスクに変更）",
+    "kindTask": "タスク（クリックでマイルストーンに変更）",
+    "dueDate": "期日",
+    "mode": "モード",
+    "modeFlexible": "柔軟（順算）",
+    "modeFixed": "固定（期日から逆算）",
+    "startDate": "開始日",
+    "duration": "工数（人日）",
+    "assignee": "担当者",
+    "unassigned": "未割当",
+    "sprints": "スプリント（複数選択可）",
+    "noSprints": "スプリントが登録されていません",
+    "sprintRange": "（{start}〜{end}）",
+    "progress": "進捗率",
+    "progressSummaryNote": "　※配下タスクの平均を自動表示（編集不可）",
+    "completed": "完了済み",
+    "predecessors": "先行タスク（WBS番号[型][±遅延] 例: 1.2FS+1）",
+    "predecessorsSummaryNote": "　※配下の全タスクに適用されます",
+    "successors": "後続タスク",
+    "schedStart": "開始",
+    "schedFinish": "終了",
+    "float": "フロート",
+    "floatDays": "{days} 日",
+    "floatDaysCritical": "{days} 日（クリティカル）",
+    "governed": "逆算対象",
+    "governedDescription": "固定マイルストーンの期日から逆算されています",
+    "notes": "メモ",
+    "notesPlaceholder": "このタスクに関するメモを入力"
+  },
+  "wbs": {
+    "depsPlaceholder": "例: 1.2FS+1",
+    "colResizeTitle": "ドラッグで列幅を変更（ダブルクリックで既定幅に戻す）",
+    "sprintSelectTitle": "紐付けるスプリント",
+    "noSprints": "スプリントがありません",
+    "milestoneMode": {
+      "fixed": "固定",
+      "flexible": "柔軟"
+    },
+    "newTaskName": "新規タスク",
+    "newMilestoneName": "新規マイルストーン",
+    "newTaskPlaceholder": "新しいタスクを追加して Enter",
+    "confirmDelete": "「{name}」を削除します。子タスクがある場合はまとめて削除されます。よろしいですか？",
+    "paneResizeTitle": "ドラッグでペイン幅を調整（ダブルクリックで自動幅に戻す）",
+    "toast": {
+      "rowCopied": "行をクリップボードにコピーしました",
+      "cellCopied": "セルをクリップボードにコピーしました",
+      "nothingToPaste": "貼り付けできる値がありません",
+      "pastedPartially": "互換性のないセルを除いて貼り付けました",
+      "rowPasted": "行を貼り付けました",
+      "cellPasted": "セルを貼り付けました"
+    },
+    "toolbar": {
+      "task": "タスク",
+      "milestone": "マイルストーン",
+      "indent": "インデント",
+      "outdent": "アウトデント",
+      "details": "詳細",
+      "copy": "コピー",
+      "paste": "貼り付け",
+      "undo": "元に戻す",
+      "redo": "やり直す",
+      "saveVersion": "バージョンを保存"
+    },
+    "compare": {
+      "title": "指定したバージョンをWBS番号で突き合わせ、各タスクの下に基準バージョンの行を重ねて表示します",
+      "none": "比較しない",
+      "unsupported": "非対応",
+      "unsupportedTitle": "このバージョンはWBS番号を保存していないため比較できません（再保存すると比較できるようになります）",
+      "newTask": "新規",
+      "newTaskTitle": "基準バージョンには存在しないタスクです",
+      "baselineTitle": "基準: {name}",
+      "notInBaseline": "（基準になし）",
+      "later": "現在は基準より{days}日遅い",
+      "earlier": "現在は基準より{days}日早い",
+      "same": "基準と同じ終了日"
+    },
+    "columns": {
+      "wbsTitle": "WBS番号をクリックして行を選び、コピー／貼り付けできます",
+      "name": "タスク名",
+      "start": "開始日",
+      "duration": "工数",
+      "durationTitle": "工数（人日）。小数可（例: 0.5, 2.5）",
+      "finish": "終了日",
+      "assignee": "担当",
+      "assigneeTitle": "通常タスクは担当者、マイルストーンは固定/柔軟を選択",
+      "sprint": "スプリント",
+      "sprintTitle": "紐付けるスプリント（グループには設定できません）",
+      "progress": "進捗",
+      "progressTitle": "進捗率（%）。グループはその配下タスクの進捗率の平均を自動表示します",
+      "deps": "先行",
+      "depsTitle": "WBS番号で指定します（例: 1.2FS+1）。グループの行に設定すると配下の全タスクに適用されます"
+    },
+    "row": {
+      "dragTitle": "ドラッグで並べ替え",
+      "selectTitle": "行を選択（コピー／貼り付け対象）",
+      "toTask": "クリックでタスクに変更",
+      "toMilestone": "クリックでマイルストーンに変更",
+      "openDetails": "詳細を開く",
+      "durationTitle": "人日（小数可）",
+      "milestoneModeTitle": "固定：期日から逆算してスケジュール / 柔軟：依存関係から順算",
+      "doneCheckTitle": "完了チェック（未チェック：0% / チェック済み：100%）",
+      "progressTitle": "進捗率（%）"
+    }
+  },
+  "gantt": {
+    "toolbar": {
+      "inazuma": "稲妻線",
+      "baseDate": "進捗基準日（稲妻線・今日の縦線の基準）",
+      "resetBaseDateTitle": "本日に戻す",
+      "today": "今日",
+      "criticalPath": "クリティカルパス",
+      "zoomOut": "ズームアウト（日→週→月へ縮約）",
+      "zoomIn": "ズームイン"
+    },
+    "sprintBandLabel": "{name}・{theme}",
+    "fixedMilestoneSuffix": " (固定 {date})",
+    "idle": {
+      "weekly": "週次上限（{value}人日/週）に到達",
+      "monthly": "月次上限（{value}人日/月）に到達",
+      "taskName": "「{name}」",
+      "nameSeparator": "",
+      "namesAndMore": "{names}ほか{count}件",
+      "daily": "他タスク{names}に割当済み（日次{value}人日）"
+    },
+    "tooltip": {
+      "period": "{start} 〜 {finish}",
+      "range": "{start}〜{end}",
+      "fixedMilestone": "固定マイルストーン（期日 {date}）",
+      "flexibleMilestone": "柔軟マイルストーン",
+      "assignee": "担当: {name}",
+      "effortProgress": "工数 {duration}人日 ・ 進捗 {progress}%",
+      "includesNonWorkdays": "この期間に非稼働日を含みます",
+      "sprints": "スプリント: {names}",
+      "sprintSeparator": "・",
+      "float": "余裕 {days}日",
+      "floatCritical": "余裕 {days}日（クリティカル）",
+      "idleDays": "稼働上限により割当のない稼働日: {idle}日（割当 {allocated}日）",
+      "moreSegments": "ほか{count}区間",
+      "partialDay": "{date}（{load}人日）",
+      "partial": "一部のみ割当: {days}",
+      "partialMore": "一部のみ割当: {days} ほか{count}日",
+      "overCapacity": "稼働上限内に割り当てきれず、上限を超過しています",
+      "ariaSeparator": "。"
+    }
+  },
+  "calendar": {
+    "weekdaySuffix": "（{weekday}）",
+    "exceptions": {
+      "title": "非稼働日カレンダー",
+      "add": "例外日を追加",
+      "thisRow": "この行",
+      "confirmDeleteHoliday": "{date} の休日指定を削除しますか？",
+      "confirmDeleteWorkday": "{date} の稼働日指定を削除しますか？",
+      "columns": {
+        "date": "日付",
+        "type": "種別",
+        "name": "名称"
+      },
+      "empty": "例外はまだありません（土日＋日本の祝日で計算します）",
+      "invalidType": "（不正な種別）",
+      "type": {
+        "holiday": "休日",
+        "workday": "稼働日"
+      },
+      "placeholder": {
+        "holiday": "例: 創立記念日",
+        "workday": "例: 休日出勤"
+      },
+      "hint": {
+        "noDate": "日付を入力してください",
+        "invalidType": "種別が不正です（この行はスケジュールに反映されません。種別を選び直してください）",
+        "duplicate": "同じ日付の行が複数あります（稼働日が優先されます）",
+        "alreadyWeekend": "この日は元々土日です（指定は不要）",
+        "alreadyHoliday": "この日は元々祝日です（指定は不要）",
+        "alreadyWorkday": "この日は元々稼働日です（指定は不要）"
+      },
+      "note": "優先順位: 稼働日 ＞ 休日 ＞ 日本の祝日 ＞ 土日。 「稼働日」は土日・祝日でもその日を稼働日として扱い、「休日」は平日を非稼働日にします。ここでの変更はCPM・リソース平準化・完了予定日に反映されます。",
+      "recent": "直近の例外: {items}",
+      "recentHoliday": "(休)",
+      "recentWorkday": "(稼働)"
+    },
+    "upcoming": {
+      "title": "今後の祝日（自動計算・編集不可）",
+      "empty": "直近に自動計算の祝日はありません。",
+      "note": "日本の祝日（振替休日・国民の休日を含む）は自動で非稼働日として扱われます。 ここに無い休日（会社独自の休日など）や、土日・祝日に稼働する日だけを上の表で追加してください。"
+    }
+  },
+  "sprints": {
+    "title": "スプリント一覧",
+    "add": "スプリントを追加",
+    "confirmDelete": "このスプリントを削除しますか？（紐付いていたタスクは未割当になります）",
+    "overlapWarning": "期間が重なっているスプリントがあります。保存はできますが、内容を確認してください。",
+    "columns": {
+      "name": "名称",
+      "theme": "テーマ",
+      "start": "開始日",
+      "end": "終了日",
+      "taskCount": "タスク数"
+    },
+    "empty": "スプリントはまだありません",
+    "themePlaceholder": "このスプリントのテーマ（任意）",
+    "invalidRange": "終了日が開始日より前になっています",
+    "overlapping": "他のスプリントと期間が重なっています",
+    "taskCount": "{count}件",
+    "note": "開始日・終了日は自由に入力できます（目安は1週間）。グループ（サマリータスク）にはスプリントを設定できません。",
+    "timeline": "スプリント タイムライン"
+  },
+  "resources": {
+    "newName": "新規担当者",
+    "confirmDelete": "この担当者を削除しますか？（タスクの担当は未割当になります）",
+    "title": "担当者と稼働上限",
+    "add": "担当者を追加",
+    "columns": {
+      "name": "名前",
+      "capacityTitle": "0 は上限なし（1日1人日の上限のみ適用）",
+      "weekly": "週次上限（日/週、0=上限なし）",
+      "monthly": "月次上限（日/月、0=上限なし）"
+    },
+    "weeklyLoad": "週次の稼働負荷",
+    "selectAssignee": "担当者",
+    "chart": {
+      "value": "{value} 人日",
+      "series": "割当工数",
+      "week": "週: {week}",
+      "limit": "上限"
+    },
+    "note": "赤い破線は週次稼働上限（0は上限なし）。ガントの日程と同じ日別割当を集計しています。リソース平準化をONにすると、上限に収まるよう工数を早い日から割り当て、上限に達した日を挟んでタスクの期間を延長します。"
+  },
+  "versions": {
+    "defaultName": "バージョン {n}",
+    "namePlaceholder": "バージョン名（例: 初期計画）",
+    "nameLabel": "バージョン名",
+    "save": "現在のスケジュールを保存",
+    "columns": {
+      "name": "名前",
+      "savedAt": "保存日時",
+      "taskCount": "タスク数",
+      "finish": "完了予定"
+    },
+    "empty": "保存されたバージョンはありません",
+    "compareCheck": "「{name}」を比較する",
+    "renameTitle": "クリックしてバージョン名を変更",
+    "restoreTitle": "現在のタスク・担当者をこのバージョンの状態に戻します",
+    "restoreUnsupportedTitle": "古い形式で保存されたバージョンのため復元できません",
+    "compare": "バージョン比較"
+  },
+  "network": {
+    "tidy": "整頓表示",
+    "group": "グループ（配下 {count}件）",
+    "fixedMilestone": "固定マイルストーン",
+    "milestone": "マイルストーン",
+    "float": "フロート {days}日",
+    "lagTitle": "ラグ（workday）",
+    "removeEdge": "依存関係を削除"
+  }
+}

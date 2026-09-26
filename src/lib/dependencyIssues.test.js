@@ -5,6 +5,12 @@ import {
   findMissingPredecessors, findSelfDependencies, findDependencyCycles, detectDependencyIssues, detectScheduleDependencyIssues,
   groupDependencyIssuesByTask, DEPENDENCY_ISSUE_CODES,
 } from "./dependencyIssues.js";
+import { createAppTranslator, formatDependencyIssueMessage } from "./i18n.js";
+
+// lib は文言を組み立てず code + params を返す。日本語の表示文言が従来どおりであることは
+// メッセージカタログ（src/messages/ja.json）で生成して確認する。
+const tJa = createAppTranslator("ja");
+const jaMessage = issue => formatDependencyIssueMessage(tJa, issue);
 
 // 2024-01-09(火)〜2024-02-09の間は土日以外の非稼働日が無い期間なので、
 // 日付計算の期待値を単純な曜日カウントで検証できる（scheduling.test.js と同じ前提）。
@@ -134,7 +140,9 @@ describe("detectDependencyIssues: 開始日との矛盾", () => {
       code: DEPENDENCY_ISSUE_CODES.violation, severity: "warning", ids: ["Y"], predecessorId: "X",
       requiredDate: "2024-01-11", actualDate: "2024-01-10",
     });
-    expect(issues[0].message).toBe("先行「基本設計」（FS）の条件では 2024/01/11 以降に開始する必要がありますが、2024/01/10 に開始しています");
+    expect(issues[0].params).toEqual({ side: "start", predName: "基本設計", label: "FS", required: "2024-01-11", actual: "2024-01-10" });
+    expect(issues[0]).not.toHaveProperty("message");
+    expect(jaMessage(issues[0])).toBe("先行「基本設計」（FS）の条件では 2024/01/11 以降に開始する必要がありますが、2024/01/10 に開始しています");
   });
 
   it("依存関係の条件を満たしていれば警告しない（開始日が未入力のタスクも含む）", () => {
@@ -162,10 +170,11 @@ describe("detectDependencyIssues: 開始日との矛盾", () => {
     const x = task({ id: "X", name: "X", startDate: "2024-01-10", duration: 3 }); // 1/10〜1/12
     const ff = detect([x, task({ id: "Y", order: 1, startDate: "2024-01-09", duration: 2, predecessors: [{ id: "X", type: "FF", lag: 0 }] })]);
     expect(ff).toHaveLength(1);
-    expect(ff[0].message).toBe("先行「X」（FF）の条件では 2024/01/12 以降に終了する必要がありますが、2024/01/10 に終了しています");
+    expect(ff[0].params).toMatchObject({ side: "finish", required: "2024-01-12", actual: "2024-01-10" });
+    expect(jaMessage(ff[0])).toBe("先行「X」（FF）の条件では 2024/01/12 以降に終了する必要がありますが、2024/01/10 に終了しています");
     const sf = detect([x, task({ id: "Y", order: 1, startDate: "2024-01-09", duration: 1, predecessors: [{ id: "X", type: "SF", lag: 0 }] })]);
     expect(sf).toHaveLength(1);
-    expect(sf[0].message).toContain("2024/01/10 以降に終了する必要があります");
+    expect(jaMessage(sf[0])).toContain("2024/01/10 以降に終了する必要があります");
   });
 
   it("着手済み（progress > 0）のタスクは開始日との矛盾として警告しない", () => {
@@ -220,7 +229,8 @@ describe("detectDependencyIssues: 固定マイルストーンの期日超過", (
     const issues = detect(overrunTasks());
     expect(issues).toHaveLength(1);
     expect(issues[0]).toMatchObject({ code: DEPENDENCY_ISSUE_CODES.overrun, severity: "warning", ids: ["M"], requiredDate: "2024-01-23" });
-    expect(issues[0].message).toBe("先行「結合テスト」から求めた最早日（2024/01/23）が固定期日（2024/01/10）を超過しています");
+    expect(issues[0].params).toEqual({ predName: "結合テスト", earliest: "2024-01-23", fixedDate: "2024-01-10" });
+    expect(jaMessage(issues[0])).toBe("先行「結合テスト」から求めた最早日（2024/01/23）が固定期日（2024/01/10）を超過しています");
   });
 
   it("平準化ONでも同じく警告する（平準化の警告とは二重に出さない）", () => {
@@ -249,7 +259,7 @@ describe("detectDependencyIssues: 循環・存在しない先行タスク", () =
     const issues = detect(tasks);
     expect(codesOf(issues)).toEqual(["dependency-cycle:A,B"]);
     expect(issues[0]).toMatchObject({ severity: "error", path: ["A", "B", "A"] });
-    expect(issues[0].message).toBe("循環参照: 「A」→「B」→「A」");
+    expect(jaMessage(issues[0])).toBe("循環参照: 「A」→「B」→「A」");
   });
 
   it("グループを介した循環のメッセージに、所属関係を補足する", () => {
@@ -259,7 +269,8 @@ describe("detectDependencyIssues: 循環・存在しない先行タスク", () =
       task({ id: "B", name: "B", parentId: "G", predecessors: [fs("A")] }),
     ];
     const [issue] = detectDependencyIssues(tasks);
-    expect(issue.message).toBe("循環参照: 「A」→「B」→「G」→「A」（「B」はグループ「G」の配下）");
+    expect(issue.params.memberEdges).toEqual([{ childId: "B", childName: "B", parentId: "G", parentName: "G" }]);
+    expect(jaMessage(issue)).toBe("循環参照: 「A」→「B」→「G」→「A」（「B」はグループ「G」の配下）");
   });
 
   it("自分自身への依存（WBS表の先行欄に自分のWBS番号を入力した場合等）を error として報告する", () => {
@@ -267,7 +278,7 @@ describe("detectDependencyIssues: 循環・存在しない先行タスク", () =
     const issues = detect(tasks);
     expect(issues).toHaveLength(1);
     expect(issues[0]).toMatchObject({ code: DEPENDENCY_ISSUE_CODES.self, severity: "error", ids: ["A"], predecessorId: "A" });
-    expect(issues[0].message).toBe("自分自身を先行タスクにしています（この依存関係は計算に使われていません）");
+    expect(jaMessage(issues[0])).toBe("自分自身を先行タスクにしています（この依存関係は計算に使われていません）");
   });
 
   it("存在しない先行タスクを error として報告する（スケジュール無しでも判定できる）", () => {

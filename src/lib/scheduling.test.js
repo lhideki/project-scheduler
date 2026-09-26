@@ -5,6 +5,7 @@ import {
   deriveProjectStart, autoScheduleStartDates, computeAutoSchedule, buildDisplaySchedule,
 } from "./scheduling.js";
 import { weekKey, monthKey } from "./calendar.js";
+import { createAppTranslator, formatLevelWarning } from "./i18n.js";
 
 // 2024-01-09(火)〜2024-02-09の間は土日以外の非稼働日が無い期間なので、
 // 日付計算の期待値を単純な曜日カウントで検証できる。
@@ -128,10 +129,20 @@ describe("levelResources", () => {
     expect(allocations.T.overCapacity).toBe(true);
     expect(allocations.T.alloc).toEqual(dailyLoads(cal, "2024-01-09", 500));
     expect(warnings).toHaveLength(1);
-    expect(warnings[0]).toContain("大きなタスク");
-    expect(warnings[0]).toContain("担当者1");
-    expect(warnings[0]).toContain(label);
-    expect(warnings[0]).toContain("稼働上限を超過");
+    expect(warnings[0]).toEqual({
+      code: "capacity-exceeded",
+      taskId: "T",
+      params: {
+        taskName: "大きなタスク", resourceName: "担当者1", duration: 500,
+        dailyCapacity: 1, weeklyCapacity, monthlyCapacity, searchWorkdays: 2000, start: "2024-01-09",
+      },
+    });
+    // 文言は lib では組み立てず、メッセージカタログから作る（日本語は従来どおり）
+    const text = formatLevelWarning(createAppTranslator("ja"), warnings[0]);
+    expect(text).toContain("「大きなタスク」（担当者: 担当者1、工数: 500人日）");
+    expect(text).toContain(label);
+    expect(text).toContain("（探索上限: 2,000稼働日）。開始日を2024/01/09とし");
+    expect(text).toContain("稼働上限を超過");
   });
 
   it("割当不成立のタスクの負荷と終了日を、他タスクの平準化・依存関係に反映する", () => {

@@ -1,4 +1,4 @@
-import { parseISO, toISO, weekKey, isWeekendStr, cal_addDaysISO, WEEKDAY_JA } from "./calendar.js";
+import { parseISO, toISO, weekKey, isWeekendStr, cal_addDaysISO } from "./calendar.js";
 
 /* =========================================================================================
    ガントチャートの日付軸（ヘッダーの目盛り）生成
@@ -96,8 +96,10 @@ const dayNum = (iso) => String(Number(iso.slice(8, 10)));
 
 /** ガントヘッダーの目盛りを生成する。
  *  @returns {{ tier: string, minor: Array, major: Array }}
- *    minor: 下段の細かい目盛り  [{ key, label, sub?, x, w, muted }]
+ *    minor: 下段の細かい目盛り  [{ key, label, weekday?, x, w, muted }]
  *    major: 中段の粗い帯（月 or 年）[{ key, label, x, w }]
+ *    key は各目盛りの先頭日（YYYY-MM-DD）。label は言語に依存しない数字だけ（day: 日、week: M/D、
+ *    month: 月の数字）で、月名・曜日（weekday: 0=日〜6=土、day tier のみ）の表記は表示側が表示中の言語で書式化する。
  *  x 座標は makeDateScale と同じ「round(日数差) * dayWidth」で算出するのでバー位置と一致する。 */
 export function buildTimeAxis({ minDate, maxDate, dayWidth, tier, cal }) {
   const minTime = parseISO(minDate).getTime();
@@ -105,7 +107,7 @@ export function buildTimeAxis({ minDate, maxDate, dayWidth, tier, cal }) {
   const spanW = xOf(maxDate);
 
   if (tier === "month") {
-    const minor = rangesToBands(periodRanges(minDate, maxDate, "month"), xOf, spanW, (r) => `${monthNum(r.start)}月`);
+    const minor = rangesToBands(periodRanges(minDate, maxDate, "month"), xOf, spanW, (r) => monthNum(r.start));
     const major = rangesToBands(periodRanges(minDate, maxDate, "year"), xOf, spanW, (r) => r.start.slice(0, 4));
     return { tier, minor, major };
   }
@@ -124,11 +126,11 @@ export function buildTimeAxis({ minDate, maxDate, dayWidth, tier, cal }) {
   while (d <= end) {
     const iso = toISO(d);
     const working = cal ? cal.isWorkdayStr(iso) : !isWeekendStr(iso);
-    const holiday = cal ? !!cal.holidayName(iso) : false;
+    const holiday = cal ? cal.holidayName(iso) != null : false;
     minor.push({
       key: iso,
       label: String(d.getUTCDate()),
-      sub: WEEKDAY_JA[d.getUTCDay()],
+      weekday: d.getUTCDay(),
       x: xOf(iso),
       w: dayWidth,
       muted: !working && (isWeekendStr(iso) || holiday),

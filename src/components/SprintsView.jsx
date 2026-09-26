@@ -1,15 +1,17 @@
 import React, { useMemo } from "react";
 import { Plus, Trash2, AlertTriangle } from "lucide-react";
 import { uid } from "../lib/taskTree.js";
-import { toISO, parseISO, cal_addDaysISO, fmtMD } from "../lib/calendar.js";
+import { toISO, parseISO, cal_addDaysISO } from "../lib/calendar.js";
 import { computeOverlappingSprintIds, sprintColorForId } from "../lib/sprints.js";
 import { makeDateScale } from "../dom/pointerDrag.js";
 import { IconBtn } from "./IconBtn.jsx";
+import { useI18n } from "./I18nProvider.jsx";
 
 /* =========================================================================================
    11. スプリント ビュー
    ========================================================================================= */
 export function SprintsView({ sprints, setSprints, tasks, requestConfirm }) {
+  const { t, fmtMonthDay } = useI18n();
   function update(id, patch) { setSprints(prev => prev.map(s => (s.id === id ? { ...s, ...patch } : s))); }
   function add() {
     const id = uid("sprint");
@@ -20,14 +22,14 @@ export function SprintsView({ sprints, setSprints, tasks, requestConfirm }) {
     ]);
   }
   function remove(id) {
-    requestConfirm("このスプリントを削除しますか？（紐付いていたタスクは未割当になります）", () => {
+    requestConfirm(t("sprints.confirmDelete"), () => {
       setSprints(prev => prev.filter(s => s.id !== id));
-    }, "削除する");
+    }, t("common.deleteConfirm"));
   }
 
   const taskCountOf = useMemo(() => {
     const m = new Map();
-    tasks.forEach(t => (t.sprintIds || []).forEach(id => m.set(id, (m.get(id) || 0) + 1)));
+    tasks.forEach(task => (task.sprintIds || []).forEach(id => m.set(id, (m.get(id) || 0) + 1)));
     return m;
   }, [tasks]);
 
@@ -51,29 +53,29 @@ export function SprintsView({ sprints, setSprints, tasks, requestConfirm }) {
       {overlapIds.size > 0 && (
         <div className="bg-amber-50 border border-amber-200 text-amber-800 text-xs px-3 py-2 rounded-lg flex items-center gap-2">
           <AlertTriangle size={13} className="flex-shrink-0" />
-          期間が重なっているスプリントがあります。保存はできますが、内容を確認してください。
+          {t("sprints.overlapWarning")}
         </div>
       )}
 
       <div>
         <div className="flex items-center justify-between mb-2">
-          <h3 className="text-sm font-semibold text-slate-700">スプリント一覧</h3>
-          <IconBtn icon={Plus} label="スプリントを追加" onClick={add} small />
+          <h3 className="text-sm font-semibold text-slate-700">{t("sprints.title")}</h3>
+          <IconBtn icon={Plus} label={t("sprints.add")} onClick={add} small />
         </div>
         <div className="border border-slate-200 rounded-lg overflow-hidden">
           <table className="w-full text-xs">
             <thead className="bg-slate-50 text-slate-500">
               <tr>
-                <th className="text-left px-3 py-2 font-medium w-32">名称</th>
-                <th className="text-left px-3 py-2 font-medium">テーマ</th>
-                <th className="text-left px-3 py-2 font-medium w-32">開始日</th>
-                <th className="text-left px-3 py-2 font-medium w-32">終了日</th>
-                <th className="text-left px-3 py-2 font-medium w-20">タスク数</th>
+                <th className="text-left px-3 py-2 font-medium w-32">{t("sprints.columns.name")}</th>
+                <th className="text-left px-3 py-2 font-medium">{t("sprints.columns.theme")}</th>
+                <th className="text-left px-3 py-2 font-medium w-32">{t("sprints.columns.start")}</th>
+                <th className="text-left px-3 py-2 font-medium w-32">{t("sprints.columns.end")}</th>
+                <th className="text-left px-3 py-2 font-medium w-20">{t("sprints.columns.taskCount")}</th>
                 <th className="w-10" />
               </tr>
             </thead>
             <tbody>
-              {sprints.length === 0 && <tr><td colSpan={6} className="text-center text-slate-400 py-6">スプリントはまだありません</td></tr>}
+              {sprints.length === 0 && <tr><td colSpan={6} className="text-center text-slate-400 py-6">{t("sprints.empty")}</td></tr>}
               {sprints.map(sp => {
                 const overlapping = overlapIds.has(sp.id);
                 const invalidRange = sp.startDate && sp.endDate && sp.startDate > sp.endDate;
@@ -85,7 +87,7 @@ export function SprintsView({ sprints, setSprints, tasks, requestConfirm }) {
                     </td>
                     <td className="px-3 py-1.5">
                       <input value={sp.theme || ""} onChange={e => update(sp.id, { theme: e.target.value })}
-                        placeholder="このスプリントのテーマ（任意）"
+                        placeholder={t("sprints.themePlaceholder")}
                         className="bg-transparent outline-none w-full placeholder-slate-300" />
                     </td>
                     <td className="px-3 py-1.5">
@@ -97,30 +99,34 @@ export function SprintsView({ sprints, setSprints, tasks, requestConfirm }) {
                         <input type="date" value={sp.endDate || ""} onChange={e => update(sp.id, { endDate: e.target.value })}
                           className="bg-transparent outline-none w-full font-mono" />
                         {(overlapping || invalidRange) && (
-                          <span title={invalidRange ? "終了日が開始日より前になっています" : "他のスプリントと期間が重なっています"}>
+                          <span
+                            title={invalidRange ? t("sprints.invalidRange") : t("sprints.overlapping")}
+                            role="img"
+                            aria-label={invalidRange ? t("sprints.invalidRange") : t("sprints.overlapping")}
+                          >
                             <AlertTriangle size={12} className="text-amber-500 flex-shrink-0" />
                           </span>
                         )}
                       </div>
                     </td>
-                    <td className="px-3 py-1.5 font-mono text-slate-500">{taskCountOf.get(sp.id) || 0}件</td>
-                    <td className="px-1"><button onClick={() => remove(sp.id)} className="text-slate-300 hover:text-red-500"><Trash2 size={13} /></button></td>
+                    <td className="px-3 py-1.5 font-mono text-slate-500">{t("sprints.taskCount", { count: taskCountOf.get(sp.id) || 0 })}</td>
+                    <td className="px-1"><button onClick={() => remove(sp.id)} title={t("common.delete")} aria-label={t("common.delete")} className="text-slate-300 hover:text-red-500"><Trash2 size={13} /></button></td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
         </div>
-        <p className="text-[11px] text-slate-400 mt-1">開始日・終了日は自由に入力できます（目安は1週間）。グループ（サマリータスク）にはスプリントを設定できません。</p>
+        <p className="text-[11px] text-slate-400 mt-1">{t("sprints.note")}</p>
       </div>
 
       {sprints.length > 0 && minDate && (
         <div>
-          <h3 className="text-sm font-semibold text-slate-700 mb-2">スプリント タイムライン</h3>
+          <h3 className="text-sm font-semibold text-slate-700 mb-2">{t("sprints.timeline")}</h3>
           <div className="border border-slate-200 rounded-lg p-3 overflow-x-auto">
             <div style={{ marginLeft: 100, width: timelineWidth, display: "flex", justifyContent: "space-between" }} className="text-[9px] font-mono text-slate-400 pb-1 border-b border-slate-100 mb-1">
-              <span>{fmtMD(minDate)}</span>
-              <span>{fmtMD(maxDate)}</span>
+              <span>{fmtMonthDay(minDate)}</span>
+              <span>{fmtMonthDay(maxDate)}</span>
             </div>
             {sprints.map(sp => {
               if (!sp.startDate || !sp.endDate || sp.startDate > sp.endDate) return null;

@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from "react";
 import { parseDepString, formatDeps } from "../lib/deps.js";
+import { useI18n } from "./I18nProvider.jsx";
 
 export function DepInput({ deps, idToNo, noToId, onChange, inputRef, inputProps, onKeyDown }) {
+  const { t } = useI18n();
   const [text, setText] = useState(() => formatDeps(deps, idToNo));
   useEffect(() => { setText(formatDeps(deps, idToNo)); }, [deps, idToNo]);
   return (
@@ -9,7 +11,7 @@ export function DepInput({ deps, idToNo, noToId, onChange, inputRef, inputProps,
       ref={inputRef}
       {...inputProps}
       value={text}
-      placeholder="例: 1.2FS+1"
+      placeholder={t("wbs.depsPlaceholder")}
       onChange={e => setText(e.target.value)}
       onBlur={() => { const parsed = parseDepString(text, noToId); onChange(parsed); setText(formatDeps(parsed, idToNo)); }}
       onKeyDown={onKeyDown}

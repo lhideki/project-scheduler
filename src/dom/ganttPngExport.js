@@ -32,6 +32,16 @@ function downloadBlob(filename, blob) {
 }
 
 /**
+ * PNG書き出しの失敗を表すエラー。表示用の文言は持たず、code（gantt-dom-missing / svg-image-failed /
+ * png-encode-failed）で種別を示す（呼び出し側がメッセージカタログの pngErrors.<code> で表示中の言語にする）。
+ */
+function pngExportError(code) {
+  const err = new Error(code);
+  err.code = code;
+  return err;
+}
+
+/**
  * @param {Object} params
  * @param {HTMLElement} params.container - ガント右ペインのスクロールコンテナ（rightRef.current）
  * @param {SVGSVGElement} params.bgSvg - 背景レイヤーのsvg要素
@@ -42,7 +52,7 @@ function downloadBlob(filename, blob) {
  * @returns {Promise<"copied"|"downloaded">}
  */
 export async function copyVisibleGanttAsPng({ container, bgSvg, barsSvg, headerMarkup, chartWidth, headerHeight }) {
-  if (!container || !bgSvg || !barsSvg) throw new Error("ガント画面のDOM構造を取得できませんでした");
+  if (!container || !bgSvg || !barsSvg) throw pngExportError("gantt-dom-missing");
 
   const scrollLeft = container.scrollLeft;
   const scrollTop = container.scrollTop;
@@ -68,7 +78,7 @@ export async function copyVisibleGanttAsPng({ container, bgSvg, barsSvg, headerM
     const img = await new Promise((resolve, reject) => {
       const image = new Image();
       image.onload = () => resolve(image);
-      image.onerror = () => reject(new Error("ガント画面のSVG画像化に失敗しました"));
+      image.onerror = () => reject(pngExportError("svg-image-failed"));
       image.src = svgUrl;
     });
 
@@ -83,7 +93,7 @@ export async function copyVisibleGanttAsPng({ container, bgSvg, barsSvg, headerM
     ctx.drawImage(img, 0, 0, viewW, viewH);
 
     const pngBlob = await new Promise((resolve, reject) => {
-      canvas.toBlob(b => (b ? resolve(b) : reject(new Error("PNGの生成に失敗しました"))), "image/png");
+      canvas.toBlob(b => (b ? resolve(b) : reject(pngExportError("png-encode-failed"))), "image/png");
     });
 
     if (window.isSecureContext && navigator.clipboard?.write && typeof window.ClipboardItem === "function") {

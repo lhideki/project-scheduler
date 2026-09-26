@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   sprintColorForId, computeOverlappingSprintIds, detectSprintConflicts, SPRINT_PALETTE,
 } from "./sprints.js";
+import { createAppTranslator, formatSprintConflictReason } from "./i18n.js";
 
 describe("sprintColorForId", () => {
   it("同じIDには常に同じ配色を返す", () => {
@@ -73,8 +74,11 @@ describe("detectSprintConflicts", () => {
     ]);
     const out = detectSprintConflicts(tasks, sprints, schedule);
     expect(out.map(c => c.taskId)).toEqual(["t1", "t2"]);
-    expect(out[0].reasons[0]).toContain("2024/01/20");
-    expect(out[1].reasons[0]).toContain("2024/03/10");
+    expect(out[0].reasons[0]).toEqual({ code: "start-before-sprint", params: { start: "2024-01-20", sprintStart: "2024-02-01" } });
+    expect(out[1].reasons[0]).toEqual({ code: "finish-after-sprint", params: { finish: "2024-03-10", sprintEnd: "2024-02-29" } });
+    const tJa = createAppTranslator("ja");
+    expect(formatSprintConflictReason(tJa, out[0].reasons[0])).toBe("開始日（2024/01/20）がスプリント開始日（2024/02/01）より前になっています");
+    expect(formatSprintConflictReason(tJa, out[1].reasons[0])).toBe("終了日（2024/03/10）がスプリント終了日（2024/02/29）を超えています");
   });
 
   it("複数スプリントが紐付く場合は期間の和集合で判定する", () => {
@@ -90,7 +94,8 @@ describe("detectSprintConflicts", () => {
   it("固定マイルストーン優先（governed）の場合は補足理由を追加する", () => {
     const schedule = new Map([["t1", { schedStart: "2024-03-05", schedFinish: "2024-03-05", governed: true }]]);
     const out = detectSprintConflicts(tasks, sprints, schedule);
-    expect(out[0].reasons.some(r => r.includes("固定マイルストーン"))).toBe(true);
+    expect(out[0].reasons.map(r => r.code)).toContain("governed-by-fixed-milestone");
+    expect(formatSprintConflictReason(createAppTranslator("ja"), out[0].reasons.at(-1))).toContain("固定マイルストーン");
   });
 
   it("グループタスク・スプリント未紐付けタスクは対象外", () => {

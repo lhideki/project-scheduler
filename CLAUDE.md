@@ -6,6 +6,7 @@
 
 依存関係・マイルストーン・スプリントを考慮した自動スケジューリング機能を持つ、単一HTMLで動くWBS/ガントチャート型のプロジェクト管理ツール。React 19 + Tailwind CSS + lucide-react + recharts で書かれたReactアプリを、ビルドして1つの `project_scheduler.html` に埋め込み、サーバーなし・ローカルブラウザで完結する形で配布する（配布形態が単一HTMLというだけで、編集対象のソース自体は複数ファイルに分割されている。詳細は「ソース構成」参照）。
 - サーバー・アカウント登録なし。データは `window.storage`（localStorageベース）でブラウザにローカル保存する。
+- 画面の文言は日本語・英語に対応する（ヘッダーで切り替え。詳細は「多言語対応（i18n）」参照）。
 
 ## ビルドコマンド
 
@@ -22,7 +23,7 @@ npm run build     # project_scheduler.html を生成（リポジトリ直下に�
 | `npm run build:css` | `src/input.css`（Tailwindディレクティブ）から `dist/output.css` を生成 |
 | `npm run build:html` | `template.html` に `dist/bundle.js` と `dist/output.css` を差し込み `project_scheduler.html` を生成 |
 | `npm run build:docs` | `PROJECT_JSON_SCHEMA` から `docs/json-format.md` を生成 |
-| `npm run build:agent` | `src/agent/cli.js`（と `src/lib/`）を esbuild でバンドルし `.claude/skills/schedule-adjust/cli.mjs` を生成（AIエージェント用Skillのランタイム。非minify） |
+| `npm run build:agent` | `src/agent/cli.js`（と `src/lib/`・メッセージカタログ・`intl-messageformat`）を esbuild でバンドルし `.claude/skills/schedule-adjust/cli.mjs` を生成（AIエージェント用Skillのランタイム。非minify。node_modules なしで動く） |
 
 `npm run dev:js` で `dist/bundle.dev.js` を watch モードでビルドできる（非minify、デバッグ用）。ただし現状 `template.html` は本番ビルドのプレースホルダー差し込み専用なので、開発中の動作確認は `dist/bundle.dev.js` を手元のHTMLから読み込むか、`npm run build` を都度実行して `project_scheduler.html` をブラウザで開いて確認する。
 
@@ -35,16 +36,18 @@ npm run build     # project_scheduler.html を生成（リポジトリ直下に�
 ```
 src/
   App.jsx              # 状態管理・配線の中心（旧project_scheduler.jsxのApp本体）
-  entry.jsx            # createRoot によるマウントのみ
+  entry.jsx            # createRoot によるマウントのみ（I18nProvider で App を包む）
   constants.js          # WBS/ガントのレイアウト定数（ROW_H・DEFAULT_WBS_COLS等）
   storage.js             # window.storage ラッパー（localStorageポリフィル）
+  messages/               # UIのメッセージカタログ（next-intl 形式・ICU MessageFormat。ja.json・en.json はキーが一致）
   lib/                    # React/DOM非依存の純粋ロジック（ユニットテスト対象）
+    i18n.js                 # 対応言語・名前付き書式（FORMATS）・言語判定・React非依存の翻訳関数（createAppTranslator）・lib のコード＋パラメータを文言にする関数（format*）
     calendar.js             # 祝日計算・稼働日カレンダー
     deps.js                  # 依存関係の文字列パーサ（3FS+2 等）
     taskTree.js               # WBSツリー・ヘルパー（isGroupId/buildFlatList等）
-    wbsEditing.js             # WBS表のセル・行のテキスト化と貼り付け（コピー＆ペースト用。WBS_EDITABLE_COLUMNS）
+    wbsEditing.js             # WBS表のセル・行のテキスト化と貼り付け（コピー＆ペースト用。WBS_EDITABLE_COLUMNS。書き出しは表示中の言語、貼り付けは両言語の表記を受け付ける）
     history.js                # タスク編集の Undo/Redo 履歴 reducer（taskHistoryReducer、直近100件）
-    timeAxis.js               # ガントの日付軸（ズーム段階 DAY_WIDTH_STOPS と日→週→月の目盛り縮約）
+    timeAxis.js               # ガントの日付軸（ズーム段階 DAY_WIDTH_STOPS と日→週→月の目盛り縮約。月名・曜日は返さず、表示側が書式化する）
     scheduling.js              # CPMエンジン（runCPM）・リソース平準化（levelResources）・表示スケジュールの組み立て（buildDisplaySchedule）
     workAllocation.js          # 工数の日別割当（担当者の稼働上限に合わせた分割割当・非割当日の理由・割当上の進捗位置）
     sprints.js                  # スプリント配色・期間重複検出
@@ -65,6 +68,7 @@ src/
     cli.js                    # 引数パース・ファイル読み込み・レポート整形（計算ロジックは持たない）
     cli.test.js               # computeSchedule 等が src/lib/ と一致することを担保するVitestテスト
   components/              # Reactコンポーネント（1コンポーネント1ファイル）
+    I18nProvider.jsx         # 表示言語の選択・保存（pm_ui_locale）と use-intl の IntlProvider。useI18n（t と日付書式）・useLocaleSetting
     WBSGanttView.jsx         # WBS表＋ガント（ズーム・稲妻線・ツールチップ・PNGコピー用ヘッダー生成を含む）
     GanttDeps.jsx、InazumaLine.jsx   # ガントの依存線・稲妻線（進捗線）
     TaskDetailModal.jsx、DepInput.jsx、SprintMultiSelect.jsx、ColResizeHandle.jsx
@@ -80,7 +84,7 @@ src/
 
 ### AIエージェント用Skill（`.claude/skills/schedule-adjust/`）
 
-保存JSONを読み書きしてスケジュール調整を行うためのSkill。`SKILL.md` はエージェント向け手順書、`cli.mjs` は `npm run build:agent` の生成物。CLI（`validate`/`recalc`/`plan`/`explain`）はスケジュール計算に `src/lib/` を**そのまま**使う（App.jsx の `cpm`/`schedule` useMemo と同じ手順を `src/agent/cli.js` の `computeSchedule` が再現）。CLIの計算結果がアプリとずれないよう、`src/lib/` のスケジューリング仕様を変えたら `src/agent/cli.test.js` が通ることを必ず確認する。**`src/agent/cli.js` にCPM等の計算ロジックを書かない**（`src/lib/` を呼ぶだけ）。CLIは設計上JSONファイルを書き換えない（保存はエージェントが手順に従って行う）。
+保存JSONを読み書きしてスケジュール調整を行うためのSkill。`SKILL.md` はエージェント向け手順書、`cli.mjs` は `npm run build:agent` の生成物。CLI（`validate`/`recalc`/`plan`/`explain`）はスケジュール計算に `src/lib/` を**そのまま**使う（App.jsx の `cpm`/`schedule` useMemo と同じ手順を `src/agent/cli.js` の `computeSchedule` が再現）。CLIの計算結果がアプリとずれないよう、`src/lib/` のスケジューリング仕様を変えたら `src/agent/cli.test.js` が通ることを必ず確認する。**`src/agent/cli.js` にCPM等の計算ロジックを書かない**（`src/lib/` を呼ぶだけ）。CLIは設計上JSONファイルを書き換えない（保存はエージェントが手順に従って行う）。CLI のレポートは日本語のまま出す（`src/lib/` が返すコード＋パラメータを、`createAppTranslator("ja")` でアプリと同じメッセージカタログから文言にする。出力の形・文言は多言語対応の前と同じで、`src/agent/cli.test.js` が日本語の文言を確認している）。
 
 ### Backlog連携用Skill（`.claude/skills/backlog-sync/`）
 
@@ -97,6 +101,21 @@ bee（`@nulab/bee` 1.1 以上、Backlog公式CLI）経由で保存JSONと Backlo
 - Undo/Redo: `tasks` だけが対象（`useReducer(taskHistoryReducer)`、`src/lib/history.js`、直近100件）。`resources`・`sprints`・`calendarExceptions` の変更は履歴に積まない。初回ロード・linked の読み込みは `resetTasks` で履歴を空にする。キーボードショートカット（Ctrl/Cmd+Z・Shift+Ctrl/Cmd+Z・Ctrl/Cmd+Y）は `window` 全体で受け付ける（ヘッダーのボタン操作直後なども効かせるため。IME変換中は無視する）。ただし `input`/`textarea`/`select`/contenteditable にフォーカスがある間は、ブラウザ標準の Undo を奪わないよう素通りする。タスク編集用の入力欄（WBS表のセル・タスク詳細モーダル）でのショートカットは `WBSGanttView` 側のローカルハンドラ（`stopPropagation` あり）が先に処理する。
 - `levelingOn`: リソース平準化トグルのON/OFF（`boolean`、デフォルト`false`）。`window.storage`（`pm_project`）およびJSONエクスポート/インポートの対象。旧形式JSON（`levelingOn`キーなし）は読み込み時に`false`へフォールバックする。
 - `calendarExceptions`: 非稼働日カレンダーの例外（`{date, type: "holiday" | "workday", name?}` の配列、デフォルト`[]`）。`type: "holiday"`＝休日（平日を非稼働日化）、`type: "workday"`＝稼働日（土日・祝日・休日指定を稼働日化・**最優先**）。UIの種別ラベルは「休日」「稼働日」（内部値は `holiday`/`workday` のまま）。「カレンダー編集」タブ（`CalendarView` → `CalendarExceptionsEditor`）で編集。`window.storage`（`pm_project`）・JSONエクスポート/インポート・バージョンスナップショット（`rawCalendarExceptions`）の対象。旧形式JSON（キーなし）は`[]`へフォールバック。稼働日判定は `makeCalendar(holidayMap, calendarExceptions)`（`src/lib/calendar.js`）に集約されており、`runCPM`/`levelResources` は `cal` を受け取るだけなので変更不要。`holidayMap`（App・CLI とも `buildHolidayMap(y - 1, y + 6)`）の収録範囲外の年の祝日は、`makeCalendar` が問い合わせ時にその年の分を計算して補う（稼働上限でタスクが長く延長され、範囲より先まで割り当てる場合に祝日へ割り当てないため。`cal.holidayMap` 自体は渡したマップのままで、空のマップなら補わない）。
+
+### 多言語対応（i18n）
+
+- 対応言語は日本語（`ja`、既定）と英語（`en`）。React 側は `use-intl`（next-intl のコア。Next.js 非依存）の `IntlProvider`・`useTranslations`/`useFormatter` を使い、コンポーネントでは `useI18n()`（`src/components/I18nProvider.jsx`。`t` と `fmtDate`/`fmtDateCompact`/`fmtMonthDay`/`fmtWeekday`/`fmtDateTime`）を呼ぶ。
+- **メッセージカタログ**: `src/messages/ja.json`・`src/messages/en.json`（next-intl 形式・ICU MessageFormat。ビルド時に両言語ともバンドルする）。画面の文言・ツールチップ・`aria-label`・`title`・プレースホルダー・確認ダイアログ・トーストは、すべてカタログのキーで書く（コンポーネントに日本語・英語の文言を直書きしない）。
+  - キーは画面・機能単位の名前空間で分ける（`common.*`・`header.*`・`tabs.*`・`toast.*`・`confirm.*`・`wbs.*`・`gantt.*`・`taskDetail.*`・`dependencyIssues.*`・`sprintConflicts.*`・`levelWarnings.*`・`calendar.*`・`sprints.*`・`resources.*`・`versions.*`・`network.*`・`linked.*`・`embedded.*`・`pngErrors.*`・`mermaid.*`）。名前空間の中は lowerCamelCase。lib のコードをそのまま使う箇所（`dependencyIssues.label.<code>`・`pngErrors.<code>`）はコードをキーにする。
+  - `ja.json` と `en.json` のキー・引数名は一致させる（`src/lib/i18n.test.js` が確認する）。キーを追加・変更したら両方を更新する。英語カタログには日本語を入れない（言語名「日本語」を除く）。
+  - 日付はメッセージ内の `{x, date, ymd}` か `useI18n` の `fmt*` で書式化する。名前付き書式は `src/lib/i18n.js` の `FORMATS`（`ymd`・`ymdNumeric`〔表の列など幅が限られる箇所〕・`md`・`weekday`・`weekdayNarrow`・`month`・`dateTime`・`dateTimeShort`）で、日本語は多言語対応前の表示（`2026/09/26`・`09/26`・`土`・`9月`・`toLocaleString("ja-JP")`）と同じ結果になる指定にしている。日付（YYYY-MM-DD）は UTC の0時として扱うため、タイムゾーンは UTC（保存日時など時刻を表す `dateTime`・`dateTimeShort` だけは実行環境のタイムゾーン）。
+- **`src/lib/` は表示用の文字列を組み立てない**。依存関係の矛盾（`{code, severity, ids, params, ...}`）・スプリント矛盾（`reasons: {code, params}[]`・`sprintNames`）・リソース平準化の警告（`LevelWarning`: `{code, taskId, params}`）・日付軸（月の数字と曜日番号）のように、**コードとパラメータ**を返す。文言にする関数（`formatDependencyIssueMessage`・`dependencyIssueLabel`・`formatSprintConflictReason`・`formatSprintConflictSprintNames`・`formatLevelWarning`）は `src/lib/i18n.js` に集め、App（`useI18n` の `t`）と CLI（`createAppTranslator("ja")`）の両方から使う。`src/dom/` のエラーも `code` を持たせ、UI 側でカタログの文言にする（例: `ganttPngExport.js` → `pngErrors.<code>`）。
+  - `src/lib/` は React・`use-intl` に依存しない。`use-intl` の `createTranslator`（`use-intl/core`）はリッチテキスト対応のため `react` を import するので、React 以外の翻訳関数 `createAppTranslator` は、`use-intl` が内部で使う `intl-messageformat` を同じ書式設定で直接使う（`use-intl` の結果と全キーで一致することを `src/lib/i18n.test.js` で確認している）。
+  - 表示言語に依存するデータを lib が作る必要がある場合は、翻訳関数を引数で受け取る（例: `taskCellText` の `context.t`。省略時は日本語）。
+- **言語の選択**: 初回は `navigator.language` から判定し（`ja*` なら日本語、それ以外は英語。`detectLocale`）、ヘッダーのセレクトで切り替える。選択は `window.storage` の `pm_ui_locale` に保存し、切り替え時に `<html lang>` も更新する。UIの設定なので **Project JSON のスキーマ（`PROJECT_JSON_SCHEMA`）・エクスポート・バージョンスナップショット・共有用HTMLの埋め込みJSONには含めない**。linked / embedded 起動でも保存する（「起動モード」参照）。`template.html` の `lang="ja"` は起動直後の初期値。
+- **翻訳しないもの**: ユーザーが入力したデータ（タスク名・担当者名など）、サンプルデータ（`seedData()`）、日本の祝日名（`calendar.js`。`holidayName` は文言の既定値を持たず、名称未入力の休日指定は空文字を返す。休日かどうかは `null` かどうかで判定する）、`PROJECT_JSON_SCHEMA` の `description`（`docs/json-format.md`）、Skill（CLI のレポート・`SKILL.md`）。新規作成時の既定名（「新規タスク」・「バージョン N」等）は作成時の表示言語で付ける。
+- WBS表のコピー＆ペースト: 書き出すテキストは表示中の言語（マイルストーンの `固定`/`Fixed` 等）、貼り付けはどちらの言語の表記も受け付ける（表記はカタログから集める。`catalogValues`）。
+- 言語を追加する場合は、`src/messages/<locale>.json` を追加し、`src/lib/i18n.js` の `LOCALES`・`MESSAGES`・`buildFormats`・`detectLocale` と、`header.languageName.<locale>`（全カタログ）を更新する。
 
 ### スケジューリングロジック（CPM: クリティカルパス法）
 
@@ -152,7 +171,7 @@ bee（`@nulab/bee` 1.1 以上、Backlog公式CLI）経由で保存JSONと Backlo
 
 ### 起動モード（local / linked / embedded）
 
-App は起動元を概念的に3種類として扱う。`autoSaveDisabled`（= `linkedProjectKey || embeddedProject`）が真のときは `pm_project`/`pm_versions` を **一切 localStorage へ書き込まない**（`storageSet` 呼び出しはすべてこのフラグでガードする）。
+App は起動元を概念的に3種類として扱う。`autoSaveDisabled`（= `linkedProjectKey || embeddedProject`）が真のときは `pm_project`/`pm_versions` を **一切 localStorage へ書き込まない**（`App.jsx` の `storageSet` 呼び出しはすべてこのフラグでガードする）。表示言語（`pm_ui_locale`）はプロジェクトのデータではなくUIの設定なので、このガードの対象外とし、どの起動モードでも保存する（`I18nProvider` が保存する）。
 
 - `local`: 通常起動。`window.storage`（localStorage）へ自動保存する。
 - `linked`: URL に `?schedule=` がある起動。関連付けた外部JSONを表示し、自動保存しない。最新版の再読込が可能（`src/lib/linkedProject.js`・`src/dom/linkedProjectFile.js`）。
@@ -167,6 +186,7 @@ App は起動元を概念的に3種類として扱う。`autoSaveDisabled`（= `
 ## コーディング上の注意
 
 - ロジック（`src/lib/`・`src/dom/`）とUIコンポーネント（`src/components/`・`src/App.jsx`）の分離を維持する。CPMロジックやWBSツリー処理などをReactコンポーネントの中に書き戻さないこと。
+- 画面の文言はメッセージカタログ（`src/messages/*.json`）に書き、`src/lib/` では表示用の文字列を組み立てない（コード＋パラメータを返す）。詳細は「多言語対応（i18n）」。
 - ドラッグ操作は `startPointerDrag`（`src/dom/pointerDrag.js`）、グループ判定・ロールアップは `isGroupId`/`rollupSummaries`（`src/lib/taskTree.js`・`src/lib/scheduling.js`）、日付スケール・SVG座標変換は `makeDateScale`/`svgPointFromRef`（`src/dom/pointerDrag.js`）、依存関係ラベルは `formatDepLabel`（`src/lib/deps.js`）の各共通ヘルパーを再利用し、コンポーネント内にローカルに再定義しないこと。
 - JSON エクスポート/インポート、バージョンスナップショットは `tasks`/`resources`/`sprints`/`calendarExceptions`（JSONはさらに `versions`/`levelingOn`）を含める。新しいトップレベルstateを追加した場合は、次をすべて更新すること。
   - `PROJECT_JSON_SCHEMA`（`src/lib/exportUtils.js`。`npm run build:docs` で `docs/json-format.md` に反映）と `buildProjectExport`/`normalizeImportedProject`
@@ -185,6 +205,7 @@ npm run test:watch  # watchモード（開発中）
 ```
 
 - `src/lib/` に新しい純粋ロジックを追加・変更した場合は、対応する `*.test.js` を必ず追加・更新すること。特に `runCPM`/`levelResources`（`scheduling.js`）はCLAUDE.mdに明文化された仕様（固定マイルストーンのみLS/LFを使う、進捗済みタスクはピン留めする等）の回帰を防ぐ最重要テスト対象なので、挙動を変える変更をした場合は既存テストが仕様変更を正しく反映しているか必ず確認する。
+- `src/lib/i18n.test.js` は、`ja.json` と `en.json` のキー・引数名の一致、全メッセージが両言語で書式化できること（`use-intl` と `createAppTranslator` の結果の一致を含む）、英語カタログに日本語が残っていないこと、日本語の日付書式が従来どおりであることを確認する。
 - `src/agent/cli.test.js` は、CLIのスケジュール計算（`computeSchedule`）が `src/lib/` の `runCPM` と一致すること・依存関係の矛盾判定（`validate`）がアプリと一致すること・整合性チェック・バージョンスナップショット構造を担保する。`scheduling.js` の仕様を変えたらここも確認する。
 - `src/components/`・`src/App.jsx`（Reactコンポーネント）はユニットテストの対象外。次節の手動確認で担保する。
 
@@ -198,5 +219,6 @@ npm run test:watch  # watchモード（開発中）
 変更後は `npm run test` を実行してユニットテストが全件パスすることを確認したうえで、`npm run build` した `project_scheduler.html` をブラウザ（またはPlaywright）で直接開き、以下を目視・手動確認する。
 
 - コンソールエラーが出ていないこと
-- サンプルデータ（`seedData()`）を開いた状態でスプリント矛盾アラート・スプリント期間重複警告・依存関係の矛盾が出ないこと（リソース平準化のON/OFFとも）
+- ヘッダーで日本語・英語を切り替えられ、リロード後も選んだ言語が保持されること（英語表示でユーザー入力データ・祝日名以外に日本語が残っていないこと）
+- サンプルデータ（`seedData()`）を開いた状態でスプリント矛盾アラート・スプリント期間重複警告・依存関係の矛盾が出ないこと（リソース平準化のON/OFFとも、日本語・英語とも）
 - タスク編集後、リロードしても内容が保持されること（localStorage永続化）

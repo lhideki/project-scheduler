@@ -2,7 +2,6 @@
    スプリント関連ヘルパー（配色・期間重複検出・スケジュール矛盾検出）
    ========================================================================================= */
 
-import { fmtJP } from "./calendar.js";
 import { buildFlatList } from "./taskTree.js";
 
 /**
@@ -37,10 +36,14 @@ export function sprintColorForId(id) {
  * 複数スプリントが紐付く場合は、それらの期間の和集合（最も早い開始日〜最も遅い終了日）を基準にする
  * （タスクが複数スプリントにまたがること自体は許容するため）。App のヘッダーのアラートアイコン／
  * ダイアログ一覧、および CLI のレポートで共有する。
+ * 表示用の文言は組み立てず、理由はコード＋パラメータで返す（文言は src/lib/i18n.js の
+ * formatSprintConflictReason・formatSprintConflictSprintNames で作る）。
  * @param {import("./taskTree.js").Task[]} tasks
  * @param {Sprint[]} sprints
  * @param {Map<string, import("./scheduling.js").ScheduleEntry>} schedule
- * @returns {{taskId: string, name: string, wbsNo: string, sprintName: string, reasons: string[]}[]}
+ * @returns {{taskId: string, name: string, wbsNo: string, sprintNames: (string|null)[],
+ *   reasons: {code: "start-before-sprint"|"finish-after-sprint"|"governed-by-fixed-milestone", params: Object}[]}[]}
+ *   sprintNames: 紐付くスプリントの名前（名前が空ならテーマ、どちらも空なら null）
  */
 export function detectSprintConflicts(tasks, sprints, schedule) {
   if (!sprints || !sprints.length) return [];
@@ -65,17 +68,17 @@ export function detectSprintConflicts(tasks, sprints, schedule) {
     if (!s || !s.schedStart || !s.schedFinish) return;
     const reasons = [];
     if (s.schedStart < rangeStart) {
-      reasons.push(`開始日（${fmtJP(s.schedStart)}）がスプリント開始日（${fmtJP(rangeStart)}）より前になっています`);
+      reasons.push({ code: "start-before-sprint", params: { start: s.schedStart, sprintStart: rangeStart } });
     }
     if (s.schedFinish > rangeEnd) {
-      reasons.push(`終了日（${fmtJP(s.schedFinish)}）がスプリント終了日（${fmtJP(rangeEnd)}）を超えています`);
+      reasons.push({ code: "finish-after-sprint", params: { finish: s.schedFinish, sprintEnd: rangeEnd } });
     }
     if (!reasons.length) return;
     if (s.governed) {
-      reasons.push("固定マイルストーンの期日が優先されているため、スプリント期間内に収まりません");
+      reasons.push({ code: "governed-by-fixed-milestone", params: {} });
     }
-    const sprintName = sps.map(sp => sp.name || sp.theme || "（無題のスプリント）").join("、");
-    out.push({ taskId: t.id, name: t.name, wbsNo: wbsNoById[t.id] || "", sprintName, reasons });
+    const sprintNames = sps.map(sp => sp.name || sp.theme || null);
+    out.push({ taskId: t.id, name: t.name, wbsNo: wbsNoById[t.id] || "", sprintNames, reasons });
   });
   out.sort((a, b) => (a.wbsNo || "").localeCompare(b.wbsNo || "", undefined, { numeric: true }));
   return out;

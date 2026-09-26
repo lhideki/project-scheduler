@@ -21,7 +21,8 @@
  * @property {(startStr: string, duration: number) => string} endFromStart
  * @property {(finishStr: string, duration: number) => string} startFromEnd
  * @property {(aStr: string, bStr: string) => number} workdaysBetween - 稼働日数の差（符号あり）
- * @property {(s: string) => (string|null)} holidayName - 表示用の休日名（休日名・祝日名。稼働日指定の日は null）
+ * @property {(s: string) => (string|null)} holidayName - 表示用の休日名（休日名・祝日名。稼働日指定の日・休日でない日は null。
+ *   名称を入力していない休日指定は空文字で、表示側が表示中の言語の「休日」に置き換える）
  * @property {Map<string,string>} holidayMap - 日付(YYYY-MM-DD) -> 国民の祝日名（例外は含まない。makeCalendar に渡したマップそのもので、
  *   収録範囲外の年の祝日は含まない。稼働日判定・holidayName は範囲外の年の祝日もその場で計算して扱う）
  * @property {CalendarException[]} exceptions - 適用中のカレンダー例外（正規化済み）
@@ -29,7 +30,6 @@
 
 export function toISO(d) { return d.toISOString().slice(0, 10); }
 export function parseISO(s) { return new Date(s + "T00:00:00Z"); }
-export const WEEKDAY_JA = ["日", "月", "火", "水", "木", "金", "土"];
 
 /** 土曜(6)・日曜(0)か。カレンダー例外による上書きは考慮しない純粋な曜日判定。 */
 export function isWeekend(d) { const dow = d.getUTCDay(); return dow === 0 || dow === 6; }
@@ -183,10 +183,10 @@ export function makeCalendar(holidayMap, exceptions = []) {
     if (extraHolidays.has(iso)) return false;
     return true;
   }
-  /** 表示用の休日名。稼働日指定の日は null（＝稼働日扱いなので休日ラベルを出さない）。 */
+  /** 表示用の休日名。稼働日指定の日は null（＝稼働日扱いなので休日ラベルを出さない）。名称未入力の休日指定は空文字。 */
   function holidayName(s) {
     if (forcedWorkdays.has(s)) return null;
-    if (extraHolidays.has(s)) return extraHolidays.get(s) || "休日";
+    if (extraHolidays.has(s)) return extraHolidays.get(s) || "";
     return nationalHolidayName(s) || null;
   }
   function isWorkdayStr(s) { return isWorkday(parseISO(s)); }
@@ -234,17 +234,8 @@ export function weekKey(dateStr) {
   return toISO(monday);
 }
 export function monthKey(dateStr) { return dateStr.slice(0, 7); }
-export function fmtJP(dateStr) {
-  if (!dateStr) return "";
-  const [y, m, d] = dateStr.split("-");
-  return `${y}/${m}/${d}`;
-}
-// 月日のみの短い表記（バージョン比較の基準行など、表示幅が限られる箇所で使用）。
-export function fmtMD(dateStr) {
-  if (!dateStr) return "";
-  const [, m, d] = dateStr.split("-");
-  return `${m}/${d}`;
-}
+// 日付・曜日の表示用の書式は表示中の言語に合わせるため、ここには持たない
+// （src/lib/i18n.js の FORMATS と、React 側の useI18n の fmtDate・fmtMonthDay・fmtWeekday を使う）。
 export function cal_addDaysISO(iso, n) { const d = parseISO(iso); d.setUTCDate(d.getUTCDate() + n); return toISO(d); }
 
 /**
