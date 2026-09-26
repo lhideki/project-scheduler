@@ -10,7 +10,9 @@
     "build:html": "node scripts/build-html.mjs",
     "build:docs": "node scripts/build-json-doc.mjs",
     "build:agent": "node scripts/build-agent.mjs",
-    "build": "npm run build:js && npm run build:css && npm run build:html && npm run build:docs && npm run build:agent",
+    "build:readme": "node scripts/build-readme.mjs",
+    "build:pages": "node scripts/build-pages.mjs",
+    "build": "npm run build:js && npm run build:css && npm run build:html && npm run build:docs && npm run build:agent && npm run build:readme",
     "dev:js": "esbuild src/entry.jsx --bundle --loader:.jsx=jsx --outfile=dist/bundle.dev.js --watch",
     "test": "vitest run",
     "test:watch": "vitest"

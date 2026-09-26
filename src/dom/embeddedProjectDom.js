@@ -2,6 +2,7 @@ import {
   EMBEDDED_PROJECT_SCRIPT_ID, EMBEDDED_PROJECT_SCRIPT_TYPE,
   serializeEmbeddedProject, parseEmbeddedProject,
 } from "../lib/embeddedProject.js";
+import { removeLocalizedPageMarkers } from "./localizedPageDom.js";
 
 /**
  * 現在の document に「共有用HTML」の埋め込みデータがあれば読み取って検証する。
@@ -28,6 +29,8 @@ export function readEmbeddedProject(doc) {
  *
  * - #root の描画結果（Reactがマウントした内容）は取り除く
  * - 既存の埋め込みデータ（共有HTMLからの再書き出し時）があれば置き換える
+ * - Live Demo の言語別ページ（/ja/・/en/）の言語の固定と hreflang のリンクは取り除く
+ *   （共有用HTMLは配布用HTMLと同じく、開いた人の言語で表示する）
  *
  * 埋め込み <script> は <head> の末尾へ置く。バンドルの <script>（body内）より前に
  * 解析されている必要があるため（アプリ起動時に getElementById で読み取る）。
@@ -41,6 +44,8 @@ export function buildSharedHtml(projectExport, doc) {
 
   const prev = html.querySelector("#" + EMBEDDED_PROJECT_SCRIPT_ID);
   if (prev) prev.remove();
+
+  removeLocalizedPageMarkers(html);
 
   const script = d.createElement("script");
   script.type = EMBEDDED_PROJECT_SCRIPT_TYPE;

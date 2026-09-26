@@ -90,6 +90,14 @@ export function detectLocale(languageTag) {
 }
 
 /**
+ * 起動時の表示言語。ページで固定した言語（Live Demo の /ja/・/en/。src/lib/localizedPages.js）→
+ * 保存済みの選択（pm_ui_locale）→ ブラウザの言語の順に決める。
+ */
+export function resolveInitialLocale({ pageLocale, savedLocale, browserLanguage } = {}) {
+  return normalizeLocale(pageLocale) || normalizeLocale(savedLocale) || detectLocale(browserLanguage);
+}
+
+/**
  * FORMATS（use-intl 形式の dateTime/number）を intl-messageformat の形式（date/time/number）に変換する。
  * use-intl の convertFormatsToIntlMessageFormat と同じく、タイムゾーンを指定していない日付書式には TIME_ZONE を補う。
  */

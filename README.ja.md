@@ -1,4 +1,4 @@
-[English](README.md) | 日本語
+[Default](README.md) | [English](README.en.md) | [日本語](README.ja.md)
 
 # Project Scheduler
 
@@ -6,7 +6,7 @@
 
 依存関係・マイルストーン・スプリント・担当者の稼働上限を考慮して日程を自動計算できる、ローカル完結のWBS / ガント計画ツールです。サーバーやアカウント登録は不要で、`project_scheduler.html`をブラウザで開くだけで使えます。
 
-[Live Demo](https://lhideki.github.io/project-scheduler/) | [配布用HTML](project_scheduler.html) | [機能紹介](https://www.inoue-kobo.com/webservice/project-scheduler/) | [実践チュートリアル](https://www.inoue-kobo.com/webservice/tutorial-project-scheduler/) | [JSON形式](docs/json-format.md)
+[Live Demo](https://lhideki.github.io/project-scheduler/ja/) | [配布用HTML](project_scheduler.html) | [機能紹介](https://www.inoue-kobo.com/webservice/project-scheduler/) | [実践チュートリアル](https://www.inoue-kobo.com/webservice/tutorial-project-scheduler/) | [JSON形式](docs/json-format.md)
 
 ![WBS / ガント](docs/images/wbs-gantt.png)
 
@@ -21,7 +21,7 @@ Project Schedulerは、JiraやBacklogなどの共同管理ツールを置き換�
 
 ## 3分で試す
 
-1. [Live Demo](https://lhideki.github.io/project-scheduler/)を開きます。
+1. [Live Demo](https://lhideki.github.io/project-scheduler/ja/)を開きます。
 2. 最初から表示されるサンプルWBSで「基本設計」の工数を`6`から`10`へ変更します。
 3. 画面右上の「自動スケジューリング実行」を押します。
 4. 後続タスクの日程、完了予定日、クリティカルパスが変化することを確認します。
@@ -29,6 +29,20 @@ Project Schedulerは、JiraやBacklogなどの共同管理ツールを置き換�
 ビルドやインストールは不要です。オフラインで利用する場合は、[project_scheduler.html](project_scheduler.html)を開き、GitHub画面右上の「Download raw file」からダウンロードしてブラウザで開きます。
 
 別の端末やLive Demoとダウンロード版の間で計画を移す場合は、画面上部の「書き出し」でJSONファイルを保存し、移行先で「読み込み」を実行します。
+
+### Live Demoの表示言語
+
+Live Demoは、表示言語の異なる3つのページで公開しています。
+
+| ページ | URL | 画面の表示言語 |
+| --- | --- | --- |
+| Default | https://lhideki.github.io/project-scheduler/ | 保存済みの選択。未選択ならブラウザの言語設定 |
+| 日本語 | https://lhideki.github.io/project-scheduler/ja/ | 常に日本語で開きます |
+| 英語 | https://lhideki.github.io/project-scheduler/en/ | 常に英語で開きます |
+
+日本語・英語のページは、以前に別の言語を選んでいても、そのページの言語で開きます。これらのページでヘッダーから言語を切り替えると、アドレスも切り替えた言語のページに変わるため、再読み込みやブックマークでも選んだ言語で開きます。
+
+3つのページは同じサイトから公開しているため、ブラウザに保存した計画を共有します。ページを移っても、同じプロジェクトが別の言語で表示されます。
 
 ## 主な機能
 
@@ -48,7 +62,7 @@ Project Schedulerは、JiraやBacklogなどの共同管理ツールを置き換�
 - 計算済みの日程をMermaid形式のガントチャートとしてコピーしたり、ガントチャートの表示範囲をPNG画像としてコピーしたりできます。
 - 任意のタイミングでスナップショットを保存し、複数バージョンの比較や過去の状態への復元ができます。
 - プロジェクト全体(タスク・担当者・スプリント・カレンダーの例外指定・リソース平準化の設定・バージョン履歴)をJSONファイルとして書き出し・読み込みできます。
-- ヘッダーで画面の表示言語を日本語・英語から切り替えられます。初回はブラウザの言語設定に合わせ、選んだ言語はブラウザに保存します（プロジェクトのJSONには含めません）。サンプルデータと祝日名は日本語のままです。
+- ヘッダーで画面の表示言語を日本語・英語から切り替えられます。初回はブラウザの言語設定に合わせ、選んだ言語はブラウザに保存します（プロジェクトのJSONには含めません）。Live Demoには、常に日本語・英語で開くページもあります（[Live Demoの表示言語](#live-demoの表示言語)参照）。サンプルデータと祝日名は日本語のままです。
 - 現在の計画を埋め込んだ共有用HTMLを書き出せます([詳細](#共有用htmlで計画を渡す))。
 - Claude Code 向けの Skill を同梱し、AIエージェントに保存JSONを直接調整させられます([詳細](#aiエージェントでスケジュールを調整する))。
 
@@ -79,7 +93,7 @@ Project Schedulerは、JiraやBacklogなどの共同管理ツールを置き換�
 
 「書き出し」メニューの「共有用HTML書き出し」を選ぶと、現在の計画を埋め込んだ1つのHTMLファイルをダウンロードできます。受け取った人はJSONファイルなしでブラウザから開き、書き出した時点の計画を確認できます。
 
-共有用HTMLでの変更は`localStorage`へ保存しません。開いた後に編集はできますが、再読み込みすると書き出した時点の状態に戻ります。変更を残す場合はJSONファイルとして書き出してください。
+共有用HTMLは、Live Demoの日本語・英語のページから書き出した場合も、配布用HTMLと同じく開いた人の言語設定に合わせて表示します。共有用HTMLでの変更は`localStorage`へ保存しません。開いた後に編集はできますが、再読み込みすると書き出した時点の状態に戻ります。変更を残す場合はJSONファイルとして書き出してください。
 
 ## 同期フォルダ内のJSONを表示する
 
@@ -146,7 +160,7 @@ JSON形式のフィールド、型、必須項目は[JSON形式ドキュメン�
 
 `project_scheduler.html`は、`src/entry.jsx`を起点にReact製のソースを[esbuild](https://esbuild.github.io/)でバンドルし、[Tailwind CSS](https://tailwindcss.com/)のスタイルとともに1つのHTMLへ埋め込んだビルド成果物です。手で直接編集せず、ソースを変更した後に再生成してください。
 
-`master`ブランチへpushすると、GitHub Actionsがテストとビルドを実行し、生成したHTMLをGitHub Pagesの[Live Demo](https://lhideki.github.io/project-scheduler/)へ公開します。
+`master`ブランチへpushすると、GitHub Actionsがテストとビルドを実行し、生成したHTMLをGitHub Pagesの[Live Demo](https://lhideki.github.io/project-scheduler/ja/)へDefault・日本語・英語の3ページとして公開します。Pull Requestでも同じテストとビルドを実行し、生成物が最新でなければ失敗します。
 
 ### 必要環境
 
@@ -161,7 +175,7 @@ npm run test
 npm run build
 ```
 
-`npm run build`は次の5ステップを順に実行します。
+`npm run build`は次の6ステップを順に実行します。
 
 | コマンド | 内容 |
 | --- | --- |
@@ -170,6 +184,13 @@ npm run build
 | `npm run build:html` | JavaScriptとCSSを`template.html`へ差し込み、`project_scheduler.html`を生成します。 |
 | `npm run build:docs` | コード内のJSON Schemaから`docs/json-format.md`を生成します。 |
 | `npm run build:agent` | `src/agent/cli.js`をバンドルし、Skill用の`.claude/skills/schedule-adjust/cli.mjs`を生成します。 |
+| `npm run build:readme` | `README.en.md`から`README.md`を生成します。 |
+
+`npm run build:pages`は、`project_scheduler.html`からLive Demoの3ページ（`_site/`の`index.html`・`ja/index.html`・`en/index.html`）を生成します。`npm run build`には含まれず、GitHub Actionsが公開前に実行します。`hreflang`のリンクに使う公開URLは、環境変数`PAGES_BASE_URL`で変更できます。
+
+### READMEファイル
+
+`README.en.md`（英語）と`README.ja.md`（日本語）は手で編集します。`README.md`は`npm run build:readme`で`README.en.md`から生成するファイルで、内容は同じですが、Live Demoのリンク先だけがDefaultのページです。`README.md`は直接編集しないでください。内容がずれていると`npm run test`が失敗します。
 
 ### 主なディレクトリ
 
@@ -184,7 +205,7 @@ npm run build
 │   ├── entry.jsx            # Reactアプリのエントリポイント
 │   ├── input.css            # Tailwind CSSの入力ファイル
 │   └── storage.js           # window.storageとlocalStorageの接続
-├── scripts/                 # HTML・JSON文書・Skill CLIの生成スクリプト
+├── scripts/                 # HTML・Live Demoのページ・README・JSON文書・Skill CLIの生成スクリプト
 ├── docs/                    # JSON文書とREADME用画像
 ├── .claude/skills/          # Claude Code 向け Skill（schedule-adjust、backlog-sync）
 ├── .claude-plugin/          # プラグインマーケットプレイス定義

@@ -34,13 +34,15 @@ jobs:
       - name: Build standalone HTML
         run: npm run build
 
-      - name: Prepare Pages artifact
-        run: |
-          mkdir -p _site
-          cp project_scheduler.html _site/index.html
-
       - name: Configure GitHub Pages
+        id: pages
         uses: actions/configure-pages@v5
+
+      # Default（自動判定）・ja・en の3ページを _site/ に生成する（hreflang の相互リンクには公開URLを使う）
+      - name: Prepare Pages artifact
+        run: npm run build:pages
+        env:
+          PAGES_BASE_URL: ${{ steps.pages.outputs.base_url }}
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4

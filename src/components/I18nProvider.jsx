@@ -1,8 +1,9 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { IntlProvider, useFormatter, useTranslations } from "use-intl";
 import {
-  MESSAGES, FORMATS, TIME_ZONE, UI_LOCALE_STORAGE_KEY, detectLocale, normalizeLocale, dateArg,
+  MESSAGES, FORMATS, TIME_ZONE, UI_LOCALE_STORAGE_KEY, normalizeLocale, resolveInitialLocale, dateArg,
 } from "../lib/i18n.js";
+import { readPageLocale, replaceUrlWithLocalizedPage } from "../dom/localizedPageDom.js";
 import { storageGet, storageSet } from "../storage.js";
 
 /* =========================================================================================
@@ -11,29 +12,34 @@ import { storageGet, storageSet } from "../storage.js";
    初回は navigator.language から判定し（ja* なら日本語、それ以外は英語）、ヘッダーで切り替えた言語は
    window.storage の pm_ui_locale に保存する。UIの設定なので Project JSON・バージョンスナップショット・
    共有用HTMLの埋め込みJSONには含めず、linked / embedded 起動時も保存する（autoSaveDisabled の対象外）。
+
+   Live Demo の言語別ページ（/ja/・/en/、src/lib/localizedPages.js）では、ページの言語を保存済みの選択より優先して
+   起動する（ページを開いただけでは pm_ui_locale を書き換えない）。そのページで言語を切り替えたときは、その場で
+   表示を切り替えて保存し、URL を切り替え先の言語のページに置き換える（再読み込みはしない）。
    ========================================================================================= */
 
 const LocaleSettingContext = createContext({ locale: "ja", setLocale: () => {} });
 
-function initialLocale() {
-  return detectLocale(typeof navigator !== "undefined" ? navigator.language : "");
+function browserLanguage() {
+  return typeof navigator !== "undefined" ? navigator.language : "";
 }
 
 export function I18nProvider({ children }) {
-  const [locale, setLocaleState] = useState(initialLocale);
+  const [pageLocale] = useState(() => readPageLocale());
+  const [locale, setLocaleState] = useState(() => resolveInitialLocale({ pageLocale, browserLanguage: browserLanguage() }));
   // 保存済みの言語を読み込むまでは描画しない（初回に別の言語で一瞬表示されるのを避ける）。
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const saved = normalizeLocale(await storageGet(UI_LOCALE_STORAGE_KEY));
+      const saved = pageLocale ? null : await storageGet(UI_LOCALE_STORAGE_KEY);
       if (cancelled) return;
-      if (saved) setLocaleState(saved);
+      setLocaleState(resolveInitialLocale({ pageLocale, savedLocale: saved, browserLanguage: browserLanguage() }));
       setReady(true);
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [pageLocale]);
 
   useEffect(() => {
     if (typeof document !== "undefined") document.documentElement.lang = locale;
@@ -44,7 +50,8 @@ export function I18nProvider({ children }) {
     if (!l) return;
     setLocaleState(l);
     storageSet(UI_LOCALE_STORAGE_KEY, l);
-  }, []);
+    if (pageLocale) replaceUrlWithLocalizedPage(l);
+  }, [pageLocale]);
 
   const setting = useMemo(() => ({ locale, setLocale }), [locale, setLocale]);
   if (!ready) return null;
