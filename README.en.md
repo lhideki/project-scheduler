@@ -6,7 +6,7 @@
 
 Project Scheduler helps you test project plans against dependencies, milestones, sprint windows, and resource capacity. It runs entirely in your browser from a single HTML file, with no server or account required.
 
-[Live Demo](https://lhideki.github.io/project-scheduler/en/) | [Downloadable HTML](project_scheduler.html) | [Feature Overview (Japanese)](https://www.inoue-kobo.com/webservice/project-scheduler/) | [Hands-on Tutorial (Japanese)](https://www.inoue-kobo.com/webservice/tutorial-project-scheduler/) | [JSON Format](docs/json-format.md)
+[Live Demo](https://lhideki.github.io/project-scheduler/en/) | [Downloadable HTML](project_scheduler.html) | [Feature Overview](https://www.inoue-kobo.com/webservice/project-scheduler-en/) | [Hands-on Tutorial (Japanese)](https://www.inoue-kobo.com/webservice/tutorial-project-scheduler/) | [JSON Format](docs/json-format.md)
 
 ![WBS and Gantt view](docs/images/en/wbs-gantt.png)
 
