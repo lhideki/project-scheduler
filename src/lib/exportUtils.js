@@ -1,7 +1,9 @@
 import { buildFlatList } from "./taskTree.js";
 import { MESSAGES, DEFAULT_LOCALE } from "./i18n.js";
 
-export const PROJECT_SCHEMA_VERSION = 1;
+import { PROJECT_SCHEMA_VERSION, validateProjectData, analyzeIntegrity, isBlockingProjectIssue } from "./projectValidation.js";
+
+export { PROJECT_SCHEMA_VERSION } from "./projectValidation.js";
 
 export const PROJECT_JSON_SCHEMA = Object.freeze({
   $schema: "https://json-schema.org/draft/2020-12/schema",
@@ -148,18 +150,32 @@ function cloneJSON(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-function isObject(value) {
-  return !!value && typeof value === "object" && !Array.isArray(value);
+function rejectInvalidProject(issues) {
+  if (!issues.some(isBlockingProjectIssue)) return;
+  const error = new Error("invalid_project_json");
+  error.issues = issues;
+  throw error;
 }
 
-export function normalizeProjectVersions(versions) {
-  if (!Array.isArray(versions) || versions.some(v => !isObject(v))) {
-    throw new Error("invalid_project_json");
+function cloneVersionSnapshots(versions) {
+  return cloneJSON(versions).map(version => {
+    // Export is also an emergency backup. Preserve invalid entries so the user can
+    // save their current data and repair it, rather than failing or silently dropping it.
+    if (!version || typeof version !== "object" || Array.isArray(version)) return version;
+    return {
+      ...version,
+      hasFullSnapshot: Array.isArray(version.rawTasks) && Array.isArray(version.rawResources) && Array.isArray(version.rawSprints),
+    };
+  });
+}
+
+export function normalizeProjectVersions(versions, options = {}) {
+  const issues = analyzeIntegrity({ versions }, options);
+  if (!Array.isArray(versions) && !issues.length) {
+    issues.push({ severity: "error", code: "versions-invalid", path: "versions", messageKey: "projectValidation.array", params: {} });
   }
-  return cloneJSON(versions).map(version => ({
-    ...version,
-    hasFullSnapshot: Array.isArray(version.rawTasks) && Array.isArray(version.rawResources) && Array.isArray(version.rawSprints),
-  }));
+  rejectInvalidProject(issues);
+  return cloneVersionSnapshots(versions);
 }
 
 /** 現行の正規化済みJSONエクスポートデータを組み立てる。 */
@@ -170,7 +186,7 @@ export function buildProjectExport(tasks, resources, sprints = [], versions = []
     tasks: cloneJSON(Array.isArray(tasks) ? tasks : []),
     resources: cloneJSON(Array.isArray(resources) ? resources : []),
     sprints: cloneJSON(Array.isArray(sprints) ? sprints : []),
-    versions: normalizeProjectVersions(versions),
+    versions: cloneVersionSnapshots(Array.isArray(versions) ? versions : []),
     levelingOn: !!levelingOn,
     calendarExceptions: cloneJSON(Array.isArray(calendarExceptions) ? calendarExceptions : []),
   };
@@ -180,33 +196,42 @@ export function buildProjectExport(tasks, resources, sprints = [], versions = []
  * JSONインポートで受け取ったデータを検証・正規化する。
  * 現行スキーマのみ受け付け、旧形式へのフォールバックは行わない。
  */
-export function normalizeImportedProject(data) {
-  if (
-    !isObject(data)
-    || data.schemaVersion !== PROJECT_SCHEMA_VERSION
-    || typeof data.exportedAt !== "string"
-    || !Array.isArray(data.tasks)
-    || !Array.isArray(data.resources)
-    || !Array.isArray(data.sprints)
-    || !Array.isArray(data.versions)
-    // calendarExceptions は任意だが、キーが存在する場合は配列でなければ不正とみなす
-    // （黙って [] に丸めるとカレンダー設定を失ったまま読み込めてしまうため）。
-    || (data.calendarExceptions !== undefined && !Array.isArray(data.calendarExceptions))
-  ) {
-    throw new Error("invalid_project_json");
-  }
+export function normalizeImportedProject(data, options = {}) {
+  rejectInvalidProject(validateProjectData(data, options));
   return {
     schemaVersion: data.schemaVersion,
     exportedAt: data.exportedAt,
     tasks: cloneJSON(data.tasks),
     resources: cloneJSON(data.resources),
     sprints: cloneJSON(data.sprints),
-    versions: normalizeProjectVersions(data.versions),
-    // 旧形式のJSON（levelingOn未対応）を読み込んだ場合は false にフォールバックする。
-    levelingOn: typeof data.levelingOn === "boolean" ? data.levelingOn : false,
-    // 旧形式のJSON（calendarExceptions キーなし）のみ空配列にフォールバックする。
-    calendarExceptions: Array.isArray(data.calendarExceptions) ? cloneJSON(data.calendarExceptions) : [],
+    versions: cloneVersionSnapshots(data.versions),
+    levelingOn: data.levelingOn === undefined ? false : data.levelingOn,
+    calendarExceptions: data.calendarExceptions === undefined ? [] : cloneJSON(data.calendarExceptions),
   };
+}
+
+/** Prepare the complete next project before touching application state.
+ * Imported version IDs win; local-only versions remain. An empty imported list
+ * keeps the existing order, matching the original import behavior.
+ */
+export function prepareProjectImport(raw, currentVersions = [], { mergeVersions = true } = {}) {
+  // Incoming data must always pass strict external validation first. Existing local
+  // snapshots may contain the narrow editing states supported by local restoration.
+  const data = normalizeImportedProject(raw);
+  const localOptions = { allowEditingValues: true };
+  if (mergeVersions) {
+    const current = normalizeProjectVersions(currentVersions, localOptions);
+    if (data.versions.length) {
+      const versions = new Map(current.map(version => [version.id, version]));
+      data.versions.forEach(version => versions.set(version.id, version));
+      data.versions = normalizeProjectVersions([...versions.values()], localOptions).sort((a, b) => b.createdAt - a.createdAt);
+    } else {
+      data.versions = current;
+    }
+  }
+  const issues = validateProjectData(data, localOptions);
+  rejectInvalidProject(issues);
+  return { data, issues };
 }
 
 /** テキストを Blob にしてブラウザのダウンロードとしてトリガーする。 */

@@ -115,7 +115,7 @@ bee（`@nulab/bee` 1.1 以上、Backlog公式CLI）経由で保存JSONと Backlo
 - `resources`: 担当者（週次・月次の稼働上限を持つ。上限値 `0`・未設定は「その上限を適用しない」。日次の上限は1人日固定）。
 - `sprints`: `{id, name, theme, startDate, endDate, order}`。タスク側は `sprintIds`（配列）で複数参照できる（1タスク=複数スプリント可、グループには持たせない）。旧形式の単一 `sprintId` で保存されたデータは `migrateSprintIds()` で自動変換する（適用しているのは localStorage からの読み込み・共有用HTML（embedded）の初期化・バージョン復元。JSONの「読み込み」と linked の読み込みでは変換しない）。
 - `versions`: 任意タイミングのスナップショット（`rawTasks`/`rawResources`/`rawSprints`/`rawCalendarExceptions` を保持。`levelingOn` は含めない）。`pm_versions` に保存する。
-- Undo/Redo: `tasks` だけが対象（`useReducer(taskHistoryReducer)`、`src/lib/history.js`、直近100件）。`resources`・`sprints`・`calendarExceptions` の変更は履歴に積まない。初回ロード・linked の読み込みは `resetTasks` で履歴を空にする。キーボードショートカット（Ctrl/Cmd+Z・Shift+Ctrl/Cmd+Z・Ctrl/Cmd+Y）は `window` 全体で受け付ける（ヘッダーのボタン操作直後なども効かせるため。IME変換中は無視する）。ただし `input`/`textarea`/`select`/contenteditable にフォーカスがある間は、ブラウザ標準の Undo を奪わないよう素通りする。タスク編集用の入力欄（WBS表のセル・タスク詳細モーダル）でのショートカットは `WBSGanttView` 側のローカルハンドラ（`stopPropagation` あり）が先に処理する。
+- Undo/Redo: `tasks` だけが対象（`useReducer(taskHistoryReducer)`、`src/lib/history.js`、直近100件）。`resources`・`sprints`・`calendarExceptions` の変更は履歴に積まない。初回ロード・linked・通常JSONの読み込みは `resetTasks` で履歴を空にする（成功時のみ。以前のタスクを新しい担当者・カレンダーへUndoしないため）。キーボードショートカット（Ctrl/Cmd+Z・Shift+Ctrl/Cmd+Z・Ctrl/Cmd+Y）は `window` 全体で受け付ける（ヘッダーのボタン操作直後なども効かせるため。IME変換中は無視する）。ただし `input`/`textarea`/`select`/contenteditable にフォーカスがある間は、ブラウザ標準の Undo を奪わないよう素通りする。タスク編集用の入力欄（WBS表のセル・タスク詳細モーダル）でのショートカットは `WBSGanttView` 側のローカルハンドラ（`stopPropagation` あり）が先に処理する。
 - `levelingOn`: リソース平準化トグルのON/OFF（`boolean`、デフォルト`false`）。`window.storage`（`pm_project`）およびJSONエクスポート/インポートの対象。旧形式JSON（`levelingOn`キーなし）は読み込み時に`false`へフォールバックする。
 - `calendarExceptions`: 非稼働日カレンダーの例外（`{date, type: "holiday" | "workday", name?}` の配列、デフォルト`[]`）。`type: "holiday"`＝休日（平日を非稼働日化）、`type: "workday"`＝稼働日（土日・祝日・休日指定を稼働日化・**最優先**）。UIの種別ラベルは「休日」「稼働日」（内部値は `holiday`/`workday` のまま）。「カレンダー編集」タブ（`CalendarView` → `CalendarExceptionsEditor`）で編集。`window.storage`（`pm_project`）・JSONエクスポート/インポート・バージョンスナップショット（`rawCalendarExceptions`）の対象。旧形式JSON（キーなし）は`[]`へフォールバック。稼働日判定は `makeCalendar(holidayMap, calendarExceptions)`（`src/lib/calendar.js`）に集約されており、`runCPM`/`levelResources` は `cal` を受け取るだけなので変更不要。`holidayMap`（App・CLI とも `buildHolidayMap(y - 1, y + 6)`）の収録範囲外の年の祝日は、`makeCalendar` が問い合わせ時にその年の分を計算して補う（稼働上限でタスクが長く延長され、範囲より先まで割り当てる場合に祝日へ割り当てないため。`cal.holidayMap` 自体は渡したマップのままで、空のマップなら補わない）。
 
@@ -210,7 +210,7 @@ App は起動元を概念的に3種類として扱う。`autoSaveDisabled`（= `
   - `PROJECT_JSON_SCHEMA`（`src/lib/exportUtils.js`。`npm run build:docs` で `docs/json-format.md` に反映）と `buildProjectExport`/`normalizeImportedProject`
   - App の読み込み経路（localStorage の初回ロード、linked の `applyLinkedProject`、embedded の `initialProject`、JSON「読み込み」の `handleImportFile`）と `pm_project` の自動保存
   - バージョンスナップショット（`saveVersion` の `rawXxx`）と復元（`restoreVersion`）、`seedData()`（`src/lib/seedData.js`）
-  - インポートは `schemaVersion: 1` のみ受け付け、`tasks`/`resources`/`sprints`/`versions` は必須（無ければ読み込み失敗）。後から追加するキーは任意項目にし、キーが無い場合は既定値（`false`・`[]` 等）へフォールバックする。キーがあって型が不正な場合の扱いはキーごとに異なる（`calendarExceptions` は配列でなければ読み込み失敗、`levelingOn` は boolean 以外なら `false` に丸める）。
+  - インポートは `schemaVersion: 1` のみ受け付け、`tasks`/`resources`/`sprints`/`versions` は必須（無ければ読み込み失敗）。後から追加するキーは任意項目にし、キーが無い場合は既定値（`false`・`[]` 等）へフォールバックする。キーが存在して型が不正な場合は共通検証で読み込みを拒否する（`calendarExceptions` は配列、`levelingOn` は boolean）。検証APIと後方互換は `docs/import-validation.md` を参照。
 - 依存パッケージのバージョンは `package.json` を正とする。
 
 ## ユニットテスト

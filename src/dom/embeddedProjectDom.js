@@ -19,7 +19,7 @@ export function readEmbeddedProject(doc) {
   try {
     return { ok: true, data: parseEmbeddedProject(el.textContent || "") };
   } catch (e) {
-    return { ok: false };
+    return { ok: false, syntaxError: e instanceof SyntaxError, issues: e.issues || [] };
   }
 }
 

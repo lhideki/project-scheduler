@@ -85,7 +85,9 @@
     "pngFailed": "PNGのコピーに失敗しました: {message}",
     "importFailedFormat": "読み込みに失敗しました（ファイル形式が正しくありません）",
     "importFailedParse": "読み込みに失敗しました（JSONを解析できません）",
-    "imported": "JSONファイルからプロジェクトを読み込みました"
+    "imported": "JSONファイルからプロジェクトを読み込みました",
+    "versionPending": "バージョン「{name}」を画面内に追加しました。ブラウザへの保存は待機中です",
+    "versionSessionOnly": "バージョン「{name}」を画面内に追加しました。残すにはJSONを書き出してください"
   },
   "pngErrors": {
     "gantt-dom-missing": "ガント画面のDOM構造を取得できませんでした",
@@ -408,5 +410,56 @@
     "float": "フロート {days}日",
     "lagTitle": "ラグ（workday）",
     "removeEdge": "依存関係を削除"
+  },
+  "save": {
+    "pending": "未保存 · 保存待ち",
+    "saved": "このブラウザに保存済み",
+    "failed": "保存できませんでした",
+    "disabled": "自動保存の対象外 · 変更を残すにはJSONを書き出してください",
+    "restoreBlocked": "保存データを復元できないため自動保存を停止中",
+    "failureHelp": "編集内容は画面内に保持されています。閉じる前にJSONへ退避してください。",
+    "export": "JSONへ退避",
+    "retry": "保存を再試行",
+    "replaceUnreadable": "読み込めなかったブラウザの保存データを、現在画面に表示している計画で上書きしますか？重要なデータは先に退避してください。",
+    "loading": "保存済みの計画を読み込み中…"
+  },
+  "importResult": {
+    "syntax": "JSONの構文が正しくありません",
+    "invalid": "プロジェクトの内容に不正な項目があります",
+    "warnings": "読み込みました。確認が必要な項目があります",
+    "restore": "保存データを復元できませんでした",
+    "unchanged": "現在の計画とバージョン履歴は変更していません。次の項目を修正してからファイルを選択し直してください。",
+    "restoreHelp": "ブラウザの保存データは上書きしていません。保護のため自動保存を停止しています。"
+  },
+  "projectValidation": {
+    "object": "オブジェクトで指定してください",
+    "array": "配列で指定してください",
+    "id": "IDは空でない文字列で指定してください（予約名は使用できません）",
+    "string": "{field} は文字列で指定してください",
+    "number": "{field} は有効な有限の数値で指定してください",
+    "nonnegativeNumber": "{field} は 0 以上の有限の数値で指定してください",
+    "boolean": "{field} は true または false で指定してください",
+    "date": "{field} は実在する日付（YYYY-MM-DD）で指定してください",
+    "progress": "progress は 0〜100 の数値で指定してください",
+    "nullableId": "{field} はIDまたは null で指定してください",
+    "milestoneMode": "milestoneMode は flexible または fixed で指定してください",
+    "calendarType": "type は holiday または workday で指定してください",
+    "dependencyType": "type は FS / SS / FF / SF で指定してください",
+    "dateRange": "終了日は開始日以降にしてください",
+    "timestamp": "createdAt は有効な Unix ミリ秒で指定してください",
+    "nonnegativeInteger": "{field} は 0 以上の整数で指定してください",
+    "snapshotMissing": "復元用スナップショットに必要な配列がありません",
+    "duplicateId": "ID「{id}」が重複しています",
+    "parentCycle": "親子関係が循環しています: {route}",
+    "parentMissing": "親タスク「{id}」が存在しません",
+    "assigneeMissing": "担当者「{id}」が存在しません",
+    "sprintMissing": "スプリント「{id}」が存在しません",
+    "groupPredecessors": "グループ「{name}」に先行タスクが設定されています（依存はリーフタスクに付けてください）",
+    "sprintOverlap": "期間が重複しているスプリントがあります: {ids}",
+    "calendarConflict": "{date, date, ymd} に休日と稼働日の両方が指定されています（稼働日が優先されます）",
+    "schemaVersion": "schemaVersion は {version} で指定してください",
+    "dateTime": "{field} は有効な ISO 8601 日時で指定してください",
+    "requiredArray": "必須の配列がありません",
+    "dependencySubject": "「{name}」: {reason}"
   }
 }

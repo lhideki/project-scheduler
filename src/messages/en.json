@@ -85,7 +85,9 @@
     "pngFailed": "Failed to copy as PNG: {message}",
     "importFailedFormat": "Import failed (the file format is invalid)",
     "importFailedParse": "Import failed (the JSON could not be parsed)",
-    "imported": "Imported the project from the JSON file"
+    "imported": "Imported the project from the JSON file",
+    "versionPending": "Added version \"{name}\" on this screen. Browser save is pending.",
+    "versionSessionOnly": "Added version \"{name}\" on this screen. Export JSON to keep it."
   },
   "pngErrors": {
     "gantt-dom-missing": "Could not read the structure of the Gantt view",
@@ -408,5 +410,56 @@
     "float": "Float {days}d",
     "lagTitle": "Lag (workdays)",
     "removeEdge": "Remove dependency"
+  },
+  "save": {
+    "pending": "Unsaved changes · waiting to save",
+    "saved": "Saved in this browser",
+    "failed": "Could not save",
+    "disabled": "Automatic saving is off · export JSON to keep changes",
+    "restoreBlocked": "Saved data could not be restored · automatic saving paused",
+    "failureHelp": "Your changes are still on this screen. Export JSON before closing.",
+    "export": "Back up as JSON",
+    "retry": "Retry saving",
+    "replaceUnreadable": "Replace the unreadable browser data with the plan currently on screen? Export any important data before continuing.",
+    "loading": "Loading saved project…"
+  },
+  "importResult": {
+    "syntax": "The file is not valid JSON",
+    "invalid": "The project data is invalid",
+    "warnings": "Imported with issues to review",
+    "restore": "Saved data could not be restored",
+    "unchanged": "The current plan and version history have not changed. Correct the fields below and select the file again.",
+    "restoreHelp": "The saved browser data has not been overwritten. Automatic saving is paused to protect it."
+  },
+  "projectValidation": {
+    "object": "Must be an object.",
+    "array": "Must be an array.",
+    "id": "ID must be a nonempty string, not a reserved name.",
+    "string": "{field} must be a string.",
+    "number": "{field} must be a valid finite number.",
+    "nonnegativeNumber": "{field} must be a finite number greater than or equal to 0.",
+    "boolean": "{field} must be true or false.",
+    "date": "{field} must be a real date in YYYY-MM-DD format.",
+    "progress": "progress must be a number from 0 to 100.",
+    "nullableId": "{field} must be an ID or null.",
+    "milestoneMode": "milestoneMode must be flexible or fixed.",
+    "calendarType": "type must be holiday or workday.",
+    "dependencyType": "type must be FS, SS, FF, or SF.",
+    "dateRange": "End date must be on or after start date.",
+    "timestamp": "createdAt must be a valid Unix timestamp in milliseconds.",
+    "nonnegativeInteger": "{field} must be a nonnegative integer.",
+    "snapshotMissing": "Full snapshot is missing a required array.",
+    "duplicateId": "Duplicate ID \"{id}\".",
+    "parentCycle": "Parent hierarchy contains a cycle: {route}.",
+    "parentMissing": "Parent task \"{id}\" does not exist.",
+    "assigneeMissing": "Resource \"{id}\" does not exist.",
+    "sprintMissing": "Sprint \"{id}\" does not exist.",
+    "groupPredecessors": "Group \"{name}\" has predecessors; assign dependencies to leaf tasks.",
+    "sprintOverlap": "Sprint date ranges overlap: {ids}.",
+    "calendarConflict": "{date, date, ymd} is both a holiday and a workday; workday takes priority.",
+    "schemaVersion": "schemaVersion must be {version}.",
+    "dateTime": "{field} must be a valid ISO 8601 date-time.",
+    "requiredArray": "Required array is missing.",
+    "dependencySubject": "\"{name}\": {reason}"
   }
 }

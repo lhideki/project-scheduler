@@ -42,3 +42,19 @@ jobs:
 
       - name: Build Live Demo pages
         run: npm run build:pages
+
+      - name: Install browser for UI regression tests
+        run: npx playwright install --with-deps chromium
+
+      - name: Run browser regression tests
+        run: npm run test:browser
+
+      - name: Upload browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-evidence-${{ github.sha }}
+          path: |
+            test-results/
+            playwright-report/
+          if-no-files-found: ignore

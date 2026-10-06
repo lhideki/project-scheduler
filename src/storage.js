@@ -7,12 +7,8 @@
 if (typeof window !== "undefined" && !window.storage) {
   window.storage = {
     async get(key) {
-      try {
-        const v = window.localStorage.getItem(key);
-        return v !== null ? { value: v } : null;
-      } catch (e) {
-        return null;
-      }
+      const v = window.localStorage.getItem(key);
+      return v !== null ? { value: v } : null;
     },
     async set(key, value) {
       try {
@@ -25,10 +21,18 @@ if (typeof window !== "undefined" && !window.storage) {
   };
 }
 export async function storageGet(key) {
-  try { const r = await window.storage.get(key, false); return r ? JSON.parse(r.value) : null; }
-  catch (e) { return null; }
+  const result = await storageRead(key);
+  return result.status === "loaded" ? result.value : null;
+}
+// 起動時は「データなし」と「読めなかった」を区別し、読めない保存データを上書きしない。
+export async function storageRead(key) {
+  try {
+    const r = await window.storage.get(key, false);
+    return r == null ? { status: "missing" } : { status: "loaded", value: JSON.parse(r.value) };
+  } catch (e) { return { status: "failed" }; }
 }
 export async function storageSet(key, value) {
-  try { await window.storage.set(key, JSON.stringify(value), false); return true; }
+  // ホスト提供APIの void / オブジェクト形式の成功応答を維持し、明示的な false を失敗とする。
+  try { return (await window.storage.set(key, JSON.stringify(value), false)) !== false; }
   catch (e) { return false; }
 }

@@ -23,17 +23,22 @@ import {
   runCPM, buildDisplaySchedule, deriveProjectStart,
   candidateFromDep, earliestSprintFloor, computeAutoSchedule,
   idleSegments,
-  detectSprintConflicts, computeOverlappingSprintIds,
+  detectSprintConflicts,
   detectDependencyIssues, SCHEDULE_DEPENDENCY_ISSUE_CODES,
   normalizeImportedProject,
+  checkFieldShapes, analyzeIntegrity, findParentCycles, validateProjectData, projectDependencyIssue,
   buildFlatList, isGroupId, effectivePredecessors,
-  createAppTranslator, formatDependencyIssueMessage, formatLevelWarning,
+  createAppTranslator, formatProjectIssue, formatLevelWarning,
   formatSprintConflictReason, formatSprintConflictSprintNames,
 } from "./engine.js";
 
 // src/lib/ はメッセージをコード＋パラメータで返すため、レポートの文言はアプリと同じメッセージカタログ
 // （src/messages/ja.json）から作る。CLI のレポートは日本語のまま出す。
 const tJa = createAppTranslator("ja");
+
+function formatIssue(issue) {
+  return { ...issue, message: formatProjectIssue(tJa, issue) };
+}
 
 /* -------------------------------------------------------------------------------------------
    入出力
@@ -70,7 +75,7 @@ function normalizeOrFail(raw, path) {
     return normalizeImportedProject(raw);
   } catch (e) {
     if (e && e.message === "invalid_project_json") {
-      fail(`保存フォーマットが正しくありません（schemaVersion:1 と必須項目を確認してください）: ${path}`);
+      fail(`保存フォーマットが正しくありません（schemaVersion:1 と必須項目を確認してください）: ${path}`, { issues: (e.issues || []).map(formatIssue) });
     }
     fail(`保存フォーマットを正規化できません: ${path}`, { detail: String(e && e.message || e) });
   }
@@ -177,17 +182,9 @@ export function scheduleRows(data, schedule) {
    検証（スキーマ ＋ 参照整合性 ＋ 循環依存）
    ------------------------------------------------------------------------------------------- */
 
-function nameOf(tasks, id) {
-  const t = tasks.find(x => x.id === id);
-  return t ? t.name : id;
-}
-
-/** src/lib/dependencyIssues.js の判定結果を、CLI の issue 形式（severity/code/ids/message）へ整形する。
- *  lib のメッセージはアプリの行ツールチップ用に対象タスク自身の名前を含まないため、循環以外は先頭に付ける。 */
+/** Keep dependency diagnostics in the shared severity/code/path format. */
 function formatDependencyIssue(issue, tasks) {
-  const { code, severity, ids, params, ...detail } = issue;
-  const subject = code === "dependency-cycle" ? "" : `「${nameOf(tasks, ids[0])}」: `;
-  return { severity, code, ids, message: `${subject}${formatDependencyIssueMessage(tJa, issue)}`, ...detail };
+  return formatIssue(projectDependencyIssue(issue, tasks));
 }
 
 /** src/lib/sprints.js の判定結果（理由はコード＋パラメータ）を、レポート用の文言（sprintName・reasons）へ整形する。 */
@@ -200,222 +197,7 @@ function formatSprintConflict(conflict) {
   };
 }
 
-const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-function isISODate(v) {
-  if (typeof v !== "string" || !ISO_DATE_RE.test(v)) return false;
-  const d = new Date(`${v}T00:00:00Z`);
-  return !Number.isNaN(d.getTime()) && v === d.toISOString().slice(0, 10);
-}
-function isFiniteNumber(v) {
-  return typeof v === "number" && Number.isFinite(v);
-}
-
-/** タスク/リソース/スプリントのフィールド型・日付書式を検査する。
- *  normalizeImportedProject はトップレベル形状しか見ないため、ここで計算を壊す値
- *  （不正な日付・非数値の工数・id欠落・不正な依存タイプ等）を error として拾う。 */
-export function checkFieldShapes(data) {
-  const issues = [];
-  const label = (t, i) => `タスク#${i + 1}${t && t.name ? `「${t.name}」` : t && t.id ? `（id: ${t.id}）` : ""}`;
-  const DEP_TYPES = new Set(["FS", "SS", "FF", "SF"]);
-
-  (data.tasks || []).forEach((t, i) => {
-    if (typeof t !== "object" || t === null) {
-      issues.push({ severity: "error", code: "task-not-object", message: `タスク#${i + 1} がオブジェクトではありません` });
-      return;
-    }
-    if (typeof t.id !== "string" || !t.id) {
-      issues.push({ severity: "error", code: "task-id-invalid", message: `${label(t, i)} の id が文字列ではありません` });
-    }
-    if (t.parentId != null && typeof t.parentId !== "string") {
-      issues.push({ severity: "error", code: "task-parentId-invalid", ids: [t.id], message: `${label(t, i)} の parentId が文字列でも null でもありません` });
-    }
-    if (t.startDate != null && !isISODate(t.startDate)) {
-      issues.push({ severity: "error", code: "task-startDate-invalid", ids: [t.id], message: `${label(t, i)} の startDate「${t.startDate}」が YYYY-MM-DD 形式ではありません` });
-    }
-    if (t.fixedDate != null && !isISODate(t.fixedDate)) {
-      issues.push({ severity: "error", code: "task-fixedDate-invalid", ids: [t.id], message: `${label(t, i)} の fixedDate「${t.fixedDate}」が YYYY-MM-DD 形式ではありません` });
-    }
-    if (t.duration != null && !isFiniteNumber(t.duration)) {
-      issues.push({ severity: "error", code: "task-duration-invalid", ids: [t.id], message: `${label(t, i)} の duration が数値ではありません` });
-    }
-    if (t.progress != null && !isFiniteNumber(t.progress)) {
-      issues.push({ severity: "error", code: "task-progress-invalid", ids: [t.id], message: `${label(t, i)} の progress が数値ではありません` });
-    }
-    if (t.sprintIds != null && !Array.isArray(t.sprintIds)) {
-      issues.push({ severity: "error", code: "task-sprintIds-invalid", ids: [t.id], message: `${label(t, i)} の sprintIds が配列ではありません` });
-    }
-    if (t.predecessors != null && !Array.isArray(t.predecessors)) {
-      issues.push({ severity: "error", code: "task-predecessors-invalid", ids: [t.id], message: `${label(t, i)} の predecessors が配列ではありません` });
-    } else {
-      (t.predecessors || []).forEach((p, j) => {
-        if (typeof p !== "object" || p === null || typeof p.id !== "string" || !p.id) {
-          issues.push({ severity: "error", code: "dependency-id-invalid", ids: [t.id], message: `${label(t, i)} の先行タスク#${j + 1} に id がありません` });
-        }
-        if (!DEP_TYPES.has(p && p.type)) {
-          issues.push({ severity: "error", code: "dependency-type-invalid", ids: [t.id], message: `${label(t, i)} の先行タスク#${j + 1} の type「${p && p.type}」が FS/SS/FF/SF ではありません` });
-        }
-        if (p && p.lag != null && !isFiniteNumber(p.lag)) {
-          issues.push({ severity: "error", code: "dependency-lag-invalid", ids: [t.id], message: `${label(t, i)} の先行タスク#${j + 1} の lag が数値ではありません` });
-        }
-      });
-    }
-  });
-
-  (data.resources || []).forEach((r, i) => {
-    if (typeof r !== "object" || r === null || typeof r.id !== "string" || !r.id) {
-      issues.push({ severity: "error", code: "resource-id-invalid", message: `リソース#${i + 1} の id が文字列ではありません` });
-    }
-    if (r && r.weeklyCapacity != null && !isFiniteNumber(r.weeklyCapacity)) {
-      issues.push({ severity: "error", code: "resource-weeklyCapacity-invalid", message: `リソース#${i + 1} の weeklyCapacity が数値ではありません` });
-    }
-    if (r && r.monthlyCapacity != null && !isFiniteNumber(r.monthlyCapacity)) {
-      issues.push({ severity: "error", code: "resource-monthlyCapacity-invalid", message: `リソース#${i + 1} の monthlyCapacity が数値ではありません` });
-    }
-  });
-
-  (data.sprints || []).forEach((s, i) => {
-    if (typeof s !== "object" || s === null || typeof s.id !== "string" || !s.id) {
-      issues.push({ severity: "error", code: "sprint-id-invalid", message: `スプリント#${i + 1} の id が文字列ではありません` });
-    }
-    if (s && s.startDate != null && !isISODate(s.startDate)) {
-      issues.push({ severity: "error", code: "sprint-startDate-invalid", message: `スプリント#${i + 1} の startDate「${s.startDate}」が YYYY-MM-DD 形式ではありません` });
-    }
-    if (s && s.endDate != null && !isISODate(s.endDate)) {
-      issues.push({ severity: "error", code: "sprint-endDate-invalid", message: `スプリント#${i + 1} の endDate「${s.endDate}」が YYYY-MM-DD 形式ではありません` });
-    }
-  });
-
-  if (data.calendarExceptions != null && !Array.isArray(data.calendarExceptions)) {
-    issues.push({ severity: "error", code: "calendarExceptions-invalid", message: "calendarExceptions が配列ではありません" });
-  } else {
-    (data.calendarExceptions || []).forEach((e, i) => {
-      if (typeof e !== "object" || e === null) {
-        issues.push({ severity: "error", code: "calendar-exception-not-object", message: `カレンダー例外#${i + 1} がオブジェクトではありません` });
-        return;
-      }
-      if (!isISODate(e.date)) {
-        issues.push({ severity: "error", code: "calendar-exception-date-invalid", message: `カレンダー例外#${i + 1} の date「${e.date}」が YYYY-MM-DD 形式ではありません` });
-      }
-      if (e.type !== "holiday" && e.type !== "workday") {
-        issues.push({ severity: "error", code: "calendar-exception-type-invalid", message: `カレンダー例外#${i + 1} の type「${e.type}」が holiday / workday ではありません` });
-      }
-    });
-  }
-
-  return issues;
-}
-
-/** parentId チェーンの循環（自己参照・相互参照）を検出する。同じ循環は1件だけ返す。 */
-export function findParentCycles(tasks) {
-  const byId = new Map(tasks.map(t => [t.id, t]));
-  const cycles = [];
-  const reportedKeys = new Set();
-  const settled = new Set(); // 循環でないと確定済みの起点
-  for (const start of tasks) {
-    if (settled.has(start.id)) continue;
-    const path = [];
-    const inPath = new Set();
-    let cur = start;
-    let hitCycle = false;
-    while (cur && cur.parentId != null) {
-      if (inPath.has(cur.id)) {
-        const cyc = path.slice(path.indexOf(cur.id));
-        const key = [...cyc].sort().join(" ");
-        if (!reportedKeys.has(key)) {
-          reportedKeys.add(key);
-          cycles.push(cyc);
-        }
-        hitCycle = true;
-        break;
-      }
-      path.push(cur.id);
-      inPath.add(cur.id);
-      cur = byId.get(cur.parentId);
-    }
-    if (!hitCycle) path.forEach(id => settled.add(id));
-  }
-  return cycles;
-}
-
-/** フィールド型・参照整合性・循環依存（依存関係／親子）・スプリント重複を検査して issue 配列を返す。 */
-export function analyzeIntegrity(data) {
-  const tasks = data.tasks || [];
-
-  // 型・書式の検査を先に行う。ここで error が出た場合、以降の参照チェックや
-  // 依存関係の判定（detectDependencyIssues）は不正な値で誤動作しうるため、フィールド検査の結果だけ返す。
-  const shapeIssues = checkFieldShapes(data);
-  if (shapeIssues.some(i => i.severity === "error")) return shapeIssues;
-
-  const issues = [...shapeIssues];
-
-  const seen = new Set();
-  const dup = new Set();
-  for (const t of tasks) {
-    if (seen.has(t.id)) dup.add(t.id);
-    seen.add(t.id);
-  }
-  for (const id of dup) {
-    issues.push({ severity: "error", code: "duplicate-task-id", ids: [id], message: `タスクID「${id}」が重複しています` });
-  }
-
-  for (const cyc of findParentCycles(tasks)) {
-    issues.push({
-      severity: "error",
-      code: "parent-cycle",
-      ids: cyc,
-      message: `親子関係が循環しています: ${cyc.map(id => nameOf(tasks, id)).join(" → ")}`,
-    });
-  }
-
-  const taskIds = seen;
-  const resIds = new Set((data.resources || []).map(r => r.id));
-  const sprintIds = new Set((data.sprints || []).map(s => s.id));
-
-  for (const t of tasks) {
-    if (t.parentId != null && !taskIds.has(t.parentId)) {
-      issues.push({ severity: "error", code: "parent-missing", ids: [t.id], message: `「${t.name}」の親タスク「${t.parentId}」が存在しません` });
-    }
-    if (t.assigneeId && !resIds.has(t.assigneeId)) {
-      issues.push({ severity: "warning", code: "assignee-missing", ids: [t.id], message: `「${t.name}」の担当者「${t.assigneeId}」が存在しません` });
-    }
-    for (const sid of t.sprintIds || []) {
-      if (!sprintIds.has(sid)) {
-        issues.push({ severity: "warning", code: "sprint-missing", ids: [t.id], message: `「${t.name}」のスプリント参照「${sid}」が存在しません` });
-      }
-    }
-    if ((t.predecessors || []).length && isGroupId(tasks, t.id)) {
-      issues.push({ severity: "warning", code: "group-has-predecessors", ids: [t.id], message: `グループ「${t.name}」に先行タスクが設定されています（依存はリーフタスクに付けてください）` });
-    }
-  }
-
-  // 自己依存（self-dependency）・存在しない先行タスク（predecessor-missing）・循環参照（dependency-cycle、
-  // グループを介した循環を含む）は、アプリと同じ判定（src/lib/dependencyIssues.js）を使う。
-  // スケジュールを使う判定（開始日との矛盾・固定マイルストーンの期日超過）は validateProject が
-  // スケジュール計算後に追加する。
-  for (const issue of detectDependencyIssues(tasks)) {
-    issues.push(formatDependencyIssue(issue, tasks));
-  }
-
-  const overlaps = computeOverlappingSprintIds(data.sprints || []);
-  if (overlaps.size) {
-    issues.push({ severity: "warning", code: "sprint-overlap", ids: [...overlaps], message: `期間が重複しているスプリントがあります: ${[...overlaps].join(", ")}` });
-  }
-
-  // 同一日に休日（holiday）と稼働日（workday）が両方あると分かりにくい（workday が優先される）。
-  const exByDate = new Map();
-  for (const e of data.calendarExceptions || []) {
-    if (!e || typeof e.date !== "string") continue;
-    if (!exByDate.has(e.date)) exByDate.set(e.date, new Set());
-    exByDate.get(e.date).add(e.type);
-  }
-  for (const [date, types] of exByDate) {
-    if (types.has("holiday") && types.has("workday")) {
-      issues.push({ severity: "warning", code: "calendar-exception-conflict", message: `${date} に休日と稼働日の両方が指定されています（稼働日が優先されます）` });
-    }
-  }
-
-  return issues;
-}
+export { checkFieldShapes, analyzeIntegrity, findParentCycles };
 
 /* -------------------------------------------------------------------------------------------
    バージョンスナップショット（App.jsx saveVersion と同一構造）
@@ -502,8 +284,8 @@ const SCHEDULE_BLOCKING_CODES = new Set(["duplicate-task-id", "parent-cycle"]);
  * @param {{leveling?: boolean}} [opts] - 表示スケジュールの平準化条件（既定はデータの levelingOn）
  */
 export function validateProject(data, opts = {}) {
-  const leveling = opts.leveling === undefined ? !!data.levelingOn : !!opts.leveling;
-  const issues = analyzeIntegrity(data);
+  const leveling = opts.leveling === undefined ? !!data?.levelingOn : !!opts.leveling;
+  const issues = data && Object.hasOwn(data, "schemaVersion") ? validateProjectData(data) : analyzeIntegrity(data);
   let scheduleChecks;
   const blocking = checkFieldShapes(data).find(i => i.severity === "error")
     || issues.find(i => i.severity === "error" && SCHEDULE_BLOCKING_CODES.has(i.code));
@@ -519,7 +301,7 @@ export function validateProject(data, opts = {}) {
       scheduleChecks = { performed: false, leveling, reason: computed.error };
     }
   }
-  return { valid: !issues.some(i => i.severity === "error"), issues, scheduleChecks };
+  return { valid: !issues.some(i => i.severity === "error"), issues: issues.map(formatIssue), scheduleChecks };
 }
 
 function cmdValidate(positional, opts) {
@@ -537,8 +319,9 @@ function cmdValidate(positional, opts) {
       file: path,
       valid: false,
       schemaValid: false,
-      issues: [{
+      issues: e?.issues?.map(formatIssue) || [{
         severity: "error",
+        path: "$",
         code: schemaError ? "schema" : "normalize",
         message: schemaError
           ? "保存フォーマットが正しくありません（schemaVersion:1 と必須トップレベル項目 tasks/resources/sprints/versions/exportedAt を確認してください）"
@@ -570,7 +353,7 @@ function cmdRecalc(positional, opts) {
   if (!path) fail("使い方: recalc <file> [--leveling on|off|auto]");
   const data = normalizeOrFail(readProjectFile(path), path);
 
-  const integrity = analyzeIntegrity(data);
+  const integrity = analyzeIntegrity(data).map(formatIssue);
   const leveling = resolveLeveling(opts.leveling, data);
   const computed = tryComputeSchedule(data, { respectManualPins: true, leveling });
   if (!computed.ok) {
@@ -606,7 +389,7 @@ function cmdPlan(positional, opts) {
   const edited = normalizeOrFail(readProjectFile(editedPath), editedPath);
 
   // 編集後データの整合性を先に確認。error があれば提案JSONは出さない。
-  const integrity = analyzeIntegrity(edited);
+  const integrity = analyzeIntegrity(edited).map(formatIssue);
   if (integrity.some(i => i.severity === "error")) {
     return emit({
       command: "plan",
@@ -628,7 +411,7 @@ function cmdPlan(positional, opts) {
   // before: 元データを「現在アプリで見えている」条件で計算（差分とスナップショットの基準）
   const beforeComputed = tryComputeSchedule(original, { respectManualPins: true, leveling: beforeLeveling });
   if (!beforeComputed.ok) {
-    return emit({ command: "plan", original: originalPath, edited: editedPath, blocked: true, reason: beforeComputed.error, integrityIssues: analyzeIntegrity(original) });
+    return emit({ command: "plan", original: originalPath, edited: editedPath, blocked: true, reason: beforeComputed.error, integrityIssues: analyzeIntegrity(original).map(formatIssue) });
   }
   const before = beforeComputed.result;
 
@@ -740,7 +523,7 @@ function cmdExplain(positional, opts) {
   const leveling = resolveLeveling(opts.leveling, data);
   const computed = tryComputeSchedule(data, { respectManualPins: true, leveling });
   if (!computed.ok) {
-    return emit({ command: "explain", file: path, computeFailed: true, error: computed.error, integrityIssues: analyzeIntegrity(data) });
+    return emit({ command: "explain", file: path, computeFailed: true, error: computed.error, integrityIssues: analyzeIntegrity(data).map(formatIssue) });
   }
   const r = computed.result;
   const s = r.schedule.get(taskId) || {};

@@ -12,15 +12,17 @@ import { detectSprintConflicts } from "./lib/sprints.js";
 import { detectDependencyIssues, groupDependencyIssuesByTask } from "./lib/dependencyIssues.js";
 import {
   LOCALES, formatDependencyIssueMessage, dependencyIssueLabel,
-  formatSprintConflictReason, formatSprintConflictSprintNames, formatLevelWarning,
+  formatSprintConflictReason, formatSprintConflictSprintNames, formatLevelWarning, formatProjectIssue,
 } from "./lib/i18n.js";
 import {
   downloadJSON, downloadTextFile, copyTextToClipboard, generateMermaidGantt,
-  buildProjectExport, normalizeImportedProject, normalizeProjectVersions,
+  buildProjectExport, prepareProjectImport,
 } from "./lib/exportUtils.js";
 import { seedData } from "./lib/seedData.js";
 import { createTaskHistory, taskHistoryReducer } from "./lib/history.js";
-import { storageGet, storageSet } from "./storage.js";
+import { storageRead, storageSet } from "./storage.js";
+import { createAutoSaver } from "./lib/autoSave.js";
+import { normalizeStoredProject } from "./lib/storedProject.js";
 import { getLinkedProjectKey } from "./lib/linkedProject.js";
 import { readEmbeddedProject, buildSharedHtml } from "./dom/embeddedProjectDom.js";
 import {
@@ -139,6 +141,9 @@ export default function App() {
   const [sprints, setSprints] = useState(initialProject.sprints);
   const [calendarExceptions, setCalendarExceptions] = useState(initialProject.calendarExceptions);
   const [versions, setVersions] = useState(initialProject.versions);
+  // A file read/confirmation can outlive version edits; merge only against committed history.
+  const versionsRef = useRef(versions);
+  useEffect(() => { versionsRef.current = versions; }, [versions]);
   const [tab, setTab] = useState("gantt");
   const [selectedId, setSelectedId] = useState(null);
   const [collapsed, setCollapsed] = useState(new Set());
@@ -154,6 +159,13 @@ export default function App() {
   const [levelingOn, setLevelingOn] = useState(initialProject.levelingOn);
   const [loaded, setLoaded] = useState(false);
   const [toast, setToast] = useState(null);
+  const [saveStatus, setSaveStatus] = useState("pending");
+  const [restoreBlocked, setRestoreBlocked] = useState(false);
+  const [importResult, setImportResult] = useState(() => embeddedProject && !embeddedProject.ok
+    ? { kind: embeddedProject.syntaxError ? "syntax" : "invalid", issues: embeddedProject.issues || [] }
+    : null);
+  const autoSaverRef = useRef(null);
+  const importSequenceRef = useRef(0);
   const fileInputRef = useRef(null);
   const linkedFileInputRef = useRef(null);
   const ganttViewRef = useRef(null);
@@ -211,14 +223,22 @@ export default function App() {
     return mx;
   }, [schedule, cpm]);
 
-  function applyLinkedProject(data, fileInfo, persistent) {
+  // React batches this synchronous update: validation/merging has finished before any state changes.
+  // Reset task-only Undo so it cannot put old tasks into a newly imported resource/calendar context.
+  function applyProject(data) {
     resetTasks(data.tasks);
     setResources(data.resources);
     setSprints(data.sprints);
     setVersions(data.versions);
-    setLevelingOn(typeof data.levelingOn === "boolean" ? data.levelingOn : false);
-    setCalendarExceptions(Array.isArray(data.calendarExceptions) ? data.calendarExceptions : []);
+    setLevelingOn(data.levelingOn);
+    setCalendarExceptions(data.calendarExceptions);
     setSelectedId(null);
+    setBaselineVersionId(null);
+    setCollapsed(new Set());
+  }
+
+  function applyLinkedProject(data, fileInfo, persistent) {
+    applyProject(data);
     setLinkedProjectState({
       status: "loaded",
       fileName: fileInfo.name,
@@ -230,10 +250,12 @@ export default function App() {
 
   async function parseLinkedProjectFile(fileInfo, persistent) {
     try {
-      const data = normalizeImportedProject(JSON.parse(fileInfo.text));
+      const { data, issues } = prepareProjectImport(JSON.parse(fileInfo.text), [], { mergeVersions: false });
       applyLinkedProject(data, fileInfo, persistent);
+      setImportResult(issues.length ? { kind: "warnings", issues } : null);
       return true;
     } catch (err) {
+      setImportResult({ kind: err instanceof SyntaxError ? "syntax" : "invalid", issues: err.issues || [] });
       setLinkedProjectState(prev => ({
         ...(prev || {}),
         status: "error",
@@ -290,17 +312,21 @@ export default function App() {
           });
         }
       } else {
-        const proj = await storageGet("pm_project");
-        if (proj && proj.tasks && proj.tasks.length) {
-          resetTasks(migrateSprintIds(proj.tasks));
-          setResources(proj.resources || seed.resources);
-          // 旧バージョンのデータ（sprints未対応）を開いた場合は空配列にフォールバックする。
-          setSprints(Array.isArray(proj.sprints) ? proj.sprints : []);
-          setLevelingOn(typeof proj.levelingOn === "boolean" ? proj.levelingOn : false);
-          setCalendarExceptions(Array.isArray(proj.calendarExceptions) ? proj.calendarExceptions : []);
+        const [projectRead, versionsRead] = await Promise.all([
+          storageRead("pm_project"), storageRead("pm_versions"),
+        ]);
+        try {
+          if (projectRead.status === "failed" || versionsRead.status === "failed") throw new Error("storage_read_failed");
+          const project = projectRead.status === "loaded" ? projectRead.value : seed;
+          const savedVersions = versionsRead.status === "loaded" ? versionsRead.value : [];
+          const restored = normalizeStoredProject(project, savedVersions, seed.resources);
+          applyProject(restored);
+        } catch (error) {
+          // Preserve unreadable/invalid stored data until the user explicitly chooses to replace it.
+          setRestoreBlocked(true);
+          setSaveStatus("failed");
+          setImportResult({ kind: "restore", issues: error.issues || [] });
         }
-        const vs = await storageGet("pm_versions");
-        if (vs) setVersions(normalizeProjectVersions(vs));
       }
       setLoaded(true);
     })();
@@ -317,20 +343,39 @@ export default function App() {
     setAutoScheduleHighlightIds(prev => (prev.size ? new Set() : prev));
   }, [tasks, resources, sprints]);
 
-  // 自動保存（linked / embedded 起動時は原本と切り離されているため保存しない）
+  // One serialized queue owns both keys, including version creation/deletion/renaming.
+  // A badge only becomes "saved" after both writes for the latest edit have succeeded.
   useEffect(() => {
-    if (!loaded || autoSaveDisabled) return;
-    const t = setTimeout(() => { storageSet("pm_project", { tasks, resources, sprints, levelingOn, calendarExceptions }); }, 800);
-    return () => clearTimeout(t);
-  }, [tasks, resources, sprints, levelingOn, calendarExceptions, loaded, autoSaveDisabled]);
+    const saver = createAutoSaver({
+      persist: async ({ project, versions: savedVersions }) => {
+        const results = await Promise.all([
+          storageSet("pm_project", project), storageSet("pm_versions", savedVersions),
+        ]);
+        return results.every(Boolean);
+      },
+      onState: setSaveStatus,
+    });
+    autoSaverRef.current = saver;
+    return () => { saver.dispose(); autoSaverRef.current = null; };
+  }, []);
 
-  // バージョン名の変更などによる versions の更新も自動保存する
-  // （新規保存・削除は即時persistしているため、これは主に名称変更のためのデバウンス保存）。
+  const saveSnapshot = useMemo(() => ({
+    project: { tasks, resources, sprints, levelingOn, calendarExceptions }, versions,
+  }), [tasks, resources, sprints, levelingOn, calendarExceptions, versions]);
+
   useEffect(() => {
-    if (!loaded || autoSaveDisabled) return;
-    const t = setTimeout(() => { storageSet("pm_versions", versions); }, 800);
-    return () => clearTimeout(t);
-  }, [versions, loaded, autoSaveDisabled]);
+    if (!loaded || autoSaveDisabled || restoreBlocked) return;
+    autoSaverRef.current.update(saveSnapshot);
+  }, [saveSnapshot, loaded, autoSaveDisabled, restoreBlocked]);
+
+  function retrySave() {
+    const retry = () => {
+      setRestoreBlocked(false);
+      autoSaverRef.current.update(saveSnapshot, { immediate: true });
+    };
+    if (restoreBlocked) requestConfirm(t("save.replaceUnreadable"), retry, t("save.retry"));
+    else retry();
+  }
 
   function renameVersion(id, newName) {
     setVersions(prev => prev.map(v => (v.id === id ? { ...v, name: newName } : v)));
@@ -444,13 +489,11 @@ export default function App() {
     };
     const next = [v, ...versions];
     setVersions(next);
-    if (!autoSaveDisabled) await storageSet("pm_versions", next);
-    showToast(t("toast.versionSaved", { name }));
+    showToast(t(autoSaveDisabled ? "toast.versionSessionOnly" : "toast.versionPending", { name }));
   }
   async function deleteVersion(id) {
     const next = versions.filter(v => v.id !== id);
     setVersions(next);
-    if (!autoSaveDisabled) await storageSet("pm_versions", next);
     setBaselineVersionId(prev => (prev === id ? null : prev));
   }
   function restoreVersion(id) {
@@ -518,35 +561,30 @@ export default function App() {
   function triggerImport() { fileInputRef.current && fileInputRef.current.click(); }
   async function handleImportFile(e) {
     const file = e.target.files && e.target.files[0];
-    e.target.value = ""; // 同じファイルを続けて選択できるようリセット
+    e.target.value = "";
     if (!file) return;
-    let data;
+    const sequence = ++importSequenceRef.current;
+    let prepared;
     try {
       const text = await file.text();
-      data = normalizeImportedProject(JSON.parse(text));
+      if (sequence !== importSequenceRef.current) return;
+      prepared = prepareProjectImport(JSON.parse(text), [], { mergeVersions: false });
     } catch (err) {
-      showToast(err?.message === "invalid_project_json"
-        ? t("toast.importFailedFormat")
-        : t("toast.importFailedParse"));
+      if (sequence !== importSequenceRef.current) return;
+      setImportResult({ kind: err instanceof SyntaxError ? "syntax" : "invalid", issues: err.issues || [] });
       return;
     }
-    requestConfirm(t("confirm.import"), async () => {
-      setTasks(data.tasks);
-      setResources(data.resources);
-      setSprints(data.sprints);
-      setLevelingOn(typeof data.levelingOn === "boolean" ? data.levelingOn : false);
-      setCalendarExceptions(Array.isArray(data.calendarExceptions) ? data.calendarExceptions : []);
-      setSelectedId(null);
-      if (Array.isArray(data.versions) && data.versions.length) {
-        const merged = (() => {
-          const map = new Map(versions.map(v => [v.id, v]));
-          data.versions.forEach(v => map.set(v.id, v));
-          return normalizeProjectVersions(Array.from(map.values())).sort((a, b) => b.createdAt - a.createdAt);
-        })();
-        setVersions(merged);
-        if (!autoSaveDisabled) await storageSet("pm_versions", merged);
+    requestConfirm(t("confirm.import"), () => {
+      if (sequence !== importSequenceRef.current) return;
+      try {
+        // Validate the merged history again before touching any part of the current plan.
+        const merged = prepareProjectImport(prepared.data, versionsRef.current);
+        applyProject(merged.data);
+        setImportResult(merged.issues.length ? { kind: "warnings", issues: merged.issues } : null);
+        showToast(t("toast.imported"));
+      } catch (err) {
+        setImportResult({ kind: "invalid", issues: err.issues || [] });
       }
-      showToast(t("toast.imported"));
     }, t("confirm.importLabel"), false);
   }
 
@@ -586,6 +624,10 @@ export default function App() {
     setDependencyIssuesOpen(false);
   }
 
+  // Do not expose editable seed data while an asynchronous host is still restoring
+  // the stored project: a late read must never overwrite edits or an import.
+  if (!loaded) return <div className="h-screen flex items-center justify-center bg-slate-50 text-sm text-slate-500" role="status">{t("save.loading")}</div>;
+
   return (
     <div className="flex flex-col bg-slate-50 text-slate-800 ps-app-root" style={{ fontFamily: "ui-sans-serif, system-ui, sans-serif" }}>
       <style>{`.ps-app-root { height: 100vh; height: 100dvh; width: 100%; }`}</style>
@@ -595,7 +637,7 @@ export default function App() {
           <span className="font-semibold text-sm tracking-tight">Project Scheduler</span>
         </div>
         <div className="flex-1" />
-        <input ref={fileInputRef} type="file" accept="application/json,.json" onChange={handleImportFile} style={{ display: "none" }} />
+        <input ref={fileInputRef} aria-label={t("header.import")} type="file" accept="application/json,.json" onChange={handleImportFile} style={{ display: "none" }} />
         {linkedProjectKey && (
           <input
             ref={linkedFileInputRef}
@@ -666,6 +708,36 @@ export default function App() {
           </select>
         </label>
       </div>
+
+      <div className={"px-4 py-1.5 border-b text-xs flex items-center gap-2 flex-wrap " +
+        (!autoSaveDisabled && saveStatus === "failed" ? "bg-red-50 border-red-200 text-red-800" : "bg-white border-slate-200 text-slate-500")}>
+        <span role="status" aria-live="polite" data-testid="save-status" className="flex items-center gap-1.5">
+          {autoSaveDisabled ? <Download size={13} /> : saveStatus === "saved" ? <Check size={13} className="text-emerald-600" /> : saveStatus === "failed" ? <AlertTriangle size={13} /> : <Clock size={13} />}
+          {t(autoSaveDisabled ? "save.disabled" : restoreBlocked ? "save.restoreBlocked" : `save.${saveStatus}`)}
+        </span>
+        {!autoSaveDisabled && saveStatus === "failed" && <>
+          <span className="flex-1">{t("save.failureHelp")}</span>
+          <button type="button" onClick={exportProject} className="px-2 py-1 rounded border border-red-200 bg-white flex items-center gap-1"><Download size={12} />{t("save.export")}</button>
+          <button type="button" onClick={retrySave} className="px-2 py-1 rounded bg-red-700 text-white flex items-center gap-1"><RefreshCw size={12} />{t("save.retry")}</button>
+        </>}
+      </div>
+
+      {importResult && (
+        <section role={importResult.kind === "warnings" ? "status" : "alert"} aria-label={t(`importResult.${importResult.kind}`)}
+          className={"px-4 py-2 border-b text-xs " + (importResult.kind === "warnings" ? "bg-amber-50 border-amber-200 text-amber-900" : "bg-red-50 border-red-200 text-red-900")}>
+          <div className="flex items-center gap-2">
+            <AlertTriangle size={14} />
+            <strong className="flex-1">{t(`importResult.${importResult.kind}`)}</strong>
+            <button type="button" onClick={() => setImportResult(null)} aria-label={t("common.close")}><X size={14} /></button>
+          </div>
+          {importResult.kind !== "warnings" && <p className="mt-1">{t(importResult.kind === "restore" ? "importResult.restoreHelp" : "importResult.unchanged")}</p>}
+          {!!importResult.issues.length && <ul className="mt-1 max-h-36 overflow-auto space-y-1">
+            {importResult.issues.map((issue, index) => <li key={index}>
+              <span className="font-mono">{issue.path || "$"}</span>: {formatProjectIssue(t, issue)}
+            </li>)}
+          </ul>}
+        </section>
+      )}
 
       {linkedProjectKey && linkedProjectState && (
         <div className="bg-indigo-50 border-b border-indigo-200 text-xs px-4 py-2 flex items-center gap-3">
