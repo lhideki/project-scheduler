@@ -55,7 +55,20 @@ array-valued `path` should use that field instead.
 
 - The required envelope remains `schemaVersion: 1`, `exportedAt`, `tasks`, `resources`,
   `sprints`, and `versions`. Dates and timestamps must be valid.
-- Empty arrays, including `tasks: []`, are legitimate projects.
+- Empty arrays, including `tasks: []`, are legitimate projects, even when only a
+  project name has been set.
+- `projectName` is an optional string. The shared `normalizeProjectName` helper trims
+  boundary whitespace, preserving internal whitespace, Unicode, and punctuation.
+  Omitted or whitespace-only names normalize to `""`; non-string values are rejected
+  with `projectName-invalid` at `projectName`. The translated untitled label is display
+  text only and is never saved as the name. The UI, CLI, and local restoration use
+  the same validation/normalization.
+- Older HTML/CLI versions that predate `projectName` discard unknown top-level fields
+  when normalizing or re-exporting. Their JSON Schema also has
+  `additionalProperties: false`, so schema validation rejects the new field. New
+  name-bearing JSON is not guaranteed to retain its name through old tools. Use
+  `projectName`-aware HTML and CLI versions together; old nameless schema-v1 JSON
+  remains accepted by new tools.
 - Omitted `levelingOn` defaults to `false`; omitted `calendarExceptions` defaults to
   `[]`. Present values of the wrong type are rejected rather than silently discarded.
 - Optional empty task dates (`startDate: ""` / `fixedDate: ""`) remain accepted as
@@ -79,6 +92,21 @@ array-valued `path` should use that field instead.
 - Emergency JSON export preserves the current screen data, including invalid edited
   snapshots, so it remains a backup path when browser storage fails. It does not
   silently repair it; importing that backup still reports any invalid fields.
+
+## Project name behavior
+
+The header provides explicit Apply and Cancel controls (Enter/Escape also work).
+Uncommitted drafts do not change exports or browser storage. Successful imports close
+any previous name draft, even if the imported name is identical. Header and tab titles
+use text content, and embedded JSON escapes `<`; markup-like names are never HTML.
+Long names are visually truncated in the header, with the full name in the title and
+editor, and are not shortened in saved data.
+
+The name is independent of task Undo and schedule version snapshots: restoring a
+schedule leaves the current name intact. CLI `plan` preserves the edited JSON's name
+in `proposed`, including deliberate clearing. Renaming does not change calculations,
+`pm_project` / `pm_versions`, `schedule` associations, or real/export file names. Names
+need not be unique; they do not create separate project slots.
 
 ## Browser persistence
 

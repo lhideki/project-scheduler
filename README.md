@@ -85,6 +85,14 @@ All three pages are served from the same site, so they share the plan saved in y
 
 </details>
 
+## Project name
+
+Click the name in the header to set or change it, then apply or cancel the edit (Enter/Escape also work). The header and browser tab show the name. Blank names display “Untitled project” in the selected language; that translated label is not stored.
+
+Names are kept in browser storage, JSON, linked JSON, shareable HTML, and the CLI's proposed JSON, including projects with no tasks. Restoring a schedule version keeps the current project name. Changing a name does not rename files, change the `schedule` association or storage location, or create a separate project slot. Duplicate names are allowed.
+
+Existing nameless `schemaVersion: 1` files remain readable. Use updated HTML and CLI versions together: older versions discard the new `projectName` field on re-export, and their schema rejects it. See [import validation and compatibility](docs/import-validation.md).
+
 ## Data storage
 
 When opened in a regular browser, the app automatically saves changes to that browser's `localStorage` after about 0.8 seconds. Data stays in that browser and on that device; it is not synchronized automatically with other browsers or devices.
@@ -163,7 +171,7 @@ deletes issues automatically. See `.claude/skills/backlog-sync/` for the mapping
 
 See the [JSON format reference](docs/json-format.md) for fields, types, and required properties. The reference is generated from the JSON Schema in the source code.
 
-Imports currently accept only `schemaVersion: 1`. Older JSON formats are not supported.
+Imports currently accept only `schemaVersion: 1`. Different schema versions are not converted; schema-v1 JSON without newer optional fields remains supported.
 
 ## Development and rebuilding
 

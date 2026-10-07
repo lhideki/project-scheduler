@@ -6,6 +6,7 @@ export function normalizeStoredProject(project, versions, fallbackResources = []
   const candidate = {
     schemaVersion: 1,
     exportedAt: new Date().toISOString(),
+    projectName: project.projectName,
     tasks: project.tasks,
     resources: project.resources === undefined ? fallbackResources : project.resources,
     sprints: project.sprints === undefined ? [] : project.sprints,

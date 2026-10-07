@@ -526,6 +526,7 @@ describe("shared UI/CLI project validation", () => {
 
   it.each([
     ["null task", data => { data.tasks = [null]; }],
+    ["invalid project name", data => { data.projectName = {}; }],
     ["bad number", data => { data.tasks[0].duration = "one"; }],
     ["duplicate IDs", data => { data.resources.push({ ...data.resources[0] }); }],
     ["missing predecessor", data => { data.tasks[1].predecessors = [{ id: "missing", type: "FS", lag: 0 }]; }],
