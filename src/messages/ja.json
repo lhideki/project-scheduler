@@ -470,5 +470,24 @@
     "cancel": "名前の編集を取消",
     "untitled": "無題のプロジェクト",
     "help": "空欄にすると無題のプロジェクトになります。"
+  },
+  "dependencyInput": {
+    "unknownWbs": "WBS番号「{no}」のタスクが見つかりません。",
+    "invalidFormat": "「{token}」は依存関係の書式が正しくありません（例: 1FS+2）。",
+    "emptyToken": "空の項目",
+    "notApplied": "未反映です。すべての入力を修正するまで、確定済みの依存関係を保持します。"
+  },
+  "schedulingResult": {
+    "completed": "再計算完了",
+    "unresolved": "再計算完了・未解決の制約あり",
+    "notConverged": "再計算が収束していません",
+    "error": "再計算に失敗しました。計画は変更していません。",
+    "changed": "開始日を変更したタスク: {count}件",
+    "remaining": "未解決: {count}件",
+    "levelingOn": "リソース平準化 ON",
+    "levelingOff": "リソース平準化 OFF",
+    "details": "対象タスクと理由を確認",
+    "dismiss": "再計算結果を閉じる",
+    "title": "再計算結果"
   }
 }

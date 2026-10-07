@@ -8,6 +8,8 @@ import {
 import { toISO, parseISO, buildHolidayMap, makeCalendar } from "./lib/calendar.js";
 import { migrateSprintIds, isGroupId, buildFlatList, ancestorChain } from "./lib/taskTree.js";
 import { runCPM, buildDisplaySchedule, deriveProjectStart, computeAutoSchedule } from "./lib/scheduling.js";
+import { applyScheduleStartDates } from "./lib/schedulingFeedback.js";
+import { SchedulingResult } from "./components/SchedulingResult.jsx";
 import { detectSprintConflicts } from "./lib/sprints.js";
 import { detectDependencyIssues, groupDependencyIssuesByTask } from "./lib/dependencyIssues.js";
 import {
@@ -98,6 +100,8 @@ export default function App() {
     createTaskHistory
   );
   const tasks = taskHistory.present;
+  // Whole-plan replacement must discard uncommitted dependency drafts, even for identical IDs.
+  const [taskContextRevision, setTaskContextRevision] = useState(0);
   // 子コンポーネントには従来のReact setterと同じインターフェースを渡し、すべてのタスク更新を
   // 1つの履歴に集約する。読み込み・バージョン復元はresetで履歴を空にする。
   const setTasks = useCallback(value => dispatchTasks({ type: "set", value }), []);
@@ -164,6 +168,7 @@ export default function App() {
   // runScheduling による書き戻しの場合はスキップする）。
   const [autoScheduleHighlightIds, setAutoScheduleHighlightIds] = useState(() => new Set());
   const skipHighlightClearRef = useRef(false);
+  const [schedulingResult, setSchedulingResult] = useState(null);
   const [baselineVersionId, setBaselineVersionId] = useState(null);
   const [levelingOn, setLevelingOn] = useState(initialProject.levelingOn);
   const [loaded, setLoaded] = useState(false);
@@ -238,6 +243,7 @@ export default function App() {
     setProjectName(data.projectName);
     setProjectRevision(revision => revision + 1); // discard any draft for the previous plan
     resetTasks(data.tasks);
+    setTaskContextRevision(revision => revision + 1);
     setResources(data.resources);
     setSprints(data.sprints);
     setVersions(data.versions);
@@ -372,7 +378,6 @@ export default function App() {
   const saveSnapshot = useMemo(() => ({
     project: { projectName, tasks, resources, sprints, levelingOn, calendarExceptions }, versions,
   }), [projectName, tasks, resources, sprints, levelingOn, calendarExceptions, versions]);
-
   // Render against this exact snapshot, even before the passive autosave effect runs.
   const saveStatus = getAutoSaveStatus(saveState, saveSnapshot, { restoreBlocked });
 
@@ -457,25 +462,32 @@ export default function App() {
   // 書き戻す。CPMの日付を書き戻すと、その後に着手済みにしたタスクが levelResources で
   // startDate へピン留めされ、表示が平準化前の位置に戻って見えてしまうため。
   function runScheduling() {
-    const { startDates, converged } = computeAutoSchedule(
-      tasks, cal, projectStart, sprints, resources, { leveling: levelingOn }
-    );
-    const changedIds = new Set();
-    setTasks(prev => prev.map(t => {
-      if (isGroupId(tasks, t.id) || !startDates.has(t.id)) return t;
-      const nextStart = startDates.get(t.id);
-      if (t.startDate !== nextStart) changedIds.add(t.id);
-      return { ...t, startDate: nextStart };
-    }));
-    skipHighlightClearRef.current = true;
-    setAutoScheduleHighlightIds(changedIds);
-    // 平準化ONで、書き戻しと表示の一致を上限回数内に確認できなかった場合は成功扱いにせず知らせる
-    showToast(!converged
-      ? t("toast.scheduleNotConverged")
-      : levelingOn
-        ? t("toast.scheduledWithLeveling")
-        : t("toast.scheduled"));
+    try {
+      const { startDates, converged } = computeAutoSchedule(
+        tasks, cal, projectStart, sprints, resources, { leveling: levelingOn }
+      );
+      const applied = applyScheduleStartDates(tasks, startDates);
+      // Compute the diff before dispatching: the history reducer runs during rendering.
+      // A no-op must not create history or suppress highlight clearing on the next edit.
+      skipHighlightClearRef.current = applied.changedIds.size > 0;
+      setTasks(applied.tasks);
+      setAutoScheduleHighlightIds(applied.changedIds);
+      setSchedulingResult({
+        tasks: applied.tasks, resources, sprints, calendarExceptions, levelingOn,
+        changedCount: applied.changedIds.size, converged,
+      });
+    } catch (error) {
+      setSchedulingResult({ tasks, resources, sprints, calendarExceptions, levelingOn, error: true });
+    }
   }
+
+  // Results describe exactly one plan/settings snapshot. Editing or undoing invalidates them.
+  useEffect(() => {
+    setSchedulingResult(previous => previous && (
+      previous.tasks !== tasks || previous.resources !== resources || previous.sprints !== sprints ||
+      previous.calendarExceptions !== calendarExceptions || previous.levelingOn !== levelingOn
+    ) ? null : previous);
+  }, [tasks, resources, sprints, calendarExceptions, levelingOn]);
 
   async function saveVersion(name) {
     const v = buildVersionSnapshot({ tasks, resources, sprints, calendarExceptions, levelingOn }, schedule, name);
@@ -501,6 +513,7 @@ export default function App() {
       () => {
         const restored = restoreVersionSnapshot(v, levelingOn);
         resetTasks(restored.tasks);
+        setTaskContextRevision(revision => revision + 1);
         setResources(restored.resources);
         setSprints(restored.sprints);
         setCalendarExceptions(restored.calendarExceptions);
@@ -822,6 +835,12 @@ export default function App() {
         </div>
       )}
 
+      {schedulingResult && (
+        <SchedulingResult result={schedulingResult} dependencyIssues={dependencyIssues}
+          sprintConflicts={sprintConflicts} levelWarnings={levelWarnings} tasks={tasks} wbsNoById={wbsNoById}
+          onRevealTask={revealTask} onDismiss={() => setSchedulingResult(null)} />
+      )}
+
       {levelWarnings.length > 0 && (
         <div className="bg-amber-50 border-b border-amber-200 text-amber-800 text-xs px-4 py-1.5 flex items-center gap-2">
           <AlertTriangle size={13} className="flex-shrink-0" />
@@ -851,6 +870,7 @@ export default function App() {
             versions={versions} baselineVersionId={baselineVersionId} setBaselineVersionId={setBaselineVersionId}
             requestConfirm={requestConfirm}
             autoScheduleHighlightIds={autoScheduleHighlightIds}
+            taskContextRevision={taskContextRevision}
             dependencyIssuesByTask={dependencyIssuesByTask}
             revealTaskRequest={revealTaskRequest}
             onRevealTaskHandled={() => setRevealTaskRequest(null)}

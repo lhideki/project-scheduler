@@ -124,3 +124,11 @@ describe("WBSクリップボード変換（多言語）", () => {
     expect(taskRowPatch(flexible, taskRowText(milestone, context), { ...context, t: tEn }).patch.milestoneMode).toBe("fixed");
   });
 });
+
+describe("atomic dependency paste", () => {
+  it("rejects mixed valid/unknown or malformed tokens without a partial patch", () => {
+    for (const text of ["1FS, 99FS", "1FS, abc", "1FS,"]) {
+      expect(taskCellPatch(task(), "predecessors", text, context)).toEqual({ ok: false, patch: {} });
+    }
+  });
+});

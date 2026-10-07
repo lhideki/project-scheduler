@@ -1,4 +1,4 @@
-import { formatDeps, parseDepString } from "./deps.js";
+import { formatDeps, parseDepInput } from "./deps.js";
 import { catalogValues, createAppTranslator, DEFAULT_LOCALE } from "./i18n.js";
 
 export const WBS_EDITABLE_COLUMNS = [
@@ -105,7 +105,9 @@ export function taskCellPatch(task, column, rawText, context) {
     }
     case "predecessors": {
       if (emptyMark(text)) return { ok: true, patch: { predecessors: [] } };
-      const predecessors = parseDepString(text, noToId).filter(dep => dep.id !== task.id);
+      const parsed = parseDepInput(text, noToId);
+      if (parsed.errors.length) return { ok: false, patch: {} };
+      const predecessors = parsed.deps.filter(dep => dep.id !== task.id);
       return predecessors.length ? { ok: true, patch: { predecessors } } : { ok: false, patch: {} };
     }
     default:

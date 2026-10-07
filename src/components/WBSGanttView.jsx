@@ -46,7 +46,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
   collapsed, setCollapsed, dayWidth, setDayWidth, requestConfirm,
   colWidths, setColWidths,
   versions, baselineVersionId, setBaselineVersionId,
-  autoScheduleHighlightIds,
+  autoScheduleHighlightIds, taskContextRevision,
   dependencyIssuesByTask,
   revealTaskRequest,
   onRevealTaskHandled,
@@ -1237,7 +1237,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                   )}
                 </div>
                 <div style={{ width: colWidths.deps }} className="px-1">
-                  <DepInput deps={t.predecessors} idToNo={idToNo} noToId={noToId} onChange={d => updateTask(t.id, { predecessors: d })}
+                  <DepInput key={taskContextRevision} deps={t.predecessors} idToNo={idToNo} noToId={noToId} onChange={d => updateTask(t.id, { predecessors: d })}
                     inputRef={cellRefCallback(t.id, "predecessors")} inputProps={cellInputProps(t.id, "predecessors")}
                     onKeyDown={e => handleGridCellKeyDown(e, t.id, "predecessors")} />
                 </div>
@@ -1609,6 +1609,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
           onToggleMilestone={() => toggleMilestone(detailId)}
           onClose={() => { onCommitTaskEdit(); composingRef.current = false; setDetailId(null); }}
           autoScheduleHighlightIds={autoScheduleHighlightIds}
+          taskContextRevision={taskContextRevision}
         />
       )}
     </div>

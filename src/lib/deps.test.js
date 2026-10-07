@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseDepString, dedupeDeps, formatDepLabel, formatDeps } from "./deps.js";
+import { parseDepInput, parseDepString, dedupeDeps, formatDepLabel, formatDeps } from "./deps.js";
 
 const noToId = { "1": "id-1", "2": "id-2", "1.1": "id-1-1" };
 
@@ -75,5 +75,24 @@ describe("formatDepLabel / formatDeps", () => {
   it("空/未指定はから文字列を返す", () => {
     expect(formatDeps([], {})).toBe("");
     expect(formatDeps(undefined, {})).toBe("");
+  });
+});
+
+describe("parseDepInput", () => {
+  it("reports all invalid tokens and keeps valid tokens available for diagnostics", () => {
+    expect(parseDepInput("1FS, 99SS-1, abc,", noToId)).toEqual({
+      deps: [{ id: "id-1", type: "FS", lag: 0 }],
+      errors: [
+        { code: "unknown-wbs", no: "99", token: "99SS-1", index: 1 },
+        { code: "invalid-format", token: "abc", index: 2 },
+        { code: "invalid-format", token: "", index: 3 },
+      ],
+    });
+  });
+  it.each(["1FS+2", "1SS-2", "1FF", "1SF", "1fs + 2", "1, 2SS-1", "", "   "])("accepts the existing syntax: %s", text => {
+    expect(parseDepInput(text, noToId).errors).toEqual([]);
+  });
+  it.each(["1XX", "1FS+1.5", "1FS+99999999999999999999", "１ＦＳ", "1FS;2SS"])("rejects invalid syntax: %s", text => {
+    expect(parseDepInput(text, noToId).errors).toHaveLength(1);
   });
 });

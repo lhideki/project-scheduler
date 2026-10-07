@@ -16,20 +16,28 @@
 
 const DEP_RE = /^\s*(\d+(?:\.\d+)*)\s*(FS|SS|FF|SF)?\s*([+-]\s*\d+)?\s*$/i;
 
-export function parseDepString(str, noToId) {
-  if (!str || !str.trim()) return [];
-  const out = [];
-  str.split(",").forEach(tok => {
-    const m = tok.match(DEP_RE);
-    if (!m) return;
+/** Parse every token before committing an edit. Callers must reject the whole edit when errors exist. */
+export function parseDepInput(str, noToId) {
+  if (!str || !str.trim()) return { deps: [], errors: [] };
+  const out = [], errors = [];
+  str.split(",").forEach((value, index) => {
+    const token = value.trim();
+    const m = token.match(DEP_RE);
+    if (!m) { errors.push({ code: "invalid-format", token, index }); return; }
     const no = m[1];
-    const id = noToId[no];
-    if (!id) return;
+    const id = Object.hasOwn(noToId, no) ? noToId[no] : null;
+    if (!id) { errors.push({ code: "unknown-wbs", token, no, index }); return; }
     const type = (m[2] || "FS").toUpperCase();
-    const lag = m[3] ? parseInt(m[3].replace(/\s/g, ""), 10) : 0;
+    const lag = m[3] ? Number(m[3].replace(/\s/g, "")) : 0;
+    if (!Number.isSafeInteger(lag)) { errors.push({ code: "invalid-format", token, index }); return; }
     out.push({ id, type, lag });
   });
-  return dedupeDeps(out);
+  return { deps: dedupeDeps(out), errors };
+}
+
+/** Compatibility parser for non-editing consumers. Editing must use parseDepInput and check errors. */
+export function parseDepString(str, noToId) {
+  return parseDepInput(str, noToId).deps;
 }
 /** 同じ先行タスクに対する依存関係は1本に限定する（後勝ち）。
  *  2タスク間に複数本の関係が存在すると、ガント/ネットワーク図の矢印キーが衝突し、

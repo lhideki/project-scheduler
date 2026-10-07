@@ -57,6 +57,7 @@ All three pages are served from the same site, so they share the plan saved in y
 - Check each assignee's weekly workload against their capacity in the `Resources` tab.
 - Define sprints with start dates, end dates, and themes, and assign multiple sprints to a task.
 - Flag conflicts between sprint windows and calculated task dates.
+- Keep invalid dependency edits in the input with an explanation; the saved dependencies stay unchanged until the full input is valid. After auto-scheduling, review the changed-task count and any remaining constraints from a persistent result panel.
 - Flag dependency problems in the WBS table and Gantt chart: circular dependencies (including cycles through groups), start dates that break a dependency, fixed milestones pushed past their due date, and links to deleted tasks.
 - Inspect dependencies in a network (PERT) view.
 - Copy the calculated schedule as a Mermaid Gantt chart, or copy the visible part of the Gantt chart as a PNG image.
