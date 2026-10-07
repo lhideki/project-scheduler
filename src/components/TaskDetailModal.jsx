@@ -7,10 +7,10 @@ import { DepInput } from "./DepInput.jsx";
 
 /** タスク／マイルストーンの詳細パネル。テーブルの1行に収まらない情報（メモ、後続タスク、
  *  スケジュール計算結果など）をまとめて確認・編集できるモーダル。 */
-export function TaskDetailModal({ task, schedule, tasks, resources, sprints, idToNo, noToId, onUpdate, onToggleMilestone, onClose, autoScheduleHighlightIds }) {
+export function TaskDetailModal({ task, schedule, tasks, resources, sprints, idToNo, noToId, onUpdate, onEdit, onCommitEdit, onToggleMilestone, onClose, autoScheduleHighlightIds }) {
   const { t, fmtDate, fmtMonthDay } = useI18n();
   useEffect(() => {
-    function onKey(e) { if (e.key === "Escape") onClose(); }
+    function onKey(e) { if (e.key === "Escape" && !e.isComposing && e.keyCode !== 229) onClose(); }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
@@ -28,7 +28,13 @@ export function TaskDetailModal({ task, schedule, tasks, resources, sprints, idT
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onClick={onClose}>
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-full overflow-y-auto" onClick={e => e.stopPropagation()}>
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-full overflow-y-auto" onClick={e => e.stopPropagation()}
+        onKeyDown={e => {
+          if (e.key === "Enter" && e.target.tagName === "INPUT" && !e.nativeEvent.isComposing && e.keyCode !== 229) {
+            e.preventDefault();
+            e.target.blur();
+          }
+        }}>
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 sticky top-0 bg-white rounded-t-xl">
           <div className="flex items-center gap-2 text-xs text-slate-400 font-mono">
             <span>WBS {task.wbsNo}</span>
@@ -41,7 +47,7 @@ export function TaskDetailModal({ task, schedule, tasks, resources, sprints, idT
         <div className="p-4 space-y-4">
           <div>
             <label className="block text-[11px] text-slate-500 mb-1">{t("taskDetail.name")}</label>
-            <input value={task.name} onChange={e => onUpdate({ name: e.target.value })}
+            <input value={task.name} onChange={e => onEdit("name", { name: e.target.value })}
               className="w-full border border-slate-200 rounded-md px-2.5 py-1.5 text-sm outline-none focus:border-indigo-400" />
           </div>
 
@@ -61,7 +67,7 @@ export function TaskDetailModal({ task, schedule, tasks, resources, sprints, idT
               <div>
                 <label className="block text-[11px] text-slate-500 mb-1">{t("taskDetail.dueDate")}</label>
                 <input type="date" value={task.milestoneMode === "fixed" ? (task.fixedDate || "") : (sched?.schedStart || "")}
-                  onChange={e => onUpdate({ fixedDate: e.target.value, startDate: e.target.value })}
+                  onChange={e => onEdit("startDate", { fixedDate: e.target.value, startDate: e.target.value })}
                   className={"w-full border border-slate-200 rounded-md px-2.5 py-1.5 text-sm font-mono outline-none focus:border-indigo-400 " + (autoScheduleHighlightIds.has(task.id) ? "font-bold" : "")} />
               </div>
               <div>
@@ -79,13 +85,13 @@ export function TaskDetailModal({ task, schedule, tasks, resources, sprints, idT
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-[11px] text-slate-500 mb-1">{t("taskDetail.startDate")}</label>
-                <input type="date" value={task.startDate || ""} onChange={e => onUpdate({ startDate: e.target.value })}
+                <input type="date" value={task.startDate || ""} onChange={e => onEdit("startDate", { startDate: e.target.value })}
                   className={"w-full border border-slate-200 rounded-md px-2.5 py-1.5 text-sm font-mono outline-none focus:border-indigo-400 " + (autoScheduleHighlightIds.has(task.id) ? "font-bold" : "")} />
               </div>
               <div>
                 <label className="block text-[11px] text-slate-500 mb-1">{t("taskDetail.duration")}</label>
                 <input type="number" min={0} step={0.5} value={task.duration}
-                  onChange={e => onUpdate({ duration: Math.max(0, Math.round(parseFloat(e.target.value || "0") * 100) / 100) })}
+                  onChange={e => onEdit("duration", { duration: Math.max(0, Math.round(parseFloat(e.target.value || "0") * 100) / 100) })}
                   className="w-full border border-slate-200 rounded-md px-2.5 py-1.5 text-sm font-mono outline-none focus:border-indigo-400" />
               </div>
             </div>
@@ -147,12 +153,12 @@ export function TaskDetailModal({ task, schedule, tasks, resources, sprints, idT
               </label>
             ) : (
               <div className="flex items-center gap-2">
-                <input type="range" min={0} max={100} step={5} value={task.progress || 0}
-                  onChange={e => onUpdate({ progress: Math.max(0, Math.min(100, parseInt(e.target.value, 10))) })}
+                <input type="range" onPointerUp={onCommitEdit} onKeyUp={onCommitEdit} min={0} max={100} step={5} value={task.progress || 0}
+                  onChange={e => onEdit("progress", { progress: Math.max(0, Math.min(100, parseInt(e.target.value, 10))) })}
                   className="flex-1" />
                 <div className="flex items-center gap-0.5 w-16 flex-shrink-0">
                   <input type="number" min={0} max={100} step={5} value={task.progress || 0}
-                    onChange={e => onUpdate({ progress: Math.max(0, Math.min(100, Math.round(parseFloat(e.target.value || "0")))) })}
+                    onChange={e => onEdit("progress", { progress: Math.max(0, Math.min(100, Math.round(parseFloat(e.target.value || "0")))) })}
                     className="w-full border border-slate-200 rounded-md px-1.5 py-1 text-sm font-mono outline-none focus:border-indigo-400" />
                   <span className="text-xs text-slate-400">%</span>
                 </div>
@@ -205,7 +211,7 @@ export function TaskDetailModal({ task, schedule, tasks, resources, sprints, idT
 
           <div>
             <label className="block text-[11px] text-slate-500 mb-1">{t("taskDetail.notes")}</label>
-            <textarea value={task.notes || ""} onChange={e => onUpdate({ notes: e.target.value })} rows={3}
+            <textarea value={task.notes || ""} onChange={e => onEdit("notes", { notes: e.target.value })} rows={3}
               placeholder={t("taskDetail.notesPlaceholder")}
               className="w-full border border-slate-200 rounded-md px-2.5 py-1.5 text-sm outline-none focus:border-indigo-400 resize-none" />
           </div>

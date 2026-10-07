@@ -30,6 +30,12 @@ describe("PROJECT_JSON_SCHEMA", () => {
     expect(PROJECT_JSON_SCHEMA.$defs.calendarException.properties.type.enum).toEqual(["holiday", "workday"]);
     expect(PROJECT_JSON_SCHEMA.required).not.toContain("calendarExceptions");
   });
+
+  it("新しいバージョンの平準化条件は boolean、旧形式の互換性のため任意項目にする", () => {
+    expect(PROJECT_JSON_SCHEMA.$defs.version.properties.rawLevelingOn.type).toBe("boolean");
+    expect(PROJECT_JSON_SCHEMA.$defs.version.required).not.toContain("rawLevelingOn");
+    expect(PROJECT_JSON_SCHEMA.$defs.version.properties.rawLevelingOn).not.toHaveProperty("default");
+  });
 });
 
 describe("buildProjectExport", () => {

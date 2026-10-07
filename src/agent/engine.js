@@ -12,6 +12,7 @@ export {
   candidateFromDep, earliestSprintFloor, autoScheduleStartDates, computeAutoSchedule, buildDisplaySchedule,
 } from "../lib/scheduling.js";
 export { idleSegments } from "../lib/workAllocation.js";
+export { buildVersionSnapshot } from "../lib/versionSnapshot.js";
 export { detectSprintConflicts, computeOverlappingSprintIds } from "../lib/sprints.js";
 export {
   detectDependencyIssues, findDependencyCycles, findMissingPredecessors,

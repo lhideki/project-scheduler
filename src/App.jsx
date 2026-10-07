@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 
 import { toISO, parseISO, buildHolidayMap, makeCalendar } from "./lib/calendar.js";
-import { uid, migrateSprintIds, isGroupId, buildFlatList, ancestorChain } from "./lib/taskTree.js";
+import { migrateSprintIds, isGroupId, buildFlatList, ancestorChain } from "./lib/taskTree.js";
 import { runCPM, buildDisplaySchedule, deriveProjectStart, computeAutoSchedule } from "./lib/scheduling.js";
 import { detectSprintConflicts } from "./lib/sprints.js";
 import { detectDependencyIssues, groupDependencyIssuesByTask } from "./lib/dependencyIssues.js";
@@ -19,7 +19,8 @@ import {
   buildProjectExport, prepareProjectImport,
 } from "./lib/exportUtils.js";
 import { seedData } from "./lib/seedData.js";
-import { createTaskHistory, taskHistoryReducer } from "./lib/history.js";
+import { buildVersionSnapshot, hasFullVersionSnapshot, restoreVersionSnapshot } from "./lib/versionSnapshot.js";
+import { createTaskHistory, taskHistoryReducer, canUndoTasks, canRedoTasks } from "./lib/history.js";
 import { storageRead, storageSet } from "./storage.js";
 import { createAutoSaver, getAutoSaveStatus } from "./lib/autoSave.js";
 import { normalizeStoredProject } from "./lib/storedProject.js";
@@ -96,18 +97,17 @@ export default function App() {
   );
   const tasks = taskHistory.present;
   // 子コンポーネントには従来のReact setterと同じインターフェースを渡し、すべてのタスク更新を
-  // 1つの履歴に集約する。初回ロードだけはUndo対象にせず、resetで履歴を空にする。
+  // 1つの履歴に集約する。読み込み・バージョン復元はresetで履歴を空にする。
   const setTasks = useCallback(value => dispatchTasks({ type: "set", value }), []);
+  const editTasks = useCallback((key, value) => dispatchTasks({ type: "edit", key, value }), []);
+  const commitTaskEdit = useCallback(() => dispatchTasks({ type: "commit" }), []);
   const resetTasks = useCallback(value => dispatchTasks({ type: "reset", value }), []);
   const undoTasks = useCallback(() => dispatchTasks({ type: "undo" }), []);
   const redoTasks = useCallback(() => dispatchTasks({ type: "redo" }), []);
   // Undo/RedoのキーボードショートカットはWBS/ガント画面内の要素にフォーカスがある場合しか
   // 効かないとヘッダーの「自動スケジューリング実行」ボタン操作直後などに機能しないため、
-  // window全体で受け付ける（IME変換中は無視する）。ただし、タスク編集用（WBS表のセル・
-  // タスク詳細モーダル）以外のテキスト入力（リソース名・スプリント名・カレンダー例外・
-  // バージョン名等、taskHistoryの対象外の state を編集するフォーム）にフォーカスがある間は
-  // ブラウザのネイティブUndoを奪わないよう素通りする。タスク編集用の入力欄側は
-  // WBSGanttView側のローカルハンドラ（stopPropagationあり）が先に処理する。
+  // window全体で受け付ける（IME変換中は無視する）。入力欄ではタスク編集用も含めて
+  // ブラウザのネイティブUndoに譲る。アプリ全体のUndoはツールバー、または入力欄の外で使う。
   useEffect(() => {
     function isEditableTarget(el) {
       if (!el) return false;
@@ -121,22 +121,22 @@ export default function App() {
       if (isEditableTarget(e.target)) return;
       const key = e.key.toLowerCase();
       if (key === "z" && e.shiftKey) {
-        if (!taskHistory.future.length) return;
+        if (!canRedoTasks(taskHistory)) return;
         e.preventDefault();
         redoTasks();
       } else if (key === "z") {
-        if (!taskHistory.past.length) return;
+        if (!canUndoTasks(taskHistory)) return;
         e.preventDefault();
         undoTasks();
       } else if (key === "y") {
-        if (!taskHistory.future.length) return;
+        if (!canRedoTasks(taskHistory)) return;
         e.preventDefault();
         redoTasks();
       }
     }
     window.addEventListener("keydown", handleUndoRedoKeyDown);
     return () => window.removeEventListener("keydown", handleUndoRedoKeyDown);
-  }, [taskHistory.past.length, taskHistory.future.length, undoTasks, redoTasks]);
+  }, [taskHistory, undoTasks, redoTasks]);
   const [resources, setResources] = useState(initialProject.resources);
   const [sprints, setSprints] = useState(initialProject.sprints);
   const [calendarExceptions, setCalendarExceptions] = useState(initialProject.calendarExceptions);
@@ -467,28 +467,7 @@ export default function App() {
   }
 
   async function saveVersion(name) {
-    // WBS番号は折りたたみ状態に依存して欠番が出るため、保存時は必ず全展開の状態で採番する
-    // （WBS/ガント側で指定バージョンとの比較を行う際、WBS番号で突き合わせるために必要）。
-    const flatAll = buildFlatList(tasks, new Set());
-    const snapshotTasks = flatAll.map(t => {
-      const s = schedule.get(t.id) || {};
-      return {
-        id: t.id, name: t.name, level: t.level, wbsNo: t.wbsNo, hasChildren: t.hasChildren,
-        schedStart: s.schedStart, schedFinish: s.schedFinish, critical: !!s.critical, milestone: !!t.milestone,
-        duration: t.duration, assigneeId: t.assigneeId || null,
-        progress: typeof s.progress === "number" ? s.progress : 0,
-      };
-    });
-    const v = {
-      id: uid("v"), name, createdAt: Date.now(), tasks: snapshotTasks, hasWbsInfo: true,
-      // 「指定バージョンに戻す」機能のためのフル復元用スナップショット（依存関係・階層・
-      // 開始日など、表示用の snapshotTasks には含まれない情報も含む生の tasks/resources）。
-      rawTasks: JSON.parse(JSON.stringify(tasks)),
-      rawResources: JSON.parse(JSON.stringify(resources)),
-      rawSprints: JSON.parse(JSON.stringify(sprints)),
-      rawCalendarExceptions: JSON.parse(JSON.stringify(calendarExceptions)),
-      hasFullSnapshot: true,
-    };
+    const v = buildVersionSnapshot({ tasks, resources, sprints, calendarExceptions, levelingOn }, schedule, name);
     const next = [v, ...versions];
     setVersions(next);
     showToast(t(autoSaveDisabled ? "toast.versionSessionOnly" : "toast.versionPending", { name }));
@@ -501,17 +480,20 @@ export default function App() {
   function restoreVersion(id) {
     const v = versions.find(x => x.id === id);
     if (!v) return;
-    if (!v.hasFullSnapshot) {
+    if (!hasFullVersionSnapshot(v)) {
       showToast(t("toast.versionRestoreUnsupported"));
       return;
     }
     requestConfirm(
-      t("confirm.restoreVersion", { name: v.name, createdAt: fmtDateTime(v.createdAt) }),
+      t("confirm.restoreVersion", { name: v.name, createdAt: fmtDateTime(v.createdAt) })
+        + (typeof v.rawLevelingOn === "boolean" ? "" : `\n\n${t("confirm.restoreVersionLegacyLeveling")}`),
       () => {
-        setTasks(migrateSprintIds(JSON.parse(JSON.stringify(v.rawTasks))));
-        setResources(JSON.parse(JSON.stringify(v.rawResources)));
-        setSprints(Array.isArray(v.rawSprints) ? JSON.parse(JSON.stringify(v.rawSprints)) : []);
-        setCalendarExceptions(Array.isArray(v.rawCalendarExceptions) ? JSON.parse(JSON.stringify(v.rawCalendarExceptions)) : []);
+        const restored = restoreVersionSnapshot(v, levelingOn);
+        resetTasks(restored.tasks);
+        setResources(restored.resources);
+        setSprints(restored.sprints);
+        setCalendarExceptions(restored.calendarExceptions);
+        setLevelingOn(restored.levelingOn);
         setSelectedId(null);
         showToast(t("toast.versionRestored", { name: v.name }));
       },
@@ -846,7 +828,7 @@ export default function App() {
         {tab === "gantt" && (
           <WBSGanttView
             ref={ganttViewRef}
-            tasks={tasks} setTasks={setTasks} resources={resources} sprints={sprints} cal={cal}
+            tasks={tasks} setTasks={setTasks} editTasks={editTasks} onCommitTaskEdit={commitTaskEdit} resources={resources} sprints={sprints} cal={cal}
             schedule={schedule} projectEnd={projectEnd}
             selectedId={selectedId} setSelectedId={setSelectedId}
             collapsed={collapsed} setCollapsed={setCollapsed}
@@ -859,8 +841,8 @@ export default function App() {
             revealTaskRequest={revealTaskRequest}
             onRevealTaskHandled={() => setRevealTaskRequest(null)}
             onSaveVersion={saveVersion}
-            canUndo={taskHistory.past.length > 0}
-            canRedo={taskHistory.future.length > 0}
+            canUndo={canUndoTasks(taskHistory)}
+            canRedo={canRedoTasks(taskHistory)}
             onUndo={undoTasks}
             onRedo={redoTasks}
             onNotify={showToast}

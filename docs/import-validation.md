@@ -64,7 +64,16 @@ array-valued `path` should use that field instead.
   displayable. Present fields are checked; a version explicitly claiming a full
   snapshot must include its required raw arrays. `hasFullSnapshot` is then derived
   from the actual raw arrays. Omitted old raw calendar data remains an empty calendar
-  when restored.
+  when restored. Comparison-only versions cannot be restored.
+- New UI and CLI full snapshots include boolean `rawLevelingOn` alongside the raw
+  tasks, resources, sprints, and calendar exceptions. Restoration reapplies that
+  saved setting even when the current toggle differs. This field stays optional
+  for schema-v1 compatibility; invalid present values are rejected at their version
+  field path. A legacy snapshot without it retains the current leveling setting,
+  because the original condition is unknown. The restore confirmation explains
+  that recalculated dates may differ from the saved comparison; no condition is
+  inferred from those dates. Restoring a version clears task Undo/Redo history so
+  earlier tasks cannot be replayed against the restored resources or calendar.
 - Task and version extension fields remain preserved. No conversion of arbitrary
   older schema versions or automatic repair of invalid data is performed.
 - Emergency JSON export preserves the current screen data, including invalid edited

@@ -96,7 +96,8 @@
   },
   "confirm": {
     "defaultLabel": "Run",
-    "restoreVersion": "Discard the current contents and restore version \"{name}\" ({createdAt})?",
+    "restoreVersion": "Discard the current contents and restore version \"{name}\" ({createdAt})? Task Undo/Redo history will be cleared.",
+    "restoreVersionLegacyLeveling": "This older version did not record resource leveling. Your current setting will be kept, so the recalculated schedule may differ from the saved comparison.",
     "restoreLabel": "Restore",
     "import": "Replace the current tasks and assignees with the imported contents?",
     "importLabel": "Import"
@@ -398,7 +399,7 @@
     "empty": "No saved versions",
     "compareCheck": "Compare \"{name}\"",
     "renameTitle": "Click to rename the version",
-    "restoreTitle": "Restore the current tasks and assignees to this version",
+    "restoreTitle": "Restore this version’s tasks, resources, sprints, calendar, and saved leveling setting",
     "restoreUnsupportedTitle": "This version was saved in an old format and cannot be restored",
     "compare": "Version comparison"
   },

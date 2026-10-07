@@ -96,7 +96,8 @@
   },
   "confirm": {
     "defaultLabel": "実行する",
-    "restoreVersion": "現在の内容を破棄し、バージョン「{name}」（{createdAt}）の状態に戻します。よろしいですか？",
+    "restoreVersion": "現在の内容を破棄し、バージョン「{name}」（{createdAt}）の状態に戻します。タスクの Undo/Redo 履歴も消去します。よろしいですか？",
+    "restoreVersionLegacyLeveling": "この古いバージョンにはリソース平準化の条件が記録されていません。現在の設定を維持するため、再計算後の日程は保存済みの比較表示と異なる場合があります。",
     "restoreLabel": "元に戻す",
     "import": "現在のタスク・担当者を、読み込んだ内容で置き換えます。よろしいですか？",
     "importLabel": "読み込む"
@@ -398,7 +399,7 @@
     "empty": "保存されたバージョンはありません",
     "compareCheck": "「{name}」を比較する",
     "renameTitle": "クリックしてバージョン名を変更",
-    "restoreTitle": "現在のタスク・担当者をこのバージョンの状態に戻します",
+    "restoreTitle": "このバージョンのタスク・担当者・スプリント・カレンダーと、記録されている平準化設定を復元します",
     "restoreUnsupportedTitle": "古い形式で保存されたバージョンのため復元できません",
     "compare": "バージョン比較"
   },

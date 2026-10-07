@@ -42,7 +42,7 @@ function issueSeverityOf(issues) {
 }
 
 export const WBSGanttView = React.forwardRef(function WBSGanttView({
-  tasks, setTasks, resources, sprints, cal, schedule, projectEnd, selectedId, setSelectedId,
+  tasks, setTasks, editTasks, onCommitTaskEdit, resources, sprints, cal, schedule, projectEnd, selectedId, setSelectedId,
   collapsed, setCollapsed, dayWidth, setDayWidth, requestConfirm,
   colWidths, setColWidths,
   versions, baselineVersionId, setBaselineVersionId,
@@ -275,8 +275,9 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
   const bgSvgRef = useRef(null);
   const barsSvgRef = useRef(null);
   const pendingFocusIdRef = useRef(null);
+  const composingRef = useRef(false);
   function isComposingEvent(e) {
-    return e.nativeEvent?.isComposing || e.isComposing || e.keyCode === 229;
+    return composingRef.current || e.nativeEvent?.isComposing || e.isComposing || e.keyCode === 229;
   }
   function cellKey(taskId, column) { return `${taskId}:${column}`; }
   function cellRefCallback(taskId, column, secondaryMap) {
@@ -343,6 +344,11 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
   // テキスト欄の←→は入力中のキャレット移動を優先し、先頭・末尾でのみセルをまたぐ。
   function handleGridCellKeyDown(e, taskId, column) {
     if (isComposingEvent(e)) return false;
+    if (e.key === "Enter" && column !== "name" && e.currentTarget.tagName === "INPUT") {
+      e.preventDefault();
+      e.currentTarget.blur(); // DepInput also parses its text here.
+      return true;
+    }
     const directions = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" };
     const direction = directions[e.key];
     if (!direction) return false;
@@ -470,6 +476,9 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
   }
 
   function updateTask(id, patch) { setTasks(prev => prev.map(t => (t.id === id ? { ...t, ...patch } : t))); }
+  function editTask(id, column, patch) {
+    editTasks(cellKey(id, column), prev => prev.map(t => (t.id === id ? { ...t, ...patch } : t)));
+  }
 
   const WBS_CLIPBOARD_TYPE = "application/x-project-scheduler-wbs";
   function clipboardContextFor(taskId) {
@@ -580,29 +589,6 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
     if (!clipboardRef.current) return;
     applyClipboardPayload(clipboardRef.current, currentClipboardSelection());
   }
-  // WBS表のセルやタスク詳細モーダルなど、タスク編集用の入力欄にフォーカスがある間のUndo/Redo。
-  // stopPropagationでApp.jsx側のwindowレベルハンドラへは伝播させない（App.jsx側は逆に、
-  // タスク編集用ではない入力欄＝isEditableTargetの場合は素通りしてネイティブUndoに譲る）。
-  function handleViewKeyDown(e) {
-    if (isComposingEvent(e)) return;
-    const modifier = e.metaKey || e.ctrlKey;
-    if (!modifier || e.altKey) return;
-    const key = e.key.toLowerCase();
-    if (key === "z" && e.shiftKey && canRedo) {
-      e.preventDefault();
-      e.stopPropagation();
-      onRedo?.();
-    } else if (key === "z" && canUndo) {
-      e.preventDefault();
-      e.stopPropagation();
-      onUndo?.();
-    } else if (key === "y" && canRedo) {
-      e.preventDefault();
-      e.stopPropagation();
-      onRedo?.();
-    }
-  }
-
   // ドラッグ&ドロップによる行の入れ替え。order/parentId のみを変更し、predecessors（依存関係）は
   // タスクIDで参照されているため一切変更しない＝どの位置に移動しても依存関係は自動的に維持される。
   const [rowDrag, setRowDrag] = useState(null); // { dragId, insertIndex }
@@ -940,7 +926,11 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
   }));
 
   return (
-    <div className="flex flex-col h-full" onKeyDown={handleViewKeyDown}>
+    <div className="flex flex-col h-full"
+      onBlur={() => { composingRef.current = false; onCommitTaskEdit(); }}
+      onKeyDownCapture={e => { if (isComposingEvent(e)) e.stopPropagation(); }}
+      onCompositionStart={() => { composingRef.current = true; }}
+      onCompositionEnd={() => { composingRef.current = false; }}>
       <div className="flex items-center gap-2 px-3 py-2 border-b border-slate-200 bg-white flex-wrap">
         <IconBtn icon={Plus} label={tr("wbs.toolbar.task")} onClick={() => addTask(false)} small />
         <IconBtn icon={Diamond} label={tr("wbs.toolbar.milestone")} onClick={() => addTask(true)} small />
@@ -1109,7 +1099,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                       ref={cellRefCallback(t.id, "name", rowInputRefs)}
                       {...cellInputProps(t.id, "name")}
                       value={t.name}
-                      onChange={e => updateTask(t.id, { name: e.target.value })}
+                      onChange={e => editTask(t.id, "name", { name: e.target.value })}
                       onKeyDown={e => {
                         if (isComposingEvent(e)) return;
                         if (e.key === "Tab") {
@@ -1120,6 +1110,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                         if (handleGridCellKeyDown(e, t.id, "name")) return;
                         if (e.key === "Enter") {
                           e.preventDefault();
+                          onCommitTaskEdit();
                           const idx = flat.findIndex(x => x.id === t.id);
                           if (idx !== -1 && idx < flat.length - 1) {
                             moveSelection(t.id, "down");
@@ -1168,12 +1159,12 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                   {!isSummary && !t.hasChildren && (
                     t.milestone ? (
                       <input type="date" value={t.milestoneMode === "fixed" ? (t.fixedDate || "") : (sched?.schedStart || "")}
-                        onChange={e => updateTask(t.id, { fixedDate: e.target.value, startDate: e.target.value })}
+                        onChange={e => editTask(t.id, "startDate", { fixedDate: e.target.value, startDate: e.target.value })}
                         ref={cellRefCallback(t.id, "startDate")} {...cellInputProps(t.id, "startDate")}
                         onKeyDown={e => handleGridCellKeyDown(e, t.id, "startDate")}
                         className={"bg-transparent outline-none w-full rounded font-mono text-[11px] focus:bg-indigo-100 focus:ring-1 focus:ring-indigo-300 " + (autoScheduleHighlightIds.has(t.id) ? "font-bold" : "")} />
                     ) : (
-                      <input type="date" value={t.startDate || ""} onChange={e => updateTask(t.id, { startDate: e.target.value })}
+                      <input type="date" value={t.startDate || ""} onChange={e => editTask(t.id, "startDate", { startDate: e.target.value })}
                         ref={cellRefCallback(t.id, "startDate")} {...cellInputProps(t.id, "startDate")}
                         onKeyDown={e => handleGridCellKeyDown(e, t.id, "startDate")}
                         className={"bg-transparent outline-none w-full rounded font-mono text-[11px] focus:bg-indigo-100 focus:ring-1 focus:ring-indigo-300 " + (autoScheduleHighlightIds.has(t.id) ? "font-bold" : "")} />
@@ -1184,7 +1175,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                 <div style={{ width: colWidths.duration }} className="px-1">
                   {!isSummary && !t.hasChildren && !t.milestone && (
                     <input type="number" min={0} step={0.5} value={t.duration} title={tr("wbs.row.durationTitle")}
-                      onChange={e => updateTask(t.id, { duration: Math.max(0, Math.round(parseFloat(e.target.value || "0") * 100) / 100) })}
+                      onChange={e => editTask(t.id, "duration", { duration: Math.max(0, Math.round(parseFloat(e.target.value || "0") * 100) / 100) })}
                       ref={cellRefCallback(t.id, "duration")} {...cellInputProps(t.id, "duration")}
                       onKeyDown={e => handleGridCellKeyDown(e, t.id, "duration")}
                       className="bg-transparent outline-none w-full rounded font-mono text-[11px] focus:bg-indigo-100 focus:ring-1 focus:ring-indigo-300" />
@@ -1234,7 +1225,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                       <div className="flex items-center gap-0.5">
                         <input type="number" min={0} max={100} step={5} value={t.progress || 0}
                           title={tr("wbs.row.progressTitle")}
-                          onChange={e => updateTask(t.id, { progress: Math.max(0, Math.min(100, Math.round(parseFloat(e.target.value || "0")))) })}
+                          onChange={e => editTask(t.id, "progress", { progress: Math.max(0, Math.min(100, Math.round(parseFloat(e.target.value || "0")))) })}
                           ref={cellRefCallback(t.id, "progress")} {...cellInputProps(t.id, "progress")}
                           onKeyDown={e => handleGridCellKeyDown(e, t.id, "progress")}
                           className="bg-transparent outline-none w-full rounded font-mono text-[11px] focus:bg-indigo-100 focus:ring-1 focus:ring-indigo-300" />
@@ -1613,8 +1604,10 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
           idToNo={idToNo}
           noToId={noToId}
           onUpdate={patch => updateTask(detailId, patch)}
+          onEdit={(column, patch) => editTask(detailId, column, patch)}
+          onCommitEdit={onCommitTaskEdit}
           onToggleMilestone={() => toggleMilestone(detailId)}
-          onClose={() => setDetailId(null)}
+          onClose={() => { onCommitTaskEdit(); composingRef.current = false; setDetailId(null); }}
           autoScheduleHighlightIds={autoScheduleHighlightIds}
         />
       )}
