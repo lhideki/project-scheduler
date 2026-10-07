@@ -21,7 +21,7 @@ import {
 import { seedData } from "./lib/seedData.js";
 import { createTaskHistory, taskHistoryReducer } from "./lib/history.js";
 import { storageRead, storageSet } from "./storage.js";
-import { createAutoSaver } from "./lib/autoSave.js";
+import { createAutoSaver, getAutoSaveStatus } from "./lib/autoSave.js";
 import { normalizeStoredProject } from "./lib/storedProject.js";
 import { getLinkedProjectKey } from "./lib/linkedProject.js";
 import { readEmbeddedProject, buildSharedHtml } from "./dom/embeddedProjectDom.js";
@@ -159,7 +159,7 @@ export default function App() {
   const [levelingOn, setLevelingOn] = useState(initialProject.levelingOn);
   const [loaded, setLoaded] = useState(false);
   const [toast, setToast] = useState(null);
-  const [saveStatus, setSaveStatus] = useState("pending");
+  const [saveState, setSaveState] = useState(null);
   const [restoreBlocked, setRestoreBlocked] = useState(false);
   const [importResult, setImportResult] = useState(() => embeddedProject && !embeddedProject.ok
     ? { kind: embeddedProject.syntaxError ? "syntax" : "invalid", issues: embeddedProject.issues || [] }
@@ -324,7 +324,6 @@ export default function App() {
         } catch (error) {
           // Preserve unreadable/invalid stored data until the user explicitly chooses to replace it.
           setRestoreBlocked(true);
-          setSaveStatus("failed");
           setImportResult({ kind: "restore", issues: error.issues || [] });
         }
       }
@@ -353,7 +352,7 @@ export default function App() {
         ]);
         return results.every(Boolean);
       },
-      onState: setSaveStatus,
+      onState: setSaveState,
     });
     autoSaverRef.current = saver;
     return () => { saver.dispose(); autoSaverRef.current = null; };
@@ -362,6 +361,9 @@ export default function App() {
   const saveSnapshot = useMemo(() => ({
     project: { tasks, resources, sprints, levelingOn, calendarExceptions }, versions,
   }), [tasks, resources, sprints, levelingOn, calendarExceptions, versions]);
+
+  // Render against this exact snapshot, even before the passive autosave effect runs.
+  const saveStatus = getAutoSaveStatus(saveState, saveSnapshot, { restoreBlocked });
 
   useEffect(() => {
     if (!loaded || autoSaveDisabled || restoreBlocked) return;
