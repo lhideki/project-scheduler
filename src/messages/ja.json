@@ -462,5 +462,13 @@
     "dateTime": "{field} は有効な ISO 8601 日時で指定してください",
     "requiredArray": "必須の配列がありません",
     "dependencySubject": "「{name}」: {reason}"
+  },
+  "projectName": {
+    "label": "プロジェクト名",
+    "edit": "プロジェクト名を編集",
+    "save": "名前を適用",
+    "cancel": "名前の編集を取消",
+    "untitled": "無題のプロジェクト",
+    "help": "空欄にすると無題のプロジェクトになります。"
   }
 }

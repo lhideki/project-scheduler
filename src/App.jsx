@@ -33,6 +33,7 @@ import {
 } from "./dom/linkedProjectFile.js";
 import { DEFAULT_WBS_COLS } from "./constants.js";
 import { IconBtn } from "./components/IconBtn.jsx";
+import { ProjectName } from "./components/ProjectName.jsx";
 import { ExportMenu } from "./components/ExportMenu.jsx";
 import { Tab } from "./components/Tab.jsx";
 import { WBSGanttView } from "./components/WBSGanttView.jsx";
@@ -72,6 +73,7 @@ export default function App() {
     if (embeddedProject && embeddedProject.ok) {
       const d = embeddedProject.data;
       return {
+        projectName: d.projectName,
         tasks: migrateSprintIds(d.tasks),
         resources: d.resources,
         sprints: d.sprints,
@@ -83,10 +85,10 @@ export default function App() {
     // linked、または埋め込みデータの解析に失敗した embedded は空で開始する
     // （後者でサンプルデータを出すと、スナップショットと誤認されるため）。
     if (linkedProjectKey || embeddedProject) {
-      return { tasks: [], resources: [], sprints: [], versions: [], levelingOn: false, calendarExceptions: [] };
+      return { projectName: "", tasks: [], resources: [], sprints: [], versions: [], levelingOn: false, calendarExceptions: [] };
     }
     return {
-      tasks: seed.tasks, resources: seed.resources, sprints: seed.sprints,
+      projectName: seed.projectName, tasks: seed.tasks, resources: seed.resources, sprints: seed.sprints,
       versions: [], levelingOn: false, calendarExceptions: seed.calendarExceptions || [],
     };
   }, [embeddedProject, linkedProjectKey, seed]);
@@ -137,6 +139,13 @@ export default function App() {
     window.addEventListener("keydown", handleUndoRedoKeyDown);
     return () => window.removeEventListener("keydown", handleUndoRedoKeyDown);
   }, [taskHistory, undoTasks, redoTasks]);
+  // Display metadata is deliberately independent of schedule Undo and version snapshots.
+  const [projectName, setProjectName] = useState(initialProject.projectName);
+  const [projectRevision, setProjectRevision] = useState(0);
+  const displayedProjectName = projectName || t("projectName.untitled");
+  useEffect(() => {
+    document.title = `${displayedProjectName} | Project Scheduler`;
+  }, [displayedProjectName]);
   const [resources, setResources] = useState(initialProject.resources);
   const [sprints, setSprints] = useState(initialProject.sprints);
   const [calendarExceptions, setCalendarExceptions] = useState(initialProject.calendarExceptions);
@@ -226,6 +235,8 @@ export default function App() {
   // React batches this synchronous update: validation/merging has finished before any state changes.
   // Reset task-only Undo so it cannot put old tasks into a newly imported resource/calendar context.
   function applyProject(data) {
+    setProjectName(data.projectName);
+    setProjectRevision(revision => revision + 1); // discard any draft for the previous plan
     resetTasks(data.tasks);
     setResources(data.resources);
     setSprints(data.sprints);
@@ -359,8 +370,8 @@ export default function App() {
   }, []);
 
   const saveSnapshot = useMemo(() => ({
-    project: { tasks, resources, sprints, levelingOn, calendarExceptions }, versions,
-  }), [tasks, resources, sprints, levelingOn, calendarExceptions, versions]);
+    project: { projectName, tasks, resources, sprints, levelingOn, calendarExceptions }, versions,
+  }), [projectName, tasks, resources, sprints, levelingOn, calendarExceptions, versions]);
 
   // Render against this exact snapshot, even before the passive autosave effect runs.
   const saveStatus = getAutoSaveStatus(saveState, saveSnapshot, { restoreBlocked });
@@ -503,13 +514,13 @@ export default function App() {
   }
 
   function exportProject() {
-    const data = buildProjectExport(tasks, resources, sprints, versions, levelingOn, calendarExceptions);
+    const data = buildProjectExport(tasks, resources, sprints, versions, levelingOn, calendarExceptions, projectName);
     downloadJSON(`project-scheduler_${toISO(new Date())}.json`, data);
     showToast(t("toast.exportedJson"));
   }
   function exportSharedHtml() {
     try {
-      const data = buildProjectExport(tasks, resources, sprints, versions, levelingOn, calendarExceptions);
+      const data = buildProjectExport(tasks, resources, sprints, versions, levelingOn, calendarExceptions, projectName);
       const html = buildSharedHtml(data);
       downloadTextFile(`project-scheduler-share_${toISO(new Date())}.html`, html, "text/html");
       showToast(t("toast.exportedSharedHtml"));
@@ -616,9 +627,12 @@ export default function App() {
     <div className="flex flex-col bg-slate-50 text-slate-800 ps-app-root" style={{ fontFamily: "ui-sans-serif, system-ui, sans-serif" }}>
       <style>{`.ps-app-root { height: 100vh; height: 100dvh; width: 100%; }`}</style>
       <div className="flex items-center gap-3 px-4 py-2.5 bg-white border-b border-slate-200 flex-wrap">
-        <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-md bg-indigo-600 flex items-center justify-center text-white"><GitBranch size={15} /></div>
-          <span className="font-semibold text-sm tracking-tight">Project Scheduler</span>
+        <div className="flex items-center gap-2 min-w-0 max-w-full">
+          <div className="w-7 h-7 shrink-0 rounded-md bg-indigo-600 flex items-center justify-center text-white"><GitBranch size={15} /></div>
+          <div className="min-w-0">
+            <span className="block text-[10px] font-medium tracking-wide text-slate-500">Project Scheduler</span>
+            <ProjectName key={projectRevision} value={projectName} displayName={displayedProjectName} onChange={setProjectName} />
+          </div>
         </div>
         <div className="flex-1" />
         <input ref={fileInputRef} aria-label={t("header.import")} type="file" accept="application/json,.json" onChange={handleImportFile} style={{ display: "none" }} />

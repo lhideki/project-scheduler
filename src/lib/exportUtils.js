@@ -1,3 +1,4 @@
+import { normalizeProjectName } from "./projectName.js";
 import { buildFlatList } from "./taskTree.js";
 import { MESSAGES, DEFAULT_LOCALE } from "./i18n.js";
 import { hasFullVersionSnapshot } from "./versionSnapshot.js";
@@ -17,6 +18,7 @@ export const PROJECT_JSON_SCHEMA = Object.freeze({
   properties: {
     schemaVersion: { type: "integer", const: PROJECT_SCHEMA_VERSION, description: "保存フォーマットのスキーマバージョン" },
     exportedAt: { type: "string", format: "date-time", description: "エクスポート日時（ISO 8601）" },
+    projectName: { type: "string", default: "", description: "表示用のプロジェクト名（任意）。前後の空白を除き、未設定・空白のみは空文字列として保持します。翻訳された既定表示名は保存しません。ID・保存先・ファイル名ではなく、日程バージョンの復元対象外です。" },
     tasks: { type: "array", description: "タスク一覧", items: { $ref: "#/$defs/task" } },
     resources: { type: "array", description: "担当者一覧", items: { $ref: "#/$defs/resource" } },
     sprints: { type: "array", description: "スプリント一覧", items: { $ref: "#/$defs/sprint" } },
@@ -181,10 +183,11 @@ export function normalizeProjectVersions(versions, options = {}) {
 }
 
 /** 現行の正規化済みJSONエクスポートデータを組み立てる。 */
-export function buildProjectExport(tasks, resources, sprints = [], versions = [], levelingOn = false, calendarExceptions = []) {
+export function buildProjectExport(tasks, resources, sprints = [], versions = [], levelingOn = false, calendarExceptions = [], projectName = "") {
   return {
     schemaVersion: PROJECT_SCHEMA_VERSION,
     exportedAt: new Date().toISOString(),
+    projectName: normalizeProjectName(projectName),
     tasks: cloneJSON(Array.isArray(tasks) ? tasks : []),
     resources: cloneJSON(Array.isArray(resources) ? resources : []),
     sprints: cloneJSON(Array.isArray(sprints) ? sprints : []),
@@ -203,6 +206,7 @@ export function normalizeImportedProject(data, options = {}) {
   return {
     schemaVersion: data.schemaVersion,
     exportedAt: data.exportedAt,
+    projectName: normalizeProjectName(data.projectName),
     tasks: cloneJSON(data.tasks),
     resources: cloneJSON(data.resources),
     sprints: cloneJSON(data.sprints),

@@ -113,6 +113,7 @@ bee（`@nulab/bee` 1.1 以上、Backlog公式CLI）経由で保存JSONと Backlo
 ### データモデル（すべてトップレベルReact state、`window.storage` に永続化）
 
 - `tasks`: フラット配列。`parentId` によりWBS階層（グループ／リーフタスク）を表現。グループ専用のエンティティは存在せず、共通ヘルパー `isGroupId(tasks, id)` で判定する。
+- `projectName`: 表示用の名前（文字列、既定 `""`）。`src/lib/projectName.js` で前後の空白を除き、未設定・空白のみは翻訳可能な既定名を表示する（既定表示名を保存しない）。全読み込み経路・自動保存・JSON・共有HTML・CLI提案で保持する。ID・保存先・ファイル名・`schedule`関連付けとは独立。同名可。タスクUndo・日程バージョンのスナップショット/復元には含めず、復元で現在の名前を巻き戻さない。
 - `resources`: 担当者（週次・月次の稼働上限を持つ。上限値 `0`・未設定は「その上限を適用しない」。日次の上限は1人日固定）。
 - `sprints`: `{id, name, theme, startDate, endDate, order}`。タスク側は `sprintIds`（配列）で複数参照できる（1タスク=複数スプリント可、グループには持たせない）。旧形式の単一 `sprintId` で保存されたデータは `migrateSprintIds()` で自動変換する（適用しているのは localStorage からの読み込み・共有用HTML（embedded）の初期化・バージョン復元。JSONの「読み込み」と linked の読み込みでは変換しない）。
 - `versions`: 任意タイミングのスナップショット（`rawTasks`/`rawResources`/`rawSprints`/`rawCalendarExceptions`/`rawLevelingOn` を保持。UI/CLI とも `src/lib/versionSnapshot.js` を使用し、復元時はタスク履歴をリセットする。旧スナップショットで `rawLevelingOn` が無ければ現在の平準化設定を維持し、保存時の日程を完全に再現できるとは扱わない）。`pm_versions` に保存する。
@@ -210,7 +211,7 @@ App は起動元を概念的に3種類として扱う。`autoSaveDisabled`（= `
 - JSON エクスポート/インポート、バージョンスナップショットは `tasks`/`resources`/`sprints`/`calendarExceptions`/`levelingOn`（JSONはさらに `versions`）を含める。新しいトップレベルstateを追加した場合は、次をすべて更新すること。
   - `PROJECT_JSON_SCHEMA`（`src/lib/exportUtils.js`。`npm run build:docs` で `docs/json-format.md` に反映）と `buildProjectExport`/`normalizeImportedProject`
   - App の読み込み経路（localStorage の初回ロード、linked の `applyLinkedProject`、embedded の `initialProject`、JSON「読み込み」の `handleImportFile`）と `pm_project` の自動保存
-  - バージョンスナップショット（`saveVersion` の `rawXxx`）と復元（`restoreVersion`）、`seedData()`（`src/lib/seedData.js`）
+  - バージョンスナップショット（`saveVersion` の `rawXxx`）と復元（`restoreVersion`）、`seedData()`（`src/lib/seedData.js`）。ただし `projectName` は表示メタデータであり、日程スナップショット・復元の対象外
   - インポートは `schemaVersion: 1` のみ受け付け、`tasks`/`resources`/`sprints`/`versions` は必須（無ければ読み込み失敗）。後から追加するキーは任意項目にし、キーが無い場合は既定値（`false`・`[]` 等）へフォールバックする。キーが存在して型が不正な場合は共通検証で読み込みを拒否する（`calendarExceptions` は配列、`levelingOn` は boolean）。検証APIと後方互換は `docs/import-validation.md` を参照。
 - 依存パッケージのバージョンは `package.json` を正とする。
 

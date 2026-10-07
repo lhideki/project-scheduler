@@ -158,6 +158,7 @@ function checkVersion(value, path, issues, options) {
 export function checkFieldShapes(data, options = {}) {
   const issues = [];
   if (!isObject(data)) return [issue("error", "project-not-object", "$", "object")];
+  if (has(data, "projectName") && !isString(data.projectName)) issues.push(issue("error", "projectName-invalid", "projectName", "string", { field: "projectName" }));
   checkCollections(data, rootPaths, issues, options);
   if (has(data, "levelingOn") && typeof data.levelingOn !== "boolean") issues.push(issue("error", "levelingOn-invalid", "levelingOn", "boolean", { field: "levelingOn" }));
   arrayField(data, "versions", "versions", false, issues, (value, path) => checkVersion(value, path, issues, options));

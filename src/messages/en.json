@@ -462,5 +462,13 @@
     "dateTime": "{field} must be a valid ISO 8601 date-time.",
     "requiredArray": "Required array is missing.",
     "dependencySubject": "\"{name}\": {reason}"
+  },
+  "projectName": {
+    "label": "Project name",
+    "edit": "Edit project name",
+    "save": "Apply name",
+    "cancel": "Cancel name edit",
+    "untitled": "Untitled project",
+    "help": "Leave blank for an untitled project."
   }
 }

@@ -8,7 +8,8 @@ Project Scheduler の「書き出し」「読み込み」で使うJSON形式で�
 
 - 現行の保存形式は `schemaVersion: 1` です
 - インポートは現行形式のみ受け付けます
-- 旧形式JSONへの後方互換はありません
+- 異なる schemaVersion の旧形式JSONへの変換は行いません。名前など後から追加された任意項目を含まない schemaVersion: 1 JSONは受け付けます
+- `projectName` 対応前のHTML・CLIは未知のトップレベル項目を保持しないため、そこを通して保存・再書き出しすると名前が失われます。旧JSON Schema（additionalProperties: false）でも名前付きJSONは検証に失敗します。名前を保持するには対応版のHTML・CLIを使ってください
 
 ## トップレベル構造
 
@@ -16,6 +17,7 @@ Project Scheduler の「書き出し」「読み込み」で使うJSON形式で�
 | --- | --- | --- | --- |
 | `schemaVersion` | `1` | 必須 | 保存フォーマットのスキーマバージョン |
 | `exportedAt` | `string` | 必須 | エクスポート日時（ISO 8601） |
+| `projectName` | `string` | 任意 | 表示用のプロジェクト名（任意）。前後の空白を除き、未設定・空白のみは空文字列として保持します。翻訳された既定表示名は保存しません。ID・保存先・ファイル名ではなく、日程バージョンの復元対象外です。 |
 | `tasks` | `task[]` | 必須 | タスク一覧 |
 | `resources` | `resource[]` | 必須 | 担当者一覧 |
 | `sprints` | `sprint[]` | 必須 | スプリント一覧 |
@@ -27,6 +29,7 @@ Project Scheduler の「書き出し」「読み込み」で使うJSON形式で�
 {
   "schemaVersion": 1,
   "exportedAt": "2026-08-26T00:00:00.000Z",
+  "projectName": "新製品リリース",
   "tasks": [],
   "resources": [],
   "sprints": [],
@@ -145,6 +148,8 @@ WBS上のタスクです。階層は parentId で表現します。
 - JSONとして解釈できない場合は読み込みに失敗します
 - `schemaVersion !== 1` の場合は読み込みに失敗します
 - 必須トップレベル項目が欠けている場合は読み込みに失敗します
+- `projectName` は前後の空白を除き、未設定・空白のみを空文字列へ正規化します。文字列でない値は読み込みに失敗します。既定表示名は翻訳して表示するだけで保存しません
+- 名前はID・保存先・ファイル名ではありません。同名を許容し、名前を変更しても `pm_project`・`schedule` の関連付け・実ファイル名は変わりません。日程バージョンを復元しても現在の名前を維持します
 - `hasFullSnapshot` は `rawTasks` / `rawResources` / `rawSprints` の有無から再計算します
 - `levelingOn` / `calendarExceptions` が無い旧形式JSONは、それぞれ `false` / `[]` として読み込みます
 - `calendarExceptions` キーが存在するのに配列でない場合は読み込みに失敗します

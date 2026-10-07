@@ -98,5 +98,5 @@ export function seedData() {
 
   // 非稼働日カレンダーの例外（休日・稼働日の上書き）。サンプルでは未設定。
   const calendarExceptions = [];
-  return { tasks, resources, sprints, calendarExceptions };
+  return { projectName: "", tasks, resources, sprints, calendarExceptions };
 }

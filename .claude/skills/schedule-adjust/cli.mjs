@@ -1198,6 +1198,12 @@ function detectDependencyIssues(tasks, schedule = null, cal = null) {
   }).map((x) => x.issue);
 }
 
+// src/lib/projectName.js
+function normalizeProjectName(value = "") {
+  if (typeof value !== "string") throw new TypeError("invalid_project_name");
+  return value.trim();
+}
+
 // node_modules/@formatjs/fast-memoize/index.js
 function memoize(fn, options) {
   const cache = options && options.cache ? options.cache : cacheDefault;
@@ -4407,6 +4413,14 @@ var ja_default = {
     dateTime: "{field} \u306F\u6709\u52B9\u306A ISO 8601 \u65E5\u6642\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044",
     requiredArray: "\u5FC5\u9808\u306E\u914D\u5217\u304C\u3042\u308A\u307E\u305B\u3093",
     dependencySubject: "\u300C{name}\u300D: {reason}"
+  },
+  projectName: {
+    label: "\u30D7\u30ED\u30B8\u30A7\u30AF\u30C8\u540D",
+    edit: "\u30D7\u30ED\u30B8\u30A7\u30AF\u30C8\u540D\u3092\u7DE8\u96C6",
+    save: "\u540D\u524D\u3092\u9069\u7528",
+    cancel: "\u540D\u524D\u306E\u7DE8\u96C6\u3092\u53D6\u6D88",
+    untitled: "\u7121\u984C\u306E\u30D7\u30ED\u30B8\u30A7\u30AF\u30C8",
+    help: "\u7A7A\u6B04\u306B\u3059\u308B\u3068\u7121\u984C\u306E\u30D7\u30ED\u30B8\u30A7\u30AF\u30C8\u306B\u306A\u308A\u307E\u3059\u3002"
   }
 };
 
@@ -4875,6 +4889,14 @@ var en_default = {
     dateTime: "{field} must be a valid ISO 8601 date-time.",
     requiredArray: "Required array is missing.",
     dependencySubject: '"{name}": {reason}'
+  },
+  projectName: {
+    label: "Project name",
+    edit: "Edit project name",
+    save: "Apply name",
+    cancel: "Cancel name edit",
+    untitled: "Untitled project",
+    help: "Leave blank for an untitled project."
   }
 };
 
@@ -5197,6 +5219,7 @@ function checkVersion(value, path, issues, options) {
 function checkFieldShapes(data, options = {}) {
   const issues = [];
   if (!isObject(data)) return [issue("error", "project-not-object", "$", "object")];
+  if (has(data, "projectName") && !isString(data.projectName)) issues.push(issue("error", "projectName-invalid", "projectName", "string", { field: "projectName" }));
   checkCollections(data, rootPaths, issues, options);
   if (has(data, "levelingOn") && typeof data.levelingOn !== "boolean") issues.push(issue("error", "levelingOn-invalid", "levelingOn", "boolean", { field: "levelingOn" }));
   arrayField(data, "versions", "versions", false, issues, (value, path) => checkVersion(value, path, issues, options));
@@ -5312,6 +5335,7 @@ var PROJECT_JSON_SCHEMA = Object.freeze({
   properties: {
     schemaVersion: { type: "integer", const: PROJECT_SCHEMA_VERSION, description: "\u4FDD\u5B58\u30D5\u30A9\u30FC\u30DE\u30C3\u30C8\u306E\u30B9\u30AD\u30FC\u30DE\u30D0\u30FC\u30B8\u30E7\u30F3" },
     exportedAt: { type: "string", format: "date-time", description: "\u30A8\u30AF\u30B9\u30DD\u30FC\u30C8\u65E5\u6642\uFF08ISO 8601\uFF09" },
+    projectName: { type: "string", default: "", description: "\u8868\u793A\u7528\u306E\u30D7\u30ED\u30B8\u30A7\u30AF\u30C8\u540D\uFF08\u4EFB\u610F\uFF09\u3002\u524D\u5F8C\u306E\u7A7A\u767D\u3092\u9664\u304D\u3001\u672A\u8A2D\u5B9A\u30FB\u7A7A\u767D\u306E\u307F\u306F\u7A7A\u6587\u5B57\u5217\u3068\u3057\u3066\u4FDD\u6301\u3057\u307E\u3059\u3002\u7FFB\u8A33\u3055\u308C\u305F\u65E2\u5B9A\u8868\u793A\u540D\u306F\u4FDD\u5B58\u3057\u307E\u305B\u3093\u3002ID\u30FB\u4FDD\u5B58\u5148\u30FB\u30D5\u30A1\u30A4\u30EB\u540D\u3067\u306F\u306A\u304F\u3001\u65E5\u7A0B\u30D0\u30FC\u30B8\u30E7\u30F3\u306E\u5FA9\u5143\u5BFE\u8C61\u5916\u3067\u3059\u3002" },
     tasks: { type: "array", description: "\u30BF\u30B9\u30AF\u4E00\u89A7", items: { $ref: "#/$defs/task" } },
     resources: { type: "array", description: "\u62C5\u5F53\u8005\u4E00\u89A7", items: { $ref: "#/$defs/resource" } },
     sprints: { type: "array", description: "\u30B9\u30D7\u30EA\u30F3\u30C8\u4E00\u89A7", items: { $ref: "#/$defs/sprint" } },
@@ -5465,6 +5489,7 @@ function normalizeImportedProject(data, options = {}) {
   return {
     schemaVersion: data.schemaVersion,
     exportedAt: data.exportedAt,
+    projectName: normalizeProjectName(data.projectName),
     tasks: cloneJSON2(data.tasks),
     resources: cloneJSON2(data.resources),
     sprints: cloneJSON2(data.sprints),
