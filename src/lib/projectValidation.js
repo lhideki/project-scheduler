@@ -93,12 +93,14 @@ function checkTask(value, path, issues) {
 }
 
 function checkCollections(data, paths, issues, { allowEditingValues = false } = {}) {
-  // Browser editors can persist incomplete sprint ranges and negative capacity
-  // inputs. Only local restoration opts into these narrow editing states.
+  // Browser editors can persist incomplete sprint ranges, cleared calendar dates
+  // and negative capacity inputs. Only local restoration opts into these states.
   const resourceDefinitions = allowEditingValues
     ? [idField, nameField, numberField("weeklyCapacity", true), numberField("monthlyCapacity", true)] : resourceFields;
   const sprintDefinitions = allowEditingValues
     ? [idField, nameField, stringField("theme"), dateField("startDate", true, true), dateField("endDate", true, true), numberField("order", true)] : sprintFields;
+  const exceptionDefinitions = allowEditingValues
+    ? [dateField("date", true, true), ...exceptionFields.slice(1)] : exceptionFields;
   arrayField(data, "tasks", paths.tasks, false, issues, (value, path) => checkTask(value, path, issues));
   arrayField(data, "resources", paths.resources, false, issues, (value, path) => fields(value, path, "resource", resourceDefinitions, issues));
   arrayField(data, "sprints", paths.sprints, false, issues, (value, path) => {
@@ -106,7 +108,7 @@ function checkCollections(data, paths, issues, { allowEditingValues = false } = 
       issues.push(issue("error", "sprint-date-range-invalid", `${path}.endDate`, "dateRange", {}, { ids: [value.id] }));
     }
   });
-  arrayField(data, "calendarExceptions", paths.calendarExceptions, false, issues, (value, path) => fields(value, path, "calendar-exception", exceptionFields, issues));
+  arrayField(data, "calendarExceptions", paths.calendarExceptions, false, issues, (value, path) => fields(value, path, "calendar-exception", exceptionDefinitions, issues));
 }
 
 const rootPaths = { tasks: "tasks", resources: "resources", sprints: "sprints", calendarExceptions: "calendarExceptions" };

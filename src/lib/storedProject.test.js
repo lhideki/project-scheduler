@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { normalizeStoredProject } from "./storedProject.js";
+import { makeCalendar } from "./calendar.js";
 
 describe("stored projects", () => {
   it("restores a deliberately empty plan with all settings", () => {
@@ -31,6 +32,22 @@ describe("stored projects", () => {
     expect(() => normalizeStoredProject({ tasks: [], resources: [resource] }, [])).toThrow("invalid_project_json");
     const sprint = { id: "s", name: "S", order: 0, startDate: "2026-02-30", endDate: "2026-10-09" };
     expect(() => normalizeStoredProject({ tasks: [], sprints: [sprint] }, [])).toThrow("invalid_project_json");
+  });
+  it("restores cleared calendar dates in the plan and raw snapshots without applying them", () => {
+    const calendarExceptions = [{ date: "", type: "holiday", name: "Editing holiday" }];
+    const version = { id: "v", name: "Editing snapshot", createdAt: 1, tasks: [], rawTasks: [], rawResources: [], rawSprints: [], rawCalendarExceptions: calendarExceptions, hasFullSnapshot: true };
+    const restored = normalizeStoredProject({ tasks: [], calendarExceptions }, [version]);
+    expect(restored.calendarExceptions).toEqual(calendarExceptions);
+    expect(restored.versions[0].rawCalendarExceptions).toEqual(calendarExceptions);
+    const cal = makeCalendar(new Map(), restored.calendarExceptions);
+    expect(cal.exceptions).toEqual([]);
+    expect(cal.isWorkdayStr("2026-10-07")).toBe(true);
+  });
+  it.each([undefined, null, 0, " ", "2026-02-30", "not a date"])("still rejects malformed calendar date %j in local plans and snapshots", date => {
+    const calendarExceptions = [{ date, type: "holiday" }];
+    expect(() => normalizeStoredProject({ tasks: [], calendarExceptions }, [])).toThrow("invalid_project_json");
+    const version = { id: "v", name: "Snapshot", createdAt: 1, tasks: [], rawCalendarExceptions: calendarExceptions };
+    expect(() => normalizeStoredProject({ tasks: [] }, [version])).toThrow("invalid_project_json");
   });
   it("does not silently replace malformed saved fields with defaults", () => {
     expect(() => normalizeStoredProject({ tasks: [null], resources: [] }, [])).toThrow("invalid_project_json");
