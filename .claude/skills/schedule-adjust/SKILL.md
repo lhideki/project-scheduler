@@ -60,7 +60,14 @@ CLI（`cli.mjs`）が担当する。**CLIはJSONファイルを一切書き換�
 
 ## CLI リファレンス
 
-出力は常に構造化JSON（stdout）。`ok: false` はCLI自体のエラー（ファイル未読込・JSON壊れ等）。
+出力は常に構造化JSON（stdout）。`ok` はCLIの処理結果であり、日程の妥当性は別の項目で確認する。
+
+- ファイルを読めない・JSON構文が壊れている場合は、全コマンドで `ok: false` と `error` を返し、終了コードは1。
+- `recalc` / `plan` / `explain` が共通検証で入力を拒否した場合も `ok: false`（終了コード1）。`issues[]` の `code` / `path` / `message` で不正な型・日付・参照などを確認する。`plan` は元ファイルと編集後ファイルの両方を検証する。
+- `validate` の共通検証による拒否は `ok: true`、`valid: false`、`schemaValid: false`、`issues[]`（終了コード0）。この経路には `scheduleChecks` は付かない。読み込める自己依存・依存循環なども `valid: false` になるが、`schemaValid` は `true`。
+- `plan` が入力を読み込めても、編集後の自己依存・依存循環や計算失敗で提案を出せない場合は `ok: true`、`blocked: true`、`reason`、`integrityIssues[]`（終了コード0）。入力拒否の `issues[]` と取り違えない。
+
+終了コード0や `ok: true` だけで成功と判断せず、`validate` の `valid`、`plan` の `blocked` と `proposed` を確認する。
 
 ```
 node <CLI> validate <file> [--leveling on|off|auto]
@@ -73,7 +80,7 @@ node <CLI> explain  <file> --task <taskId> [--leveling on|off|auto]
 スキーマ検証＋参照整合性（存在しない親/担当者/スプリント/先行タスク、自己依存、循環依存、
 スプリント期間重複、`calendarExceptions` の日付書式・type、同一日の休日＋稼働日の競合）に加え、
 アプリの「依存関係の矛盾」と同じ判定（`src/lib/dependencyIssues.js`）を行う。
-`valid`（error が無いか）、`issues[]`（`severity: error|warning`）、`scheduleChecks` を返す。
+`valid`（error が無いか）と `issues[]`（`severity: error|warning`）を返し、入力検証に成功した場合は `scheduleChecks` も付く。
 - 依存関係の矛盾の `code`:
   - `dependency-cycle`（error）… 循環参照。グループを介した循環（タスクAがグループGに依存し、
     G配下のタスクBがAに依存）も含む。`ids` は循環に含まれる全タスク、`dependencyPath` は循環の経路。`path` はJSON内の対象項目の位置です。
@@ -86,8 +93,9 @@ node <CLI> explain  <file> --task <taskId> [--leveling on|off|auto]
     マイルストーンの `fixedDate` を超えている。平準化 ON/OFF に関わらず判定する。
 - `dependency-violation` / `fixed-milestone-overrun` は表示スケジュールで判定するため、`--leveling`
   （既定 `auto` = JSON の `levelingOn`）の条件で計算する。平準化 ON では手入力の開始日が下限扱いに
-  なるため、`dependency-violation` は原則出ない。型エラー・ID重複・親子循環があるときはこの2種の
-  判定を行わず、`scheduleChecks.performed: false` と `reason` を返す。
+  なるため、`dependency-violation` は原則出ない。型エラー・ID重複・親子循環などは入力検証で拒否され、
+  `schemaValid: false` と `issues[]` を返す（`scheduleChecks` は付かない）。読み込み後の日程計算に
+  失敗した場合は `scheduleChecks.performed: false` と `reason` を返す。
 
 ### `recalc <file>`
 非破壊。現在のファイルの実効スケジュールを返す（アプリを開いた状態と一致）。
@@ -105,7 +113,7 @@ node <CLI> explain  <file> --task <taskId> [--leveling on|off|auto]
   ときに使う。平準化 ON（`--leveling` の解決結果が true）のときは、CPM 最短ではなく**平準化後の
   配置日**（＝平準化 ON 時の表示スケジュールと一致する日付。一致するまで書き戻しを繰り返す）を書き戻す。
 - 返り値:
-  - `blocked: true` … `edited.json` に整合性エラーあり。`integrityIssues` を見せて修正を促す。
+  - `blocked: true` … 読み込み後の整合性エラーまたは計算失敗で提案なし。`reason` と `integrityIssues` を提示する。入力自体が不正な場合は上記の `ok: false` / `issues[]` を返す。
   - `summary` … `projectEnd` の before→after、スケジュールが動くタスク数、
     `newlyCritical`/`noLongerCritical`、`snapshotName`、`rescheduleConverged`（`--reschedule` 時のみ。
     `false` なら書き戻した開始日と平準化後の表示の一致を確認できていないので、その旨をレポートに書き、
@@ -126,12 +134,13 @@ node <CLI> explain  <file> --task <taskId> [--leveling on|off|auto]
 
 ## 標準ワークフロー（保存を伴う調整）
 
-1. **現状把握**: `validate` と `recalc` を実行。整合性エラーがあれば先に解消。
+1. **現状把握**: `validate` を実行し、`ok: false` または `valid: false` なら理由と `issues[]`（ある場合）を提示して先に解消する。検証成功後に `recalc` で日程を確認する。
 2. **平準化条件の確認**（下記「平準化の扱い」）。
 3. **編集**: ユーザー依頼の変更を、元ファイルのコピー（`<file>.edited.json` など作業用パス）に適用する。
    - 元ファイルは変更しない。
 4. **プラン生成**: `node <CLI> plan <元ファイル> <editedファイル> [--reschedule] [--leveling …]`
-   - `blocked` なら `integrityIssues` を提示して 3 に戻る。
+   - `ok: false` なら `error` と `issues[]`（ある場合）を提示し、対象ファイルの入力を修正する。
+   - `blocked: true` なら `reason` と `integrityIssues` を提示して 3 に戻る。`proposed` が無い場合は保存へ進まない。
 5. **レポート提示**: `summary` / `scheduleChanges` / `sprintConflicts` / `levelWarnings` / `dependencyIssues` を
    日本語の表・箇条書きに整形してユーザーに見せる。最低限、次を必ず含める:
    - 依頼した編集の内容

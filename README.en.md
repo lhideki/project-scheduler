@@ -189,7 +189,11 @@ Pushing to `master` runs the tests and build in GitHub Actions, then publishes t
 npm install
 npm run test
 npm run build
+npx playwright install --with-deps chromium
+npm run test:browser
 ```
+
+Browser tests check the built HTML in Chromium and start a local server on `127.0.0.1:4173`. Pull-request CI also runs them and uploads screenshots, failure traces, and the HTML report as `browser-evidence-<commit>`. See [verification details](docs/import-validation.md#verification).
 
 `npm run build` runs these six steps:
 

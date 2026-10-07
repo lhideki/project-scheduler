@@ -96,7 +96,7 @@ src/
     IconBtn.jsx、Tab.jsx
 ```
 
-リポジトリ直下の `scripts/` は生成スクリプト（`build-html.mjs`・`build-json-doc.mjs`・`build-agent.mjs`・`build-readme.mjs`・`build-pages.mjs`）。`.github/workflows/pages.yml` は `master` への push 時に `npm ci`→`npm run test`→`npm run build`→`npm run build:pages`（`PAGES_BASE_URL` は `actions/configure-pages` の `base_url`）を実行し、Default・`ja/`・`en/` の3ページを GitHub Pages（Live Demo）へまとめて公開するワークフロー、`.github/workflows/ci.yml` は Pull Request で `npm ci`→`npm run test`→`npm run build`（生成物がコミット済みと一致するかの確認を含む）→`npm run build:pages` を実行するワークフロー（どちらも Node 24）。開発・テストには Node.js `^20.19.0 || ^22.12.0 || >=24.0.0`（20.19以上の20.x、22.12以上の22.x、または24以上。vitest 4 と vite 8 の engines の共通範囲で、21・23は対象外）が必要。Skill の `cli.mjs` は `target: "node18"` でバンドルしているため、実行は Node 18 以上で動く。
+リポジトリ直下の `scripts/` は生成スクリプト（`build-html.mjs`・`build-json-doc.mjs`・`build-agent.mjs`・`build-readme.mjs`・`build-pages.mjs`）。`.github/workflows/pages.yml` は `master` への push 時に `npm ci`→`npm run test`→`npm run build`→`npm run build:pages`（`PAGES_BASE_URL` は `actions/configure-pages` の `base_url`）を実行し、Default・`ja/`・`en/` の3ページを GitHub Pages（Live Demo）へまとめて公開するワークフロー、`.github/workflows/ci.yml` は Pull Request で `npm ci`→`npm run test`→`npm run build`（生成物がコミット済みと一致するかの確認を含む）→`npm run build:pages`→Chromiumのインストール→`npm run test:browser` を実行し、ブラウザ検証の証拠を保存するワークフロー（どちらも Node 24）。開発・テストには Node.js `^20.19.0 || ^22.12.0 || >=24.0.0`（20.19以上の20.x、22.12以上の22.x、または24以上。vitest 4 と vite 8 の engines の共通範囲で、21・23は対象外）が必要。Skill の `cli.mjs` は `target: "node18"` でバンドルしているため、実行は Node 18 以上で動く。
 
 新しい純粋ロジック（日付計算・依存関係解決・スケジューリング・データ変換など、Reactやブラウザ固有APIに依存しない処理）を追加する場合は `src/lib/` に置き、対応する `*.test.js` を書くこと。DOM/ブラウザAPI（`window`・`document`・ポインタイベント等）に依存するが React 非依存のヘルパーは `src/dom/` に置く。Reactコンポーネントは `src/components/` に1コンポーネント1ファイルで置く。
 
@@ -229,7 +229,7 @@ npm run test:watch  # watchモード（開発中）
 - `src/lib/` に新しい純粋ロジックを追加・変更した場合は、対応する `*.test.js` を必ず追加・更新すること。特に `runCPM`/`levelResources`（`scheduling.js`）はCLAUDE.mdに明文化された仕様（固定マイルストーンのみLS/LFを使う、進捗済みタスクはピン留めする等）の回帰を防ぐ最重要テスト対象なので、挙動を変える変更をした場合は既存テストが仕様変更を正しく反映しているか必ず確認する。
 - `src/lib/i18n.test.js` は、`ja.json` と `en.json` のキー・引数名の一致、全メッセージが両言語で書式化できること（`use-intl` と `createAppTranslator` の結果の一致を含む）、英語カタログに日本語が残っていないこと、日本語の日付書式が従来どおりであることを確認する。
 - `src/agent/cli.test.js` は、CLIのスケジュール計算（`computeSchedule`）が `src/lib/` の `runCPM` と一致すること・依存関係の矛盾判定（`validate`）がアプリと一致すること・整合性チェック・バージョンスナップショット構造を担保する。`scheduling.js` の仕様を変えたらここも確認する。
-- `src/components/`・`src/App.jsx`（Reactコンポーネント）はユニットテストの対象外。次節の手動確認で担保する。
+- `src/components/SchedulingResult.test.jsx` は、再計算結果の表示・警告・対象タスクを日英の静的HTMLで検証するVitestテスト。`src/App.jsx` を含む画面全体の操作・永続化・Undo/Redoなどは `tests/browser/*.pw.js` のPlaywrightテストと次節の目視確認で担保する。
 
 ## コミットメッセージ
 
@@ -238,7 +238,16 @@ npm run test:watch  # watchモード（開発中）
 
 ## 動作確認方法
 
-変更後は `npm run test` を実行してユニットテストが全件パスすることを確認したうえで、`npm run build` した `project_scheduler.html` をブラウザ（またはPlaywright）で直接開き、以下を目視・手動確認する。
+変更後は `npm run test` と `npm run build` を実行し、生成した `project_scheduler.html` に対してブラウザ回帰テストを実行する。
+
+```bash
+npx playwright install --with-deps chromium  # 初回・Playwright更新時
+npm run test:browser
+```
+
+Playwrightは `scripts/serve-test.mjs` で `127.0.0.1:4173` のローカルサーバーを起動し、合成データで保存失敗・JSON読み込み・Undo/Redo・バージョン復元・プロジェクト名・再計算結果などを検証する。結果は `playwright-report/index.html`、画面画像や失敗時のトレースは `test-results/` に出力する。PRのCIでも実行し、成功・失敗にかかわらず `browser-evidence-<commit>` artifactへ保存する。CIの対象commitと各テストの結果を確認し、画面画像・必要ならトレースを確認する。再試行で成功したケースは初回成功と区別する。
+
+テストに加え、変更に関係する以下の項目を生成したHTMLで目視確認する。
 
 - コンソールエラーが出ていないこと
 - ヘッダーで日本語・英語を切り替えられ、リロード後も選んだ言語が保持されること（英語表示でユーザー入力データ・祝日名以外に日本語が残っていないこと）
