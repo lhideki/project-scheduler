@@ -251,3 +251,24 @@ for (const start of ["", "2026-11-02"]) {
     expect(stripped(await exportJSON(page))).toEqual(before);
   });
 }
+
+test("a cleared calendar date survives save and reload with its raw version snapshot", async ({ page }, testInfo) => {
+  await boot(page); await saved(page);
+  await page.getByRole("button", { name: /^Calendar/ }).click();
+  await page.locator('input[type="date"]').fill("");
+  await page.getByRole("button", { name: /^Versions/ }).click();
+  await page.getByRole("textbox", { name: "Version name", exact: true }).fill("Calendar editing snapshot");
+  await page.getByRole("button", { name: "Save current schedule", exact: true }).click();
+  await saved(page);
+  const before = stripped(await exportJSON(page));
+  expect(before.calendarExceptions).toEqual([{ date: "", type: "holiday", name: "Test holiday" }]);
+  expect(before.versions[0].rawCalendarExceptions).toEqual(before.calendarExceptions);
+  await page.reload(); await saved(page);
+  expect(stripped(await exportJSON(page))).toEqual(before);
+  await page.getByRole("button", { name: /^Calendar/ }).click();
+  await expect(page.locator('input[type="date"]')).toHaveValue("");
+  await screenshot(page, testInfo, "06-cleared-calendar-date-restored.png");
+  await page.locator('input[type="date"]').fill("2026-10-08");
+  await saved(page);
+  expect((await readStored(page)).project.calendarExceptions[0].date).toBe("2026-10-08");
+});

@@ -231,10 +231,11 @@ describe("local editing-state compatibility", () => {
     ["reversed sprint range", data => { data.sprints[0].endDate = "2026-09-01"; }],
     ["negative weekly capacity", data => { data.resources[0].weeklyCapacity = -1; }],
     ["negative monthly capacity", data => { data.resources[0].monthlyCapacity = -2; }],
+    ["blank calendar exception date", data => { data.calendarExceptions = [{ date: "", type: "holiday", name: "Editing holiday" }]; }],
   ])("restores %s only with an explicit local editing option, including snapshots", (_, edit) => {
     const data = project();
     edit(data);
-    data.versions = [snapshot({ rawTasks: data.tasks, rawResources: data.resources, rawSprints: data.sprints })];
+    data.versions = [snapshot({ rawTasks: data.tasks, rawResources: data.resources, rawSprints: data.sprints, ...(data.calendarExceptions ? { rawCalendarExceptions: data.calendarExceptions } : {}) })];
     const before = structuredClone(data);
     expect(() => normalizeImportedProject(data)).toThrow("invalid_project_json");
     expect(() => normalizeProjectVersions(data.versions)).toThrow("invalid_project_json");
