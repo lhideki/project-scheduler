@@ -189,7 +189,11 @@ JSON形式のフィールド、型、必須項目は[JSON形式ドキュメン�
 npm install
 npm run test
 npm run build
+npx playwright install --with-deps chromium
+npm run test:browser
 ```
+
+ブラウザテストはビルド済みのHTMLをChromiumで検証し、ローカルサーバーを`127.0.0.1:4173`で起動します。PRのCIでも実行し、画面画像・失敗時のトレース・HTMLレポートを`browser-evidence-<commit>`に保存します。詳しくは[検証手順](docs/import-validation.md#verification)を参照してください。
 
 `npm run build`は次の6ステップを順に実行します。
 
