@@ -25,6 +25,11 @@ export {
   buildFlatList, isGroupId, migrateSprintIds, effectivePredecessors,
 } from "../lib/taskTree.js";
 export {
-  createAppTranslator, formatDependencyIssueMessage, formatLevelWarning,
+  createAppTranslator, formatDependencyIssueMessage, formatProjectIssue, formatLevelWarning,
   formatSprintConflictReason, formatSprintConflictSprintNames,
 } from "../lib/i18n.js";
+
+export {
+  checkFieldShapes, analyzeIntegrity, findParentCycles, validateProjectData,
+  projectDependencyIssue, isBlockingProjectIssue,
+} from "../lib/projectValidation.js";

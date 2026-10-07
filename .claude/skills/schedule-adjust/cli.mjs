@@ -1147,7 +1147,7 @@ function detectDependencyIssues(tasks, schedule = null, cal = null) {
     issues.push(...detectScheduleDependencyIssues(list, schedule, cal, { excludeIds: inCycle }));
   }
   const rank = wbsRankOf(list);
-  return issues.map((issue, i) => ({ issue, i })).sort((a, b) => {
+  return issues.map((issue2, i) => ({ issue: issue2, i })).sort((a, b) => {
     const ra = rank.get(a.issue.ids[0]) ?? 0, rb = rank.get(b.issue.ids[0]) ?? 0;
     if (ra !== rb) return ra - rb;
     const ca = CODE_ORDER.indexOf(a.issue.code), cb = CODE_ORDER.indexOf(b.issue.code);
@@ -3988,7 +3988,9 @@ var ja_default = {
     pngFailed: "PNG\u306E\u30B3\u30D4\u30FC\u306B\u5931\u6557\u3057\u307E\u3057\u305F: {message}",
     importFailedFormat: "\u8AAD\u307F\u8FBC\u307F\u306B\u5931\u6557\u3057\u307E\u3057\u305F\uFF08\u30D5\u30A1\u30A4\u30EB\u5F62\u5F0F\u304C\u6B63\u3057\u304F\u3042\u308A\u307E\u305B\u3093\uFF09",
     importFailedParse: "\u8AAD\u307F\u8FBC\u307F\u306B\u5931\u6557\u3057\u307E\u3057\u305F\uFF08JSON\u3092\u89E3\u6790\u3067\u304D\u307E\u305B\u3093\uFF09",
-    imported: "JSON\u30D5\u30A1\u30A4\u30EB\u304B\u3089\u30D7\u30ED\u30B8\u30A7\u30AF\u30C8\u3092\u8AAD\u307F\u8FBC\u307F\u307E\u3057\u305F"
+    imported: "JSON\u30D5\u30A1\u30A4\u30EB\u304B\u3089\u30D7\u30ED\u30B8\u30A7\u30AF\u30C8\u3092\u8AAD\u307F\u8FBC\u307F\u307E\u3057\u305F",
+    versionPending: "\u30D0\u30FC\u30B8\u30E7\u30F3\u300C{name}\u300D\u3092\u753B\u9762\u5185\u306B\u8FFD\u52A0\u3057\u307E\u3057\u305F\u3002\u30D6\u30E9\u30A6\u30B6\u3078\u306E\u4FDD\u5B58\u306F\u5F85\u6A5F\u4E2D\u3067\u3059",
+    versionSessionOnly: "\u30D0\u30FC\u30B8\u30E7\u30F3\u300C{name}\u300D\u3092\u753B\u9762\u5185\u306B\u8FFD\u52A0\u3057\u307E\u3057\u305F\u3002\u6B8B\u3059\u306B\u306FJSON\u3092\u66F8\u304D\u51FA\u3057\u3066\u304F\u3060\u3055\u3044"
   },
   pngErrors: {
     "gantt-dom-missing": "\u30AC\u30F3\u30C8\u753B\u9762\u306EDOM\u69CB\u9020\u3092\u53D6\u5F97\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F",
@@ -4311,6 +4313,57 @@ var ja_default = {
     float: "\u30D5\u30ED\u30FC\u30C8 {days}\u65E5",
     lagTitle: "\u30E9\u30B0\uFF08workday\uFF09",
     removeEdge: "\u4F9D\u5B58\u95A2\u4FC2\u3092\u524A\u9664"
+  },
+  save: {
+    pending: "\u672A\u4FDD\u5B58 \xB7 \u4FDD\u5B58\u5F85\u3061",
+    saved: "\u3053\u306E\u30D6\u30E9\u30A6\u30B6\u306B\u4FDD\u5B58\u6E08\u307F",
+    failed: "\u4FDD\u5B58\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F",
+    disabled: "\u81EA\u52D5\u4FDD\u5B58\u306E\u5BFE\u8C61\u5916 \xB7 \u5909\u66F4\u3092\u6B8B\u3059\u306B\u306FJSON\u3092\u66F8\u304D\u51FA\u3057\u3066\u304F\u3060\u3055\u3044",
+    restoreBlocked: "\u4FDD\u5B58\u30C7\u30FC\u30BF\u3092\u5FA9\u5143\u3067\u304D\u306A\u3044\u305F\u3081\u81EA\u52D5\u4FDD\u5B58\u3092\u505C\u6B62\u4E2D",
+    failureHelp: "\u7DE8\u96C6\u5185\u5BB9\u306F\u753B\u9762\u5185\u306B\u4FDD\u6301\u3055\u308C\u3066\u3044\u307E\u3059\u3002\u9589\u3058\u308B\u524D\u306BJSON\u3078\u9000\u907F\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
+    export: "JSON\u3078\u9000\u907F",
+    retry: "\u4FDD\u5B58\u3092\u518D\u8A66\u884C",
+    replaceUnreadable: "\u8AAD\u307F\u8FBC\u3081\u306A\u304B\u3063\u305F\u30D6\u30E9\u30A6\u30B6\u306E\u4FDD\u5B58\u30C7\u30FC\u30BF\u3092\u3001\u73FE\u5728\u753B\u9762\u306B\u8868\u793A\u3057\u3066\u3044\u308B\u8A08\u753B\u3067\u4E0A\u66F8\u304D\u3057\u307E\u3059\u304B\uFF1F\u91CD\u8981\u306A\u30C7\u30FC\u30BF\u306F\u5148\u306B\u9000\u907F\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
+    loading: "\u4FDD\u5B58\u6E08\u307F\u306E\u8A08\u753B\u3092\u8AAD\u307F\u8FBC\u307F\u4E2D\u2026"
+  },
+  importResult: {
+    syntax: "JSON\u306E\u69CB\u6587\u304C\u6B63\u3057\u304F\u3042\u308A\u307E\u305B\u3093",
+    invalid: "\u30D7\u30ED\u30B8\u30A7\u30AF\u30C8\u306E\u5185\u5BB9\u306B\u4E0D\u6B63\u306A\u9805\u76EE\u304C\u3042\u308A\u307E\u3059",
+    warnings: "\u8AAD\u307F\u8FBC\u307F\u307E\u3057\u305F\u3002\u78BA\u8A8D\u304C\u5FC5\u8981\u306A\u9805\u76EE\u304C\u3042\u308A\u307E\u3059",
+    restore: "\u4FDD\u5B58\u30C7\u30FC\u30BF\u3092\u5FA9\u5143\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F",
+    unchanged: "\u73FE\u5728\u306E\u8A08\u753B\u3068\u30D0\u30FC\u30B8\u30E7\u30F3\u5C65\u6B74\u306F\u5909\u66F4\u3057\u3066\u3044\u307E\u305B\u3093\u3002\u6B21\u306E\u9805\u76EE\u3092\u4FEE\u6B63\u3057\u3066\u304B\u3089\u30D5\u30A1\u30A4\u30EB\u3092\u9078\u629E\u3057\u76F4\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
+    restoreHelp: "\u30D6\u30E9\u30A6\u30B6\u306E\u4FDD\u5B58\u30C7\u30FC\u30BF\u306F\u4E0A\u66F8\u304D\u3057\u3066\u3044\u307E\u305B\u3093\u3002\u4FDD\u8B77\u306E\u305F\u3081\u81EA\u52D5\u4FDD\u5B58\u3092\u505C\u6B62\u3057\u3066\u3044\u307E\u3059\u3002"
+  },
+  projectValidation: {
+    object: "\u30AA\u30D6\u30B8\u30A7\u30AF\u30C8\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044",
+    array: "\u914D\u5217\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044",
+    id: "ID\u306F\u7A7A\u3067\u306A\u3044\u6587\u5B57\u5217\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044\uFF08\u4E88\u7D04\u540D\u306F\u4F7F\u7528\u3067\u304D\u307E\u305B\u3093\uFF09",
+    string: "{field} \u306F\u6587\u5B57\u5217\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044",
+    number: "{field} \u306F\u6709\u52B9\u306A\u6709\u9650\u306E\u6570\u5024\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044",
+    nonnegativeNumber: "{field} \u306F 0 \u4EE5\u4E0A\u306E\u6709\u9650\u306E\u6570\u5024\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044",
+    boolean: "{field} \u306F true \u307E\u305F\u306F false \u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044",
+    date: "{field} \u306F\u5B9F\u5728\u3059\u308B\u65E5\u4ED8\uFF08YYYY-MM-DD\uFF09\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044",
+    progress: "progress \u306F 0\u301C100 \u306E\u6570\u5024\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044",
+    nullableId: "{field} \u306FID\u307E\u305F\u306F null \u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044",
+    milestoneMode: "milestoneMode \u306F flexible \u307E\u305F\u306F fixed \u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044",
+    calendarType: "type \u306F holiday \u307E\u305F\u306F workday \u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044",
+    dependencyType: "type \u306F FS / SS / FF / SF \u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044",
+    dateRange: "\u7D42\u4E86\u65E5\u306F\u958B\u59CB\u65E5\u4EE5\u964D\u306B\u3057\u3066\u304F\u3060\u3055\u3044",
+    timestamp: "createdAt \u306F\u6709\u52B9\u306A Unix \u30DF\u30EA\u79D2\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044",
+    nonnegativeInteger: "{field} \u306F 0 \u4EE5\u4E0A\u306E\u6574\u6570\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044",
+    snapshotMissing: "\u5FA9\u5143\u7528\u30B9\u30CA\u30C3\u30D7\u30B7\u30E7\u30C3\u30C8\u306B\u5FC5\u8981\u306A\u914D\u5217\u304C\u3042\u308A\u307E\u305B\u3093",
+    duplicateId: "ID\u300C{id}\u300D\u304C\u91CD\u8907\u3057\u3066\u3044\u307E\u3059",
+    parentCycle: "\u89AA\u5B50\u95A2\u4FC2\u304C\u5FAA\u74B0\u3057\u3066\u3044\u307E\u3059: {route}",
+    parentMissing: "\u89AA\u30BF\u30B9\u30AF\u300C{id}\u300D\u304C\u5B58\u5728\u3057\u307E\u305B\u3093",
+    assigneeMissing: "\u62C5\u5F53\u8005\u300C{id}\u300D\u304C\u5B58\u5728\u3057\u307E\u305B\u3093",
+    sprintMissing: "\u30B9\u30D7\u30EA\u30F3\u30C8\u300C{id}\u300D\u304C\u5B58\u5728\u3057\u307E\u305B\u3093",
+    groupPredecessors: "\u30B0\u30EB\u30FC\u30D7\u300C{name}\u300D\u306B\u5148\u884C\u30BF\u30B9\u30AF\u304C\u8A2D\u5B9A\u3055\u308C\u3066\u3044\u307E\u3059\uFF08\u4F9D\u5B58\u306F\u30EA\u30FC\u30D5\u30BF\u30B9\u30AF\u306B\u4ED8\u3051\u3066\u304F\u3060\u3055\u3044\uFF09",
+    sprintOverlap: "\u671F\u9593\u304C\u91CD\u8907\u3057\u3066\u3044\u308B\u30B9\u30D7\u30EA\u30F3\u30C8\u304C\u3042\u308A\u307E\u3059: {ids}",
+    calendarConflict: "{date, date, ymd} \u306B\u4F11\u65E5\u3068\u7A3C\u50CD\u65E5\u306E\u4E21\u65B9\u304C\u6307\u5B9A\u3055\u308C\u3066\u3044\u307E\u3059\uFF08\u7A3C\u50CD\u65E5\u304C\u512A\u5148\u3055\u308C\u307E\u3059\uFF09",
+    schemaVersion: "schemaVersion \u306F {version} \u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044",
+    dateTime: "{field} \u306F\u6709\u52B9\u306A ISO 8601 \u65E5\u6642\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044",
+    requiredArray: "\u5FC5\u9808\u306E\u914D\u5217\u304C\u3042\u308A\u307E\u305B\u3093",
+    dependencySubject: "\u300C{name}\u300D: {reason}"
   }
 };
 
@@ -4402,7 +4455,9 @@ var en_default = {
     pngFailed: "Failed to copy as PNG: {message}",
     importFailedFormat: "Import failed (the file format is invalid)",
     importFailedParse: "Import failed (the JSON could not be parsed)",
-    imported: "Imported the project from the JSON file"
+    imported: "Imported the project from the JSON file",
+    versionPending: 'Added version "{name}" on this screen. Browser save is pending.',
+    versionSessionOnly: 'Added version "{name}" on this screen. Export JSON to keep it.'
   },
   pngErrors: {
     "gantt-dom-missing": "Could not read the structure of the Gantt view",
@@ -4725,6 +4780,57 @@ var en_default = {
     float: "Float {days}d",
     lagTitle: "Lag (workdays)",
     removeEdge: "Remove dependency"
+  },
+  save: {
+    pending: "Unsaved changes \xB7 waiting to save",
+    saved: "Saved in this browser",
+    failed: "Could not save",
+    disabled: "Automatic saving is off \xB7 export JSON to keep changes",
+    restoreBlocked: "Saved data could not be restored \xB7 automatic saving paused",
+    failureHelp: "Your changes are still on this screen. Export JSON before closing.",
+    export: "Back up as JSON",
+    retry: "Retry saving",
+    replaceUnreadable: "Replace the unreadable browser data with the plan currently on screen? Export any important data before continuing.",
+    loading: "Loading saved project\u2026"
+  },
+  importResult: {
+    syntax: "The file is not valid JSON",
+    invalid: "The project data is invalid",
+    warnings: "Imported with issues to review",
+    restore: "Saved data could not be restored",
+    unchanged: "The current plan and version history have not changed. Correct the fields below and select the file again.",
+    restoreHelp: "The saved browser data has not been overwritten. Automatic saving is paused to protect it."
+  },
+  projectValidation: {
+    object: "Must be an object.",
+    array: "Must be an array.",
+    id: "ID must be a nonempty string, not a reserved name.",
+    string: "{field} must be a string.",
+    number: "{field} must be a valid finite number.",
+    nonnegativeNumber: "{field} must be a finite number greater than or equal to 0.",
+    boolean: "{field} must be true or false.",
+    date: "{field} must be a real date in YYYY-MM-DD format.",
+    progress: "progress must be a number from 0 to 100.",
+    nullableId: "{field} must be an ID or null.",
+    milestoneMode: "milestoneMode must be flexible or fixed.",
+    calendarType: "type must be holiday or workday.",
+    dependencyType: "type must be FS, SS, FF, or SF.",
+    dateRange: "End date must be on or after start date.",
+    timestamp: "createdAt must be a valid Unix timestamp in milliseconds.",
+    nonnegativeInteger: "{field} must be a nonnegative integer.",
+    snapshotMissing: "Full snapshot is missing a required array.",
+    duplicateId: 'Duplicate ID "{id}".',
+    parentCycle: "Parent hierarchy contains a cycle: {route}.",
+    parentMissing: 'Parent task "{id}" does not exist.',
+    assigneeMissing: 'Resource "{id}" does not exist.',
+    sprintMissing: 'Sprint "{id}" does not exist.',
+    groupPredecessors: 'Group "{name}" has predecessors; assign dependencies to leaf tasks.',
+    sprintOverlap: "Sprint date ranges overlap: {ids}.",
+    calendarConflict: "{date, date, ymd} is both a holiday and a workday; workday takes priority.",
+    schemaVersion: "schemaVersion must be {version}.",
+    dateTime: "{field} must be a valid ISO 8601 date-time.",
+    requiredArray: "Required array is missing.",
+    dependencySubject: '"{name}": {reason}'
   }
 };
 
@@ -4813,10 +4919,10 @@ function dateArg(iso) {
 function taskNameText(t, name) {
   return name == null || name === "" ? t("common.untitledTask") : name;
 }
-function formatDependencyIssueMessage(t, issue) {
-  const p = issue.params || {};
+function formatDependencyIssueMessage(t, issue2) {
+  const p = issue2.params || {};
   const name = (n) => taskNameText(t, n);
-  switch (issue.code) {
+  switch (issue2.code) {
     case "dependency-cycle": {
       const route = (p.route || []).map((r) => t("dependencyIssues.quoted", { name: name(r.name) })).join(t("dependencyIssues.arrow"));
       const notes = (p.memberEdges || []).map((e) => t("dependencyIssues.cycleMemberNote", { child: name(e.childName), parent: name(e.parentName) }));
@@ -4836,8 +4942,20 @@ function formatDependencyIssueMessage(t, issue) {
     case "fixed-milestone-overrun":
       return p.predName !== void 0 ? t("dependencyIssues.message.overrunEarliest", { predName: name(p.predName), earliest: dateArg(p.earliest), fixedDate: dateArg(p.fixedDate) }) : t("dependencyIssues.message.overrunDisplay", { actual: dateArg(p.actual), fixedDate: dateArg(p.fixedDate) });
     default:
-      return issue.code;
+      return issue2.code;
   }
+}
+function formatProjectIssue(t, issue2) {
+  const params = issue2.params || {};
+  if (issue2.messageKey === "projectValidation.dependency") {
+    const reason = formatDependencyIssueMessage(t, issue2);
+    return issue2.code === "dependency-cycle" ? reason : t("projectValidation.dependencySubject", { name: taskNameText(t, params.subjectName), reason });
+  }
+  const values = { ...params };
+  if (issue2.messageKey === "projectValidation.parentCycle") values.route = (params.route || []).join(t("dependencyIssues.arrow"));
+  if (issue2.messageKey === "projectValidation.sprintOverlap") values.ids = (params.ids || []).join(t("common.listSeparator"));
+  if (issue2.messageKey === "projectValidation.calendarConflict") values.date = dateArg(params.date);
+  return issue2.messageKey && t.has(issue2.messageKey) ? t(issue2.messageKey, values) : issue2.code;
 }
 function formatSprintConflictReason(t, reason) {
   const p = reason.params || {};
@@ -4871,8 +4989,273 @@ function formatLevelWarning(t, warning) {
   });
 }
 
-// src/lib/exportUtils.js
+// src/lib/projectValidation.js
 var PROJECT_SCHEMA_VERSION = 1;
+var isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+var isNumber = (value) => typeof value === "number" && Number.isFinite(value);
+var isString = (value) => typeof value === "string";
+var isId = (value) => isString(value) && !!value.trim() && value !== "__root__" && !Object.hasOwn(Object.prototype, value);
+var has = (object, key) => Object.hasOwn(object, key) && object[key] !== void 0;
+function isISODate(value) {
+  if (!isString(value) || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = /* @__PURE__ */ new Date(`${value}T00:00:00Z`);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+function isISODateTime(value) {
+  if (!isString(value)) return false;
+  const match = /^(\d{4}-\d{2}-\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:[Zz]|[+-](\d{2}):(\d{2}))$/.exec(value);
+  return !!match && isISODate(match[1]) && +match[2] < 24 && +match[3] < 60 && +match[4] < 60 && (!match[5] || +match[5] < 24 && +match[6] < 60) && Number.isFinite(Date.parse(value));
+}
+function issue(severity, code, path, messageKey, params = {}, extra = {}) {
+  return { severity, code, path, messageKey: `projectValidation.${messageKey}`, params, ...extra };
+}
+var isBlockingProjectIssue = (item) => item.severity === "error" && item.blocking !== false;
+function fields(value, path, kind, definitions, issues) {
+  if (!isObject(value)) {
+    issues.push(issue("error", `${kind}-not-object`, path, "object"));
+    return false;
+  }
+  for (const [key, check, required, messageKey] of definitions) {
+    if (!has(value, key) && required || has(value, key) && !check(value[key])) {
+      issues.push(issue(
+        "error",
+        `${kind}-${key}-invalid`,
+        `${path}.${key}`,
+        messageKey,
+        { field: key },
+        isString(value.id) ? { ids: [value.id] } : {}
+      ));
+    }
+  }
+  return true;
+}
+var field = (key, check, required, messageKey) => [key, check, required, messageKey];
+var idField = field("id", isId, true, "id");
+var nameField = field("name", isString, true, "string");
+var nonnegative = (value) => isNumber(value) && value >= 0;
+var numberField = (key, required = false, check = isNumber) => field(
+  key,
+  check,
+  required,
+  check === nonnegative ? "nonnegativeNumber" : "number"
+);
+var stringField = (key, required = false) => field(key, isString, required, "string");
+var booleanField = (key) => field(key, (value) => typeof value === "boolean", false, "boolean");
+var dateField = (key, required = false, allowEmpty = false) => field(key, (value) => allowEmpty && value === "" || isISODate(value), required, "date");
+var progressField = field("progress", (value) => isNumber(value) && value >= 0 && value <= 100, false, "progress");
+var taskFields = [
+  idField,
+  nameField,
+  field("parentId", (value) => value === null || isId(value), true, "nullableId"),
+  numberField("order", true),
+  dateField("startDate", false, true),
+  dateField("fixedDate", false, true),
+  numberField("duration", false, nonnegative),
+  numberField("savedDuration", false, nonnegative),
+  progressField,
+  field("assigneeId", (value) => value === null || isId(value), false, "nullableId"),
+  booleanField("milestone"),
+  field("milestoneMode", (value) => ["flexible", "fixed"].includes(value), false, "milestoneMode"),
+  stringField("notes"),
+  numberField("diagX"),
+  numberField("diagY"),
+  // Older schema-v1 tasks may still carry this field; callers retain their existing migration policy.
+  field("sprintId", (value) => value === null || isId(value), false, "nullableId")
+];
+var resourceFields = [idField, nameField, numberField("weeklyCapacity", true, nonnegative), numberField("monthlyCapacity", true, nonnegative)];
+var sprintFields = [idField, nameField, stringField("theme"), dateField("startDate", true), dateField("endDate", true), numberField("order", true)];
+var exceptionFields = [dateField("date", true), field("type", (value) => ["holiday", "workday"].includes(value), true, "calendarType"), stringField("name")];
+function arrayField(object, key, path, required, issues, visit, code = `${key}-invalid`) {
+  if (!has(object, key) && !required) return;
+  if (!Array.isArray(object[key])) {
+    issues.push(issue("error", code, path, "array"));
+    return;
+  }
+  for (let i = 0; i < object[key].length; i++) visit(object[key][i], `${path}[${i}]`, i);
+}
+function checkTask(value, path, issues) {
+  if (!fields(value, path, "task", taskFields, issues)) return;
+  arrayField(value, "sprintIds", `${path}.sprintIds`, false, issues, (id, itemPath) => {
+    if (!isId(id)) issues.push(issue("error", "task-sprintId-invalid", itemPath, "id", {}, { ids: [value.id] }));
+  }, "task-sprintIds-invalid");
+  arrayField(value, "predecessors", `${path}.predecessors`, false, issues, (dep, itemPath) => {
+    fields(dep, itemPath, "dependency", [
+      idField,
+      field("type", (type) => ["FS", "SS", "FF", "SF"].includes(type), true, "dependencyType"),
+      numberField("lag", true)
+    ], issues);
+  }, "task-predecessors-invalid");
+}
+function checkCollections(data, paths, issues, { allowEditingValues = false } = {}) {
+  const resourceDefinitions = allowEditingValues ? [idField, nameField, numberField("weeklyCapacity", true), numberField("monthlyCapacity", true)] : resourceFields;
+  const sprintDefinitions = allowEditingValues ? [idField, nameField, stringField("theme"), dateField("startDate", true, true), dateField("endDate", true, true), numberField("order", true)] : sprintFields;
+  const exceptionDefinitions = allowEditingValues ? [dateField("date", true, true), ...exceptionFields.slice(1)] : exceptionFields;
+  arrayField(data, "tasks", paths.tasks, false, issues, (value, path) => checkTask(value, path, issues));
+  arrayField(data, "resources", paths.resources, false, issues, (value, path) => fields(value, path, "resource", resourceDefinitions, issues));
+  arrayField(data, "sprints", paths.sprints, false, issues, (value, path) => {
+    if (fields(value, path, "sprint", sprintDefinitions, issues) && !allowEditingValues && isISODate(value.startDate) && isISODate(value.endDate) && value.startDate > value.endDate) {
+      issues.push(issue("error", "sprint-date-range-invalid", `${path}.endDate`, "dateRange", {}, { ids: [value.id] }));
+    }
+  });
+  arrayField(data, "calendarExceptions", paths.calendarExceptions, false, issues, (value, path) => fields(value, path, "calendar-exception", exceptionDefinitions, issues));
+}
+var rootPaths = { tasks: "tasks", resources: "resources", sprints: "sprints", calendarExceptions: "calendarExceptions" };
+function rawSnapshot(version, path) {
+  const data = {}, paths = {};
+  for (const key of Object.keys(rootPaths)) {
+    const rawKey = `raw${key[0].toUpperCase()}${key.slice(1)}`;
+    paths[key] = `${path}.${rawKey}`;
+    if (has(version, rawKey)) data[key] = version[rawKey];
+  }
+  return { data, paths };
+}
+function checkVersion(value, path, issues, options) {
+  if (!fields(value, path, "version", [
+    idField,
+    nameField,
+    field("createdAt", (value2) => isNumber(value2) && Number.isFinite(new Date(value2).getTime()), true, "timestamp"),
+    booleanField("hasWbsInfo"),
+    booleanField("hasFullSnapshot")
+  ], issues)) return;
+  arrayField(value, "tasks", `${path}.tasks`, true, issues, (task, taskPath) => {
+    const definitions = [
+      idField,
+      nameField,
+      field("level", (value2) => Number.isInteger(value2) && value2 >= 0, false, "nonnegativeInteger"),
+      stringField("wbsNo"),
+      booleanField("hasChildren"),
+      booleanField("critical"),
+      booleanField("milestone"),
+      dateField("schedStart"),
+      dateField("schedFinish"),
+      numberField("duration", false, (value2) => value2 === null || nonnegative(value2)),
+      field("assigneeId", (id) => id === null || isId(id), false, "nullableId"),
+      progressField
+    ].map((definition) => [...definition]);
+    if (value.hasWbsInfo === true) {
+      for (const definition of definitions) {
+        if (["level", "wbsNo", "hasChildren", "critical", "milestone", "assigneeId", "progress"].includes(definition[0])) definition[2] = true;
+      }
+    }
+    if (fields(task, taskPath, "version-task", definitions, issues) && isISODate(task.schedStart) && isISODate(task.schedFinish) && task.schedFinish < task.schedStart) {
+      issues.push(issue("error", "version-task-date-range-invalid", `${taskPath}.schedFinish`, "dateRange", {}, { ids: [task.id] }));
+    }
+  }, "version-tasks-invalid");
+  const snapshot = rawSnapshot(value, path);
+  checkCollections(snapshot.data, snapshot.paths, issues, options);
+  if (value.hasFullSnapshot === true) {
+    for (const key of ["rawTasks", "rawResources", "rawSprints"]) {
+      if (!has(value, key)) issues.push(issue("error", "version-snapshot-incomplete", `${path}.${key}`, "snapshotMissing"));
+    }
+  }
+}
+function checkFieldShapes(data, options = {}) {
+  const issues = [];
+  if (!isObject(data)) return [issue("error", "project-not-object", "$", "object")];
+  checkCollections(data, rootPaths, issues, options);
+  if (has(data, "levelingOn") && typeof data.levelingOn !== "boolean") issues.push(issue("error", "levelingOn-invalid", "levelingOn", "boolean", { field: "levelingOn" }));
+  arrayField(data, "versions", "versions", false, issues, (value, path) => checkVersion(value, path, issues, options));
+  return issues;
+}
+function findParentCycles(tasks) {
+  const byId = new Map(tasks.map((task) => [task.id, task]));
+  const cycles = [], settled = /* @__PURE__ */ new Set();
+  for (const start of tasks) {
+    const route = [], indices = /* @__PURE__ */ new Map();
+    let task = start;
+    while (task && !settled.has(task.id)) {
+      if (indices.has(task.id)) {
+        cycles.push(route.slice(indices.get(task.id)));
+        break;
+      }
+      indices.set(task.id, route.length);
+      route.push(task.id);
+      task = task.parentId == null ? null : byId.get(task.parentId);
+    }
+    route.forEach((id) => settled.add(id));
+  }
+  return cycles;
+}
+function duplicateIds(values, path, kind, issues) {
+  const seen = /* @__PURE__ */ new Set();
+  values.forEach((value, i) => {
+    if (seen.has(value.id)) issues.push(issue("error", `duplicate-${kind}-id`, `${path}[${i}].id`, "duplicateId", { id: value.id }, { ids: [value.id] }));
+    seen.add(value.id);
+  });
+  return seen;
+}
+function projectDependencyIssue(value, tasks, path = "tasks") {
+  const { params, path: dependencyPath, ...detail } = value;
+  const index = tasks.findIndex((task2) => task2.id === value.ids[0]);
+  const task = tasks[index];
+  const depIndex = task?.predecessors?.findIndex((dep) => dep.id === value.predecessorId) ?? -1;
+  const location = index < 0 ? path : `${path}[${index}].predecessors${depIndex < 0 ? "" : `[${depIndex}].id`}`;
+  return {
+    ...detail,
+    path: location,
+    ...dependencyPath ? { dependencyPath } : {},
+    ...value.code === "dependency-cycle" || value.code === "self-dependency" ? { blocking: false } : {},
+    messageKey: "projectValidation.dependency",
+    params: { ...params, subjectName: task?.name || task?.id || null }
+  };
+}
+function collectionIntegrity(data, paths, issues) {
+  const tasks = data.tasks || [], resources = data.resources || [], sprints = data.sprints || [];
+  const taskIds = duplicateIds(tasks, paths.tasks, "task", issues);
+  const resourceIds = duplicateIds(resources, paths.resources, "resource", issues);
+  const sprintIds = duplicateIds(sprints, paths.sprints, "sprint", issues);
+  const cycles = findParentCycles(tasks);
+  for (const ids of cycles) {
+    const index = tasks.findIndex((task) => task.id === ids[0]);
+    issues.push(issue("error", "parent-cycle", `${paths.tasks}[${index}].parentId`, "parentCycle", { route: ids }, { ids }));
+  }
+  const groups = new Set(tasks.map((task) => task.parentId));
+  tasks.forEach((task, i) => {
+    const path = `${paths.tasks}[${i}]`;
+    if (task.parentId != null && !taskIds.has(task.parentId)) issues.push(issue("error", "parent-missing", `${path}.parentId`, "parentMissing", { id: task.parentId }, { ids: [task.id] }));
+    if (task.assigneeId && !resourceIds.has(task.assigneeId)) issues.push(issue("warning", "assignee-missing", `${path}.assigneeId`, "assigneeMissing", { id: task.assigneeId }, { ids: [task.id] }));
+    (task.sprintIds || (task.sprintId ? [task.sprintId] : [])).forEach((id, j) => {
+      if (!sprintIds.has(id)) issues.push(issue("warning", "sprint-missing", task.sprintIds ? `${path}.sprintIds[${j}]` : `${path}.sprintId`, "sprintMissing", { id }, { ids: [task.id] }));
+    });
+    if (task.predecessors?.length && groups.has(task.id)) issues.push(issue("warning", "group-has-predecessors", `${path}.predecessors`, "groupPredecessors", { name: task.name }, { ids: [task.id] }));
+  });
+  if (!cycles.length && taskIds.size === tasks.length) {
+    issues.push(...detectDependencyIssues(tasks).map((value) => projectDependencyIssue(value, tasks, paths.tasks)));
+  }
+  const overlaps = [...computeOverlappingSprintIds(sprints)];
+  if (overlaps.length) issues.push(issue("warning", "sprint-overlap", paths.sprints, "sprintOverlap", { ids: overlaps }, { ids: overlaps }));
+  const byDate = /* @__PURE__ */ new Map();
+  (data.calendarExceptions || []).forEach((exception, i) => {
+    const prev = byDate.get(exception.date);
+    if (prev && prev !== exception.type) issues.push(issue("warning", "calendar-exception-conflict", `${paths.calendarExceptions}[${i}].type`, "calendarConflict", { date: exception.date }));
+    byDate.set(exception.date, exception.type);
+  });
+}
+function analyzeIntegrity(data, options = {}) {
+  const issues = checkFieldShapes(data, options);
+  if (issues.some(isBlockingProjectIssue)) return issues;
+  collectionIntegrity(data, rootPaths, issues);
+  duplicateIds(data.versions || [], "versions", "version", issues);
+  (data.versions || []).forEach((version, i) => {
+    const path = `versions[${i}]`;
+    duplicateIds(version.tasks, `${path}.tasks`, "version-task", issues);
+    const snapshot = rawSnapshot(version, path);
+    collectionIntegrity(snapshot.data, snapshot.paths, issues);
+  });
+  return issues;
+}
+function validateProjectData(data, options = {}) {
+  if (!isObject(data)) return checkFieldShapes(data, options);
+  const issues = [];
+  if (data.schemaVersion !== PROJECT_SCHEMA_VERSION) issues.push(issue("error", "schema-version-invalid", "schemaVersion", "schemaVersion", { version: PROJECT_SCHEMA_VERSION }));
+  if (!isISODateTime(data.exportedAt)) issues.push(issue("error", "exportedAt-invalid", "exportedAt", "dateTime", { field: "exportedAt" }));
+  for (const key of ["tasks", "resources", "sprints", "versions"]) {
+    if (!has(data, key)) issues.push(issue("error", `${key}-invalid`, key, "requiredArray"));
+  }
+  return [...issues, ...analyzeIntegrity(data, options)];
+}
+
+// src/lib/exportUtils.js
 var PROJECT_JSON_SCHEMA = Object.freeze({
   $schema: "https://json-schema.org/draft/2020-12/schema",
   $id: "https://lhideki.github.io/project-scheduler/schema/project-export-v1.json",
@@ -5016,39 +5399,41 @@ var PROJECT_JSON_SCHEMA = Object.freeze({
 function cloneJSON(value) {
   return JSON.parse(JSON.stringify(value));
 }
-function isObject(value) {
-  return !!value && typeof value === "object" && !Array.isArray(value);
+function rejectInvalidProject(issues) {
+  if (!issues.some(isBlockingProjectIssue)) return;
+  const error = new Error("invalid_project_json");
+  error.issues = issues;
+  throw error;
 }
-function normalizeProjectVersions(versions) {
-  if (!Array.isArray(versions) || versions.some((v) => !isObject(v))) {
-    throw new Error("invalid_project_json");
-  }
-  return cloneJSON(versions).map((version) => ({
-    ...version,
-    hasFullSnapshot: Array.isArray(version.rawTasks) && Array.isArray(version.rawResources) && Array.isArray(version.rawSprints)
-  }));
+function cloneVersionSnapshots(versions) {
+  return cloneJSON(versions).map((version) => {
+    if (!version || typeof version !== "object" || Array.isArray(version)) return version;
+    return {
+      ...version,
+      hasFullSnapshot: Array.isArray(version.rawTasks) && Array.isArray(version.rawResources) && Array.isArray(version.rawSprints)
+    };
+  });
 }
-function normalizeImportedProject(data) {
-  if (!isObject(data) || data.schemaVersion !== PROJECT_SCHEMA_VERSION || typeof data.exportedAt !== "string" || !Array.isArray(data.tasks) || !Array.isArray(data.resources) || !Array.isArray(data.sprints) || !Array.isArray(data.versions) || data.calendarExceptions !== void 0 && !Array.isArray(data.calendarExceptions)) {
-    throw new Error("invalid_project_json");
-  }
+function normalizeImportedProject(data, options = {}) {
+  rejectInvalidProject(validateProjectData(data, options));
   return {
     schemaVersion: data.schemaVersion,
     exportedAt: data.exportedAt,
     tasks: cloneJSON(data.tasks),
     resources: cloneJSON(data.resources),
     sprints: cloneJSON(data.sprints),
-    versions: normalizeProjectVersions(data.versions),
-    // 旧形式のJSON（levelingOn未対応）を読み込んだ場合は false にフォールバックする。
-    levelingOn: typeof data.levelingOn === "boolean" ? data.levelingOn : false,
-    // 旧形式のJSON（calendarExceptions キーなし）のみ空配列にフォールバックする。
-    calendarExceptions: Array.isArray(data.calendarExceptions) ? cloneJSON(data.calendarExceptions) : []
+    versions: cloneVersionSnapshots(data.versions),
+    levelingOn: data.levelingOn === void 0 ? false : data.levelingOn,
+    calendarExceptions: data.calendarExceptions === void 0 ? [] : cloneJSON(data.calendarExceptions)
   };
 }
 var DEFAULT_MERMAID_LABELS = MESSAGES[DEFAULT_LOCALE].mermaid;
 
 // src/agent/cli.js
 var tJa = createAppTranslator("ja");
+function formatIssue(issue2) {
+  return { ...issue2, message: formatProjectIssue(tJa, issue2) };
+}
 function fail(message, extra = {}) {
   process.stdout.write(JSON.stringify({ ok: false, error: message, ...extra }, null, 2) + "\n");
   process.exit(1);
@@ -5076,7 +5461,7 @@ function normalizeOrFail(raw, path) {
     return normalizeImportedProject(raw);
   } catch (e) {
     if (e && e.message === "invalid_project_json") {
-      fail(`\u4FDD\u5B58\u30D5\u30A9\u30FC\u30DE\u30C3\u30C8\u304C\u6B63\u3057\u304F\u3042\u308A\u307E\u305B\u3093\uFF08schemaVersion:1 \u3068\u5FC5\u9808\u9805\u76EE\u3092\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044\uFF09: ${path}`);
+      fail(`\u4FDD\u5B58\u30D5\u30A9\u30FC\u30DE\u30C3\u30C8\u304C\u6B63\u3057\u304F\u3042\u308A\u307E\u305B\u3093\uFF08schemaVersion:1 \u3068\u5FC5\u9808\u9805\u76EE\u3092\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044\uFF09: ${path}`, { issues: (e.issues || []).map(formatIssue) });
     }
     fail(`\u4FDD\u5B58\u30D5\u30A9\u30FC\u30DE\u30C3\u30C8\u3092\u6B63\u898F\u5316\u3067\u304D\u307E\u305B\u3093: ${path}`, { detail: String(e && e.message || e) });
   }
@@ -5130,7 +5515,7 @@ function computeSchedule(data, opts = {}) {
     if (v.schedFinish && v.schedFinish > projectEnd) projectEnd = v.schedFinish;
   });
   const sprintConflicts = detectSprintConflicts(tasks, sprints, schedule).map(formatSprintConflict);
-  const dependencyIssues = detectDependencyIssues(tasks, schedule, cal).map((issue) => formatDependencyIssue(issue, tasks));
+  const dependencyIssues = detectDependencyIssues(tasks, schedule, cal).map((issue2) => formatDependencyIssue(issue2, tasks));
   return { projectStart, cal, cpm, schedule, projectEnd, leveling, levelWarnings, sprintConflicts, dependencyIssues };
 }
 function scheduleRows(data, schedule) {
@@ -5155,14 +5540,8 @@ function scheduleRows(data, schedule) {
     };
   });
 }
-function nameOf(tasks, id) {
-  const t = tasks.find((x) => x.id === id);
-  return t ? t.name : id;
-}
-function formatDependencyIssue(issue, tasks) {
-  const { code, severity, ids, params, ...detail } = issue;
-  const subject = code === "dependency-cycle" ? "" : `\u300C${nameOf(tasks, ids[0])}\u300D: `;
-  return { severity, code, ids, message: `${subject}${formatDependencyIssueMessage(tJa, issue)}`, ...detail };
+function formatDependencyIssue(issue2, tasks) {
+  return formatIssue(projectDependencyIssue(issue2, tasks));
 }
 function formatSprintConflict(conflict) {
   const { taskId, name, wbsNo, reasons } = conflict;
@@ -5173,192 +5552,6 @@ function formatSprintConflict(conflict) {
     sprintName: formatSprintConflictSprintNames(tJa, conflict),
     reasons: reasons.map((r) => formatSprintConflictReason(tJa, r))
   };
-}
-var ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-function isISODate(v) {
-  if (typeof v !== "string" || !ISO_DATE_RE.test(v)) return false;
-  const d = /* @__PURE__ */ new Date(`${v}T00:00:00Z`);
-  return !Number.isNaN(d.getTime()) && v === d.toISOString().slice(0, 10);
-}
-function isFiniteNumber(v) {
-  return typeof v === "number" && Number.isFinite(v);
-}
-function checkFieldShapes(data) {
-  const issues = [];
-  const label = (t, i) => `\u30BF\u30B9\u30AF#${i + 1}${t && t.name ? `\u300C${t.name}\u300D` : t && t.id ? `\uFF08id: ${t.id}\uFF09` : ""}`;
-  const DEP_TYPES = /* @__PURE__ */ new Set(["FS", "SS", "FF", "SF"]);
-  (data.tasks || []).forEach((t, i) => {
-    if (typeof t !== "object" || t === null) {
-      issues.push({ severity: "error", code: "task-not-object", message: `\u30BF\u30B9\u30AF#${i + 1} \u304C\u30AA\u30D6\u30B8\u30A7\u30AF\u30C8\u3067\u306F\u3042\u308A\u307E\u305B\u3093` });
-      return;
-    }
-    if (typeof t.id !== "string" || !t.id) {
-      issues.push({ severity: "error", code: "task-id-invalid", message: `${label(t, i)} \u306E id \u304C\u6587\u5B57\u5217\u3067\u306F\u3042\u308A\u307E\u305B\u3093` });
-    }
-    if (t.parentId != null && typeof t.parentId !== "string") {
-      issues.push({ severity: "error", code: "task-parentId-invalid", ids: [t.id], message: `${label(t, i)} \u306E parentId \u304C\u6587\u5B57\u5217\u3067\u3082 null \u3067\u3082\u3042\u308A\u307E\u305B\u3093` });
-    }
-    if (t.startDate != null && !isISODate(t.startDate)) {
-      issues.push({ severity: "error", code: "task-startDate-invalid", ids: [t.id], message: `${label(t, i)} \u306E startDate\u300C${t.startDate}\u300D\u304C YYYY-MM-DD \u5F62\u5F0F\u3067\u306F\u3042\u308A\u307E\u305B\u3093` });
-    }
-    if (t.fixedDate != null && !isISODate(t.fixedDate)) {
-      issues.push({ severity: "error", code: "task-fixedDate-invalid", ids: [t.id], message: `${label(t, i)} \u306E fixedDate\u300C${t.fixedDate}\u300D\u304C YYYY-MM-DD \u5F62\u5F0F\u3067\u306F\u3042\u308A\u307E\u305B\u3093` });
-    }
-    if (t.duration != null && !isFiniteNumber(t.duration)) {
-      issues.push({ severity: "error", code: "task-duration-invalid", ids: [t.id], message: `${label(t, i)} \u306E duration \u304C\u6570\u5024\u3067\u306F\u3042\u308A\u307E\u305B\u3093` });
-    }
-    if (t.progress != null && !isFiniteNumber(t.progress)) {
-      issues.push({ severity: "error", code: "task-progress-invalid", ids: [t.id], message: `${label(t, i)} \u306E progress \u304C\u6570\u5024\u3067\u306F\u3042\u308A\u307E\u305B\u3093` });
-    }
-    if (t.sprintIds != null && !Array.isArray(t.sprintIds)) {
-      issues.push({ severity: "error", code: "task-sprintIds-invalid", ids: [t.id], message: `${label(t, i)} \u306E sprintIds \u304C\u914D\u5217\u3067\u306F\u3042\u308A\u307E\u305B\u3093` });
-    }
-    if (t.predecessors != null && !Array.isArray(t.predecessors)) {
-      issues.push({ severity: "error", code: "task-predecessors-invalid", ids: [t.id], message: `${label(t, i)} \u306E predecessors \u304C\u914D\u5217\u3067\u306F\u3042\u308A\u307E\u305B\u3093` });
-    } else {
-      (t.predecessors || []).forEach((p, j) => {
-        if (typeof p !== "object" || p === null || typeof p.id !== "string" || !p.id) {
-          issues.push({ severity: "error", code: "dependency-id-invalid", ids: [t.id], message: `${label(t, i)} \u306E\u5148\u884C\u30BF\u30B9\u30AF#${j + 1} \u306B id \u304C\u3042\u308A\u307E\u305B\u3093` });
-        }
-        if (!DEP_TYPES.has(p && p.type)) {
-          issues.push({ severity: "error", code: "dependency-type-invalid", ids: [t.id], message: `${label(t, i)} \u306E\u5148\u884C\u30BF\u30B9\u30AF#${j + 1} \u306E type\u300C${p && p.type}\u300D\u304C FS/SS/FF/SF \u3067\u306F\u3042\u308A\u307E\u305B\u3093` });
-        }
-        if (p && p.lag != null && !isFiniteNumber(p.lag)) {
-          issues.push({ severity: "error", code: "dependency-lag-invalid", ids: [t.id], message: `${label(t, i)} \u306E\u5148\u884C\u30BF\u30B9\u30AF#${j + 1} \u306E lag \u304C\u6570\u5024\u3067\u306F\u3042\u308A\u307E\u305B\u3093` });
-        }
-      });
-    }
-  });
-  (data.resources || []).forEach((r, i) => {
-    if (typeof r !== "object" || r === null || typeof r.id !== "string" || !r.id) {
-      issues.push({ severity: "error", code: "resource-id-invalid", message: `\u30EA\u30BD\u30FC\u30B9#${i + 1} \u306E id \u304C\u6587\u5B57\u5217\u3067\u306F\u3042\u308A\u307E\u305B\u3093` });
-    }
-    if (r && r.weeklyCapacity != null && !isFiniteNumber(r.weeklyCapacity)) {
-      issues.push({ severity: "error", code: "resource-weeklyCapacity-invalid", message: `\u30EA\u30BD\u30FC\u30B9#${i + 1} \u306E weeklyCapacity \u304C\u6570\u5024\u3067\u306F\u3042\u308A\u307E\u305B\u3093` });
-    }
-    if (r && r.monthlyCapacity != null && !isFiniteNumber(r.monthlyCapacity)) {
-      issues.push({ severity: "error", code: "resource-monthlyCapacity-invalid", message: `\u30EA\u30BD\u30FC\u30B9#${i + 1} \u306E monthlyCapacity \u304C\u6570\u5024\u3067\u306F\u3042\u308A\u307E\u305B\u3093` });
-    }
-  });
-  (data.sprints || []).forEach((s, i) => {
-    if (typeof s !== "object" || s === null || typeof s.id !== "string" || !s.id) {
-      issues.push({ severity: "error", code: "sprint-id-invalid", message: `\u30B9\u30D7\u30EA\u30F3\u30C8#${i + 1} \u306E id \u304C\u6587\u5B57\u5217\u3067\u306F\u3042\u308A\u307E\u305B\u3093` });
-    }
-    if (s && s.startDate != null && !isISODate(s.startDate)) {
-      issues.push({ severity: "error", code: "sprint-startDate-invalid", message: `\u30B9\u30D7\u30EA\u30F3\u30C8#${i + 1} \u306E startDate\u300C${s.startDate}\u300D\u304C YYYY-MM-DD \u5F62\u5F0F\u3067\u306F\u3042\u308A\u307E\u305B\u3093` });
-    }
-    if (s && s.endDate != null && !isISODate(s.endDate)) {
-      issues.push({ severity: "error", code: "sprint-endDate-invalid", message: `\u30B9\u30D7\u30EA\u30F3\u30C8#${i + 1} \u306E endDate\u300C${s.endDate}\u300D\u304C YYYY-MM-DD \u5F62\u5F0F\u3067\u306F\u3042\u308A\u307E\u305B\u3093` });
-    }
-  });
-  if (data.calendarExceptions != null && !Array.isArray(data.calendarExceptions)) {
-    issues.push({ severity: "error", code: "calendarExceptions-invalid", message: "calendarExceptions \u304C\u914D\u5217\u3067\u306F\u3042\u308A\u307E\u305B\u3093" });
-  } else {
-    (data.calendarExceptions || []).forEach((e, i) => {
-      if (typeof e !== "object" || e === null) {
-        issues.push({ severity: "error", code: "calendar-exception-not-object", message: `\u30AB\u30EC\u30F3\u30C0\u30FC\u4F8B\u5916#${i + 1} \u304C\u30AA\u30D6\u30B8\u30A7\u30AF\u30C8\u3067\u306F\u3042\u308A\u307E\u305B\u3093` });
-        return;
-      }
-      if (!isISODate(e.date)) {
-        issues.push({ severity: "error", code: "calendar-exception-date-invalid", message: `\u30AB\u30EC\u30F3\u30C0\u30FC\u4F8B\u5916#${i + 1} \u306E date\u300C${e.date}\u300D\u304C YYYY-MM-DD \u5F62\u5F0F\u3067\u306F\u3042\u308A\u307E\u305B\u3093` });
-      }
-      if (e.type !== "holiday" && e.type !== "workday") {
-        issues.push({ severity: "error", code: "calendar-exception-type-invalid", message: `\u30AB\u30EC\u30F3\u30C0\u30FC\u4F8B\u5916#${i + 1} \u306E type\u300C${e.type}\u300D\u304C holiday / workday \u3067\u306F\u3042\u308A\u307E\u305B\u3093` });
-      }
-    });
-  }
-  return issues;
-}
-function findParentCycles(tasks) {
-  const byId = new Map(tasks.map((t) => [t.id, t]));
-  const cycles = [];
-  const reportedKeys = /* @__PURE__ */ new Set();
-  const settled = /* @__PURE__ */ new Set();
-  for (const start of tasks) {
-    if (settled.has(start.id)) continue;
-    const path = [];
-    const inPath = /* @__PURE__ */ new Set();
-    let cur = start;
-    let hitCycle = false;
-    while (cur && cur.parentId != null) {
-      if (inPath.has(cur.id)) {
-        const cyc = path.slice(path.indexOf(cur.id));
-        const key = [...cyc].sort().join("\0");
-        if (!reportedKeys.has(key)) {
-          reportedKeys.add(key);
-          cycles.push(cyc);
-        }
-        hitCycle = true;
-        break;
-      }
-      path.push(cur.id);
-      inPath.add(cur.id);
-      cur = byId.get(cur.parentId);
-    }
-    if (!hitCycle) path.forEach((id) => settled.add(id));
-  }
-  return cycles;
-}
-function analyzeIntegrity(data) {
-  const tasks = data.tasks || [];
-  const shapeIssues = checkFieldShapes(data);
-  if (shapeIssues.some((i) => i.severity === "error")) return shapeIssues;
-  const issues = [...shapeIssues];
-  const seen = /* @__PURE__ */ new Set();
-  const dup = /* @__PURE__ */ new Set();
-  for (const t of tasks) {
-    if (seen.has(t.id)) dup.add(t.id);
-    seen.add(t.id);
-  }
-  for (const id of dup) {
-    issues.push({ severity: "error", code: "duplicate-task-id", ids: [id], message: `\u30BF\u30B9\u30AFID\u300C${id}\u300D\u304C\u91CD\u8907\u3057\u3066\u3044\u307E\u3059` });
-  }
-  for (const cyc of findParentCycles(tasks)) {
-    issues.push({
-      severity: "error",
-      code: "parent-cycle",
-      ids: cyc,
-      message: `\u89AA\u5B50\u95A2\u4FC2\u304C\u5FAA\u74B0\u3057\u3066\u3044\u307E\u3059: ${cyc.map((id) => nameOf(tasks, id)).join(" \u2192 ")}`
-    });
-  }
-  const taskIds = seen;
-  const resIds = new Set((data.resources || []).map((r) => r.id));
-  const sprintIds = new Set((data.sprints || []).map((s) => s.id));
-  for (const t of tasks) {
-    if (t.parentId != null && !taskIds.has(t.parentId)) {
-      issues.push({ severity: "error", code: "parent-missing", ids: [t.id], message: `\u300C${t.name}\u300D\u306E\u89AA\u30BF\u30B9\u30AF\u300C${t.parentId}\u300D\u304C\u5B58\u5728\u3057\u307E\u305B\u3093` });
-    }
-    if (t.assigneeId && !resIds.has(t.assigneeId)) {
-      issues.push({ severity: "warning", code: "assignee-missing", ids: [t.id], message: `\u300C${t.name}\u300D\u306E\u62C5\u5F53\u8005\u300C${t.assigneeId}\u300D\u304C\u5B58\u5728\u3057\u307E\u305B\u3093` });
-    }
-    for (const sid of t.sprintIds || []) {
-      if (!sprintIds.has(sid)) {
-        issues.push({ severity: "warning", code: "sprint-missing", ids: [t.id], message: `\u300C${t.name}\u300D\u306E\u30B9\u30D7\u30EA\u30F3\u30C8\u53C2\u7167\u300C${sid}\u300D\u304C\u5B58\u5728\u3057\u307E\u305B\u3093` });
-      }
-    }
-    if ((t.predecessors || []).length && isGroupId(tasks, t.id)) {
-      issues.push({ severity: "warning", code: "group-has-predecessors", ids: [t.id], message: `\u30B0\u30EB\u30FC\u30D7\u300C${t.name}\u300D\u306B\u5148\u884C\u30BF\u30B9\u30AF\u304C\u8A2D\u5B9A\u3055\u308C\u3066\u3044\u307E\u3059\uFF08\u4F9D\u5B58\u306F\u30EA\u30FC\u30D5\u30BF\u30B9\u30AF\u306B\u4ED8\u3051\u3066\u304F\u3060\u3055\u3044\uFF09` });
-    }
-  }
-  for (const issue of detectDependencyIssues(tasks)) {
-    issues.push(formatDependencyIssue(issue, tasks));
-  }
-  const overlaps = computeOverlappingSprintIds(data.sprints || []);
-  if (overlaps.size) {
-    issues.push({ severity: "warning", code: "sprint-overlap", ids: [...overlaps], message: `\u671F\u9593\u304C\u91CD\u8907\u3057\u3066\u3044\u308B\u30B9\u30D7\u30EA\u30F3\u30C8\u304C\u3042\u308A\u307E\u3059: ${[...overlaps].join(", ")}` });
-  }
-  const exByDate = /* @__PURE__ */ new Map();
-  for (const e of data.calendarExceptions || []) {
-    if (!e || typeof e.date !== "string") continue;
-    if (!exByDate.has(e.date)) exByDate.set(e.date, /* @__PURE__ */ new Set());
-    exByDate.get(e.date).add(e.type);
-  }
-  for (const [date, types] of exByDate) {
-    if (types.has("holiday") && types.has("workday")) {
-      issues.push({ severity: "warning", code: "calendar-exception-conflict", message: `${date} \u306B\u4F11\u65E5\u3068\u7A3C\u50CD\u65E5\u306E\u4E21\u65B9\u304C\u6307\u5B9A\u3055\u308C\u3066\u3044\u307E\u3059\uFF08\u7A3C\u50CD\u65E5\u304C\u512A\u5148\u3055\u308C\u307E\u3059\uFF09` });
-    }
-  }
-  return issues;
 }
 function buildVersionSnapshot(data, schedule, name) {
   const flatAll = buildFlatList(data.tasks, /* @__PURE__ */ new Set());
@@ -5419,8 +5612,8 @@ function tryComputeSchedule(data, opts) {
 }
 var SCHEDULE_BLOCKING_CODES = /* @__PURE__ */ new Set(["duplicate-task-id", "parent-cycle"]);
 function validateProject(data, opts = {}) {
-  const leveling = opts.leveling === void 0 ? !!data.levelingOn : !!opts.leveling;
-  const issues = analyzeIntegrity(data);
+  const leveling = opts.leveling === void 0 ? !!data?.levelingOn : !!opts.leveling;
+  const issues = data && Object.hasOwn(data, "schemaVersion") ? validateProjectData(data) : analyzeIntegrity(data);
   let scheduleChecks;
   const blocking = checkFieldShapes(data).find((i) => i.severity === "error") || issues.find((i) => i.severity === "error" && SCHEDULE_BLOCKING_CODES.has(i.code));
   if (blocking) {
@@ -5435,7 +5628,7 @@ function validateProject(data, opts = {}) {
       scheduleChecks = { performed: false, leveling, reason: computed.error };
     }
   }
-  return { valid: !issues.some((i) => i.severity === "error"), issues, scheduleChecks };
+  return { valid: !issues.some((i) => i.severity === "error"), issues: issues.map(formatIssue), scheduleChecks };
 }
 function cmdValidate(positional, opts) {
   const [path] = positional;
@@ -5451,8 +5644,9 @@ function cmdValidate(positional, opts) {
       file: path,
       valid: false,
       schemaValid: false,
-      issues: [{
+      issues: e?.issues?.map(formatIssue) || [{
         severity: "error",
+        path: "$",
         code: schemaError ? "schema" : "normalize",
         message: schemaError ? "\u4FDD\u5B58\u30D5\u30A9\u30FC\u30DE\u30C3\u30C8\u304C\u6B63\u3057\u304F\u3042\u308A\u307E\u305B\u3093\uFF08schemaVersion:1 \u3068\u5FC5\u9808\u30C8\u30C3\u30D7\u30EC\u30D9\u30EB\u9805\u76EE tasks/resources/sprints/versions/exportedAt \u3092\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044\uFF09" : String(e && e.message || e)
       }]
@@ -5479,7 +5673,7 @@ function cmdRecalc(positional, opts) {
   const [path] = positional;
   if (!path) fail("\u4F7F\u3044\u65B9: recalc <file> [--leveling on|off|auto]");
   const data = normalizeOrFail(readProjectFile(path), path);
-  const integrity = analyzeIntegrity(data);
+  const integrity = analyzeIntegrity(data).map(formatIssue);
   const leveling = resolveLeveling(opts.leveling, data);
   const computed = tryComputeSchedule(data, { respectManualPins: true, leveling });
   if (!computed.ok) {
@@ -5510,7 +5704,7 @@ function cmdPlan(positional, opts) {
   }
   const original = normalizeOrFail(readProjectFile(originalPath), originalPath);
   const edited = normalizeOrFail(readProjectFile(editedPath), editedPath);
-  const integrity = analyzeIntegrity(edited);
+  const integrity = analyzeIntegrity(edited).map(formatIssue);
   if (integrity.some((i) => i.severity === "error")) {
     return emit({
       command: "plan",
@@ -5526,7 +5720,7 @@ function cmdPlan(positional, opts) {
   const afterLeveling = resolveLeveling(opts.leveling, edited);
   const beforeComputed = tryComputeSchedule(original, { respectManualPins: true, leveling: beforeLeveling });
   if (!beforeComputed.ok) {
-    return emit({ command: "plan", original: originalPath, edited: editedPath, blocked: true, reason: beforeComputed.error, integrityIssues: analyzeIntegrity(original) });
+    return emit({ command: "plan", original: originalPath, edited: editedPath, blocked: true, reason: beforeComputed.error, integrityIssues: analyzeIntegrity(original).map(formatIssue) });
   }
   const before = beforeComputed.result;
   let proposedTasks = edited.tasks;
@@ -5630,7 +5824,7 @@ function cmdExplain(positional, opts) {
   const leveling = resolveLeveling(opts.leveling, data);
   const computed = tryComputeSchedule(data, { respectManualPins: true, leveling });
   if (!computed.ok) {
-    return emit({ command: "explain", file: path, computeFailed: true, error: computed.error, integrityIssues: analyzeIntegrity(data) });
+    return emit({ command: "explain", file: path, computeFailed: true, error: computed.error, integrityIssues: analyzeIntegrity(data).map(formatIssue) });
   }
   const r = computed.result;
   const s = r.schedule.get(taskId) || {};

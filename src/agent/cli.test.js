@@ -1,4 +1,15 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
+import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
+import {
+  validateProjectData, analyzeIntegrity as sharedAnalyzeIntegrity, checkFieldShapes as sharedCheckFieldShapes,
+} from "../lib/projectValidation.js";
+import { normalizeImportedProject } from "../lib/exportUtils.js";
+import { createAppTranslator, formatProjectIssue } from "../lib/i18n.js";
+const tJa = createAppTranslator("ja");
 
 import { seedData } from "../lib/seedData.js";
 import { buildProjectExport } from "../lib/exportUtils.js";
@@ -138,7 +149,7 @@ describe("analyzeIntegrity", () => {
     const self = analyzeIntegrity(data).filter(i => i.code === "self-dependency");
     expect(self).toHaveLength(1);
     expect(self[0]).toMatchObject({ severity: "error", ids: [leaf.id] });
-    expect(self[0].message).toBe(`「${leaf.name}」: 自分自身を先行タスクにしています（この依存関係は計算に使われていません）`);
+    expect(formatProjectIssue(tJa, self[0])).toBe(`「${leaf.name}」: 自分自身を先行タスクにしています（この依存関係は計算に使われていません）`);
   });
 });
 
@@ -151,7 +162,8 @@ describe("analyzeIntegrity: 循環参照（src/lib/dependencyIssues.js と共通
     );
     const cycles = analyzeIntegrity(data).filter(i => i.code === "dependency-cycle");
     expect(cycles).toHaveLength(1);
-    expect(cycles[0]).toMatchObject({ severity: "error", ids: ["a", "b"], path: ["a", "b", "a"], message: "循環参照: 「A」→「B」→「A」" });
+    expect(cycles[0]).toMatchObject({ severity: "error", ids: ["a", "b"], path: "tasks[12].predecessors", dependencyPath: ["a", "b", "a"], blocking: false });
+    expect(formatProjectIssue(tJa, cycles[0])).toBe("循環参照: 「A」→「B」→「A」");
   });
 
   it("グループを介した循環（AがグループGに依存し、G配下のBがAに依存）を検出する", () => {
@@ -164,7 +176,7 @@ describe("analyzeIntegrity: 循環参照（src/lib/dependencyIssues.js と共通
     const cycles = analyzeIntegrity(data).filter(i => i.code === "dependency-cycle");
     expect(cycles).toHaveLength(1);
     expect(new Set(cycles[0].ids)).toEqual(new Set(["A", "G", "B"]));
-    expect(cycles[0].message).toContain("「B」はグループ「G」の配下");
+    expect(formatProjectIssue(tJa, cycles[0])).toContain("「B」はグループ「G」の配下");
   });
 });
 
@@ -369,6 +381,8 @@ describe("buildVersionSnapshot", () => {
     expect(Array.isArray(v.rawResources)).toBe(true);
     expect(Array.isArray(v.rawSprints)).toBe(true);
     expect(Array.isArray(v.rawCalendarExceptions)).toBe(true);
+    expect(normalizeImportedProject({ ...data, versions: [v] }).versions[0]).toEqual(JSON.parse(JSON.stringify(v)));
+    expect(checkFieldShapes(data)).toEqual([]); // Snapshot requirements do not leak into normal task validation.
   });
 
   it("rawCalendarExceptions にカレンダー例外を含める", () => {
@@ -449,5 +463,71 @@ describe("applyAutoSchedule", () => {
     const written = tasks.find(t => t.id === ms.id);
     expect(written.startDate).toBe(ms.fixedDate);
     expect(changed.some(c => c.id === ms.id)).toBe(true);
+  });
+});
+
+
+describe("shared UI/CLI project validation", () => {
+  const temporaryDirectories = [];
+  afterEach(() => {
+    temporaryDirectories.splice(0).forEach(path => rmSync(path, { recursive: true, force: true }));
+  });
+  function runCli(data, command = "validate") {
+    const directory = mkdtempSync(join(tmpdir(), "scheduler-validation-"));
+    temporaryDirectories.push(directory);
+    const path = join(directory, "project.json");
+    const text = JSON.stringify(data);
+    writeFileSync(path, text);
+    const result = spawnSync(process.execPath, [fileURLToPath(new URL("./cli.js", import.meta.url)), command, path], { encoding: "utf8" });
+    expect(result.stderr).toBe("");
+    expect(readFileSync(path, "utf8")).toBe(text); // CLI remains read-only even on failure
+    return { ...result, report: JSON.parse(result.stdout) };
+  }
+  const signature = issues => issues.map(({ severity, code, path, blocking, params }) => ({ severity, code, path, params, ...(blocking === undefined ? {} : { blocking }) }));
+
+  it("exports the exact shared functions instead of maintaining a CLI-specific copy", () => {
+    expect(analyzeIntegrity).toBe(sharedAnalyzeIntegrity);
+    expect(checkFieldShapes).toBe(sharedCheckFieldShapes);
+  });
+
+  it.each([
+    ["null task", data => { data.tasks = [null]; }],
+    ["bad number", data => { data.tasks[0].duration = "one"; }],
+    ["duplicate IDs", data => { data.resources.push({ ...data.resources[0] }); }],
+    ["missing predecessor", data => { data.tasks[1].predecessors = [{ id: "missing", type: "FS", lag: 0 }]; }],
+    ["broken version raw data", data => { data.versions = [{ id: "v1", name: "Bad", createdAt: 1, tasks: [], rawTasks: [null] }]; }],
+    ["bad top-level schema", data => { data.schemaVersion = 2; }],
+  ])("reports identical common issues for %s in UI normalization and CLI stdout", (_, mutate) => {
+    const data = seedProject();
+    mutate(data);
+    const expected = validateProjectData(data);
+    let error;
+    try { normalizeImportedProject(data); } catch (caught) { error = caught; }
+    expect(signature(error.issues)).toEqual(signature(expected));
+    const { status, report } = runCli(data);
+    expect(status).toBe(0); // validation findings are a successful CLI report
+    expect(report).toMatchObject({ ok: true, command: "validate", valid: false });
+    expect(signature(report.issues)).toEqual(signature(expected));
+  });
+
+  it("accepts repairable schedule errors on import while retaining CLI error severity", () => {
+    const data = seedProject();
+    const leaf = data.tasks.find(task => !data.tasks.some(child => child.parentId === task.id));
+    leaf.predecessors = [{ id: leaf.id, type: "FS", lag: 0 }];
+    expect(() => normalizeImportedProject(data)).not.toThrow();
+    const expected = validateProjectData(data);
+    const { report } = runCli(data);
+    expect(report.valid).toBe(false);
+    expect(signature(report.issues.filter(item => !["dependency-violation", "fixed-milestone-overrun"].includes(item.code)))).toEqual(signature(expected));
+    expect(report.issues.find(item => item.code === "self-dependency")).toMatchObject({ severity: "error", blocking: false });
+  });
+
+  it("recalc refuses malformed data before schedule computation and includes the same issues", () => {
+    const data = seedProject();
+    data.tasks = [null];
+    const { status, report } = runCli(data, "recalc");
+    expect(status).toBe(1);
+    expect(report.ok).toBe(false);
+    expect(signature(report.issues)).toEqual(signature(validateProjectData(data)));
   });
 });

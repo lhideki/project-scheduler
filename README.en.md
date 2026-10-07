@@ -89,6 +89,13 @@ When opened in a regular browser, the app automatically saves changes to that br
 
 Private browsing or clearing site data may delete the saved plan. Export important plans to JSON regularly as a backup.
 
+The status below the header shows **Unsaved changes**, **Saved in this browser**, or **Could not save**. A saved status means both the latest plan and version history were written successfully. If a write fails, your edits stay on screen: use **Back up as JSON** before closing, or **Retry saving**. A newly added version is initially kept on screen and uses the same save status. Linked JSON and shared HTML explicitly show that automatic saving is off.
+
+Saved projects with no tasks are restored together with their resources, sprints, calendar overrides, and leveling setting. If saved data cannot be read or validated, automatic saving pauses instead of overwriting it; retrying asks before replacing it with the current screen contents.
+
+JSON imports validate the complete plan and version snapshots before asking to replace the current plan. Syntax errors and invalid fields are shown separately, with field paths to help correct the JSON. Failed or cancelled imports leave the current plan and history unchanged. See [Import validation and compatibility](docs/import-validation.md).
+
+
 ## Share a snapshot as HTML
 
 Select `Export shareable HTML` from the `Export` menu to download a self-contained HTML file with the current plan embedded. Anyone can open it in a browser without the JSON file. It shows the plan as it was when you exported it.

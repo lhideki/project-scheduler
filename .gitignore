@@ -5,3 +5,5 @@ npm-debug.log*
 .claude/.cc-writes/
 .claude/settings.local.json
 _site/
+test-results/
+playwright-report/

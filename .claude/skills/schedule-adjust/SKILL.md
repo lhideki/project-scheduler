@@ -70,7 +70,7 @@ node <CLI> explain  <file> --task <taskId> [--leveling on|off|auto]
 `valid`（error が無いか）、`issues[]`（`severity: error|warning`）、`scheduleChecks` を返す。
 - 依存関係の矛盾の `code`:
   - `dependency-cycle`（error）… 循環参照。グループを介した循環（タスクAがグループGに依存し、
-    G配下のタスクBがAに依存）も含む。`ids` は循環に含まれる全タスク、`path` は循環の経路。
+    G配下のタスクBがAに依存）も含む。`ids` は循環に含まれる全タスク、`dependencyPath` は循環の経路。`path` はJSON内の対象項目の位置です。
   - `self-dependency`（error）… 自分自身を先行タスクにしている（エンジンは無視するため依存関係が効いていない）。
   - `predecessor-missing`（error）… 存在しないタスク（削除済み等）を先行タスクにしている。
   - `dependency-violation`（warning）… 表示中の開始日が依存関係（FS/SS/FF/SF・ラグ）の条件を

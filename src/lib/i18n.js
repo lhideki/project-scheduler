@@ -191,6 +191,21 @@ export function formatDependencyIssueMessage(t, issue) {
   }
 }
 
+/** Shared project validation diagnostics are localized only at the presentation edge. */
+export function formatProjectIssue(t, issue) {
+  const params = issue.params || {};
+  if (issue.messageKey === "projectValidation.dependency") {
+    const reason = formatDependencyIssueMessage(t, issue);
+    return issue.code === "dependency-cycle" ? reason
+      : t("projectValidation.dependencySubject", { name: taskNameText(t, params.subjectName), reason });
+  }
+  const values = { ...params };
+  if (issue.messageKey === "projectValidation.parentCycle") values.route = (params.route || []).join(t("dependencyIssues.arrow"));
+  if (issue.messageKey === "projectValidation.sprintOverlap") values.ids = (params.ids || []).join(t("common.listSeparator"));
+  if (issue.messageKey === "projectValidation.calendarConflict") values.date = dateArg(params.date);
+  return issue.messageKey && t.has(issue.messageKey) ? t(issue.messageKey, values) : issue.code;
+}
+
 /** 依存関係の矛盾の種別ラベル（循環参照・開始日との矛盾など）。 */
 export function dependencyIssueLabel(t, code) {
   const key = `dependencyIssues.label.${code}`;

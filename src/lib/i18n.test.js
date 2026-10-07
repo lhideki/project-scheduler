@@ -4,12 +4,13 @@ import { createTranslator } from "use-intl/core";
 import {
   LOCALES, MESSAGES, FORMATS, TIME_ZONE, createAppTranslator, detectLocale, normalizeLocale, resolveInitialLocale, catalogValues, dateArg,
   formatDependencyIssueMessage, dependencyIssueLabel, formatSprintConflictReason, formatSprintConflictSprintNames,
-  formatLevelWarning,
+  formatLevelWarning, formatProjectIssue,
 } from "./i18n.js";
 import { buildHolidayMap, makeCalendar } from "./calendar.js";
 import { runCPM, buildDisplaySchedule } from "./scheduling.js";
 import { detectDependencyIssues } from "./dependencyIssues.js";
 import { detectSprintConflicts } from "./sprints.js";
+import { validateProjectData } from "./projectValidation.js";
 
 /** カタログの葉（メッセージ）を "a.b.c" のキーで列挙する。 */
 function flatten(obj, prefix = "", out = {}) {
@@ -230,5 +231,44 @@ describe("src/lib のコード＋パラメータの翻訳", () => {
       + "(1 person-day daily, 1 person-day weekly; search limit: 2,000 workdays). It is placed on consecutive workdays starting Jan 9, 2024 "
       + "and exceeds the capacity limits. Review the effort or the capacity limits."
     );
+  });
+});
+
+
+describe("project validation issue formatting", () => {
+  it("keeps raw diagnostics language-neutral and formats structural errors in both UI locales", () => {
+    const data = { schemaVersion: 1, exportedAt: "2026-10-06T12:00:00Z", tasks: [null], resources: [], sprints: [], versions: [] };
+    const [issue] = validateProjectData(data);
+    expect(issue).toMatchObject({ severity: "error", code: "task-not-object", path: "tasks[0]", messageKey: "projectValidation.object", params: {} });
+    expect(issue).not.toHaveProperty("message");
+    expect(issue).not.toHaveProperty("messageEn");
+    expect(formatProjectIssue(createAppTranslator("ja"), issue)).toBe("オブジェクトで指定してください");
+    expect(formatProjectIssue(createAppTranslator("en"), issue)).toBe("Must be an object.");
+  });
+
+  it("formats shared dependency parameters, IDs and dates through the existing catalogs", () => {
+    const data = {
+      schemaVersion: 1, exportedAt: "2026-10-06T12:00:00Z", resources: [], versions: [],
+      tasks: [{ id: "t1", name: "Review", parentId: null, order: 0, predecessors: [{ id: "t1", type: "FS", lag: 0 }] }],
+      sprints: [
+        { id: "s1", name: "Sprint 1", startDate: "2026-10-01", endDate: "2026-10-10", order: 0 },
+        { id: "s2", name: "Sprint 2", startDate: "2026-10-05", endDate: "2026-10-15", order: 1 },
+      ],
+      calendarExceptions: [{ date: "2026-10-06", type: "holiday" }, { date: "2026-10-06", type: "workday" }],
+    };
+    const issues = validateProjectData(data);
+    for (const locale of LOCALES) {
+      const errors = [];
+      const intlT = createTranslator({ locale, messages: MESSAGES[locale], formats: FORMATS[locale], timeZone: TIME_ZONE, onError: error => errors.push(error.message) });
+      const appT = createAppTranslator(locale);
+      for (const issue of issues) {
+        const message = formatProjectIssue(appT, issue);
+        expect(message).not.toBe(issue.code);
+        expect(message).not.toContain("projectValidation.");
+        expect(formatProjectIssue(intlT, issue)).toBe(message);
+      }
+      expect(errors).toEqual([]);
+    }
+    expect(formatProjectIssue(createAppTranslator("ja"), issues[0])).toBe("「Review」: 自分自身を先行タスクにしています（この依存関係は計算に使われていません）");
   });
 });
