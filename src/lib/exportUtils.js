@@ -1,5 +1,6 @@
 import { buildFlatList } from "./taskTree.js";
 import { MESSAGES, DEFAULT_LOCALE } from "./i18n.js";
+import { hasFullVersionSnapshot } from "./versionSnapshot.js";
 
 import { PROJECT_SCHEMA_VERSION, validateProjectData, analyzeIntegrity, isBlockingProjectIssue } from "./projectValidation.js";
 
@@ -140,6 +141,7 @@ export const PROJECT_JSON_SCHEMA = Object.freeze({
         rawResources: { type: "array", description: "復元用の完全な resources", items: { $ref: "#/$defs/resource" } },
         rawSprints: { type: "array", description: "復元用の完全な sprints", items: { $ref: "#/$defs/sprint" } },
         rawCalendarExceptions: { type: "array", description: "復元用の完全な calendarExceptions（この項目が無い古いスナップショットは復元時に空配列扱い）", items: { $ref: "#/$defs/calendarException" } },
+        rawLevelingOn: { type: "boolean", description: "保存時のリソース平準化条件。この項目が無い古いスナップショットは元の条件が不明なため、復元時の現在値を維持する（日程の完全な再現は保証しない）。" },
         hasFullSnapshot: { type: "boolean", description: "復元に必要な raw*（rawTasks/rawResources/rawSprints）が揃っているか" },
       },
     },
@@ -164,7 +166,7 @@ function cloneVersionSnapshots(versions) {
     if (!version || typeof version !== "object" || Array.isArray(version)) return version;
     return {
       ...version,
-      hasFullSnapshot: Array.isArray(version.rawTasks) && Array.isArray(version.rawResources) && Array.isArray(version.rawSprints),
+      hasFullSnapshot: hasFullVersionSnapshot(version),
     };
   });
 }

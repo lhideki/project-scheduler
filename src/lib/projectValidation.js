@@ -123,7 +123,7 @@ function rawSnapshot(version, path) {
 function checkVersion(value, path, issues, options) {
   if (!fields(value, path, "version", [idField, nameField,
     field("createdAt", value => isNumber(value) && Number.isFinite(new Date(value).getTime()), true, "timestamp"),
-    booleanField("hasWbsInfo"), booleanField("hasFullSnapshot"),
+    booleanField("hasWbsInfo"), booleanField("hasFullSnapshot"), booleanField("rawLevelingOn"),
   ], issues)) return;
   arrayField(value, "tasks", `${path}.tasks`, true, issues, (task, taskPath) => {
     const definitions = [idField, nameField, field("level", value => Number.isInteger(value) && value >= 0, false, "nonnegativeInteger"),

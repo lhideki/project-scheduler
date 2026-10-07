@@ -108,6 +108,7 @@ WBS上のタスクです。階層は parentId で表現します。
 | `rawResources` | `resource[]` | 任意 | 復元用の完全な resources |
 | `rawSprints` | `sprint[]` | 任意 | 復元用の完全な sprints |
 | `rawCalendarExceptions` | `calendarException[]` | 任意 | 復元用の完全な calendarExceptions（この項目が無い古いスナップショットは復元時に空配列扱い） |
+| `rawLevelingOn` | `boolean` | 任意 | 保存時のリソース平準化条件。この項目が無い古いスナップショットは元の条件が不明なため、復元時の現在値を維持する（日程の完全な再現は保証しない）。 |
 | `hasFullSnapshot` | `boolean` | 必須 | 復元に必要な raw*（rawTasks/rawResources/rawSprints）が揃っているか |
 
 ## versions.tasks の要素

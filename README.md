@@ -49,7 +49,7 @@ All three pages are served from the same site, so they share the plan saved in y
 ## Features
 
 - Edit a WBS as an outline and view its Gantt chart against a working-day calendar that accounts for weekends and Japanese public holidays.
-- Navigate cells with the arrow keys, copy and paste individual cells or rows, and undo or redo task edits.
+- Navigate cells with the arrow keys, copy and paste individual cells or rows, and undo or redo task edits. Continuous input is one Undo step when committed with Enter or a focus change; editing the same cell again creates a separate step.
 - Add company holidays or extra working days in the `Calendar` tab to override weekends and public holidays.
 - Zoom the Gantt chart from days to weeks and months, hatch non-working days inside task bars, draw a progress line (inazuma line) against a chosen status date, and hover over or focus a bar to see its details in a tooltip.
 - Model all four dependency types (FS, SS, FF, and SF) with lead and lag offsets.
@@ -62,7 +62,7 @@ All three pages are served from the same site, so they share the plan saved in y
 - Flag dependency problems in the WBS table and Gantt chart: circular dependencies (including cycles through groups), start dates that break a dependency, fixed milestones pushed past their due date, and links to deleted tasks.
 - Inspect dependencies in a network (PERT) view.
 - Copy the calculated schedule as a Mermaid Gantt chart, or copy the visible part of the Gantt chart as a PNG image.
-- Save snapshots, compare multiple versions on a Gantt-style timeline, and restore an earlier state.
+- Save snapshots, compare multiple versions on a Gantt-style timeline, and restore an earlier state, including its saved resource-leveling setting. Restoring clears task Undo/Redo history. Older full snapshots without that setting retain the current toggle, so recalculated dates may differ from the saved comparison.
 - Export and import the complete project, including tasks, resources, sprints, calendar overrides, the resource leveling setting, and version history, as JSON.
 - Switch the interface between English and Japanese from the header. The first visit follows your browser's language, and your choice is remembered in the browser (it is not saved in the project JSON). The Live Demo also has English and Japanese pages that always open in that language. See [Live Demo languages](#live-demo-languages). Sample data and Japanese public holiday names stay in Japanese.
 - Export a shared HTML file that embeds the current plan. See [Share a snapshot as HTML](#share-a-snapshot-as-html).
@@ -226,7 +226,7 @@ npm run build
 
 - Real-time multi-user editing and automatic cross-device synchronization are not supported. Use JSON export and import to share or transfer a plan.
 - The working-day calendar uses a simplified implementation of Japanese public holidays. Use the `Calendar` tab to correct individual dates or add company-specific holidays.
-- Undo and Redo apply only to task edits, not to changes to resources, sprints, or the calendar.
+- Undo and Redo retain the last 100 task operations, not changes to resources, sprints, or the calendar. Inside an input, Ctrl/Cmd+Z uses the browser’s text Undo; use the toolbar or move focus outside inputs for task Undo/Redo. Restoring a version clears task history.
 
 ## Feedback
 

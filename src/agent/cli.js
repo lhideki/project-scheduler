@@ -25,7 +25,7 @@ import {
   idleSegments,
   detectSprintConflicts,
   detectDependencyIssues, SCHEDULE_DEPENDENCY_ISSUE_CODES,
-  normalizeImportedProject,
+  normalizeImportedProject, buildVersionSnapshot,
   checkFieldShapes, analyzeIntegrity, findParentCycles, validateProjectData, projectDependencyIssue,
   buildFlatList, isGroupId, effectivePredecessors,
   createAppTranslator, formatProjectIssue, formatLevelWarning,
@@ -203,38 +203,7 @@ export { checkFieldShapes, analyzeIntegrity, findParentCycles };
    バージョンスナップショット（App.jsx saveVersion と同一構造）
    ------------------------------------------------------------------------------------------- */
 
-export function buildVersionSnapshot(data, schedule, name) {
-  const flatAll = buildFlatList(data.tasks, new Set());
-  const tasks = flatAll.map(t => {
-    const s = schedule.get(t.id) || {};
-    return {
-      id: t.id,
-      name: t.name,
-      level: t.level,
-      wbsNo: t.wbsNo,
-      hasChildren: t.hasChildren,
-      schedStart: s.schedStart,
-      schedFinish: s.schedFinish,
-      critical: !!s.critical,
-      milestone: !!t.milestone,
-      duration: typeof t.duration === "number" ? t.duration : null,
-      assigneeId: t.assigneeId || null,
-      progress: typeof s.progress === "number" ? s.progress : 0,
-    };
-  });
-  return {
-    id: `v_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
-    name,
-    createdAt: Date.now(),
-    tasks,
-    hasWbsInfo: true,
-    rawTasks: JSON.parse(JSON.stringify(data.tasks)),
-    rawResources: JSON.parse(JSON.stringify(data.resources || [])),
-    rawSprints: JSON.parse(JSON.stringify(data.sprints || [])),
-    rawCalendarExceptions: JSON.parse(JSON.stringify(data.calendarExceptions || [])),
-    hasFullSnapshot: true,
-  };
-}
+export { buildVersionSnapshot };
 
 /** 「自動スケジューリング実行」（App.jsx runScheduling）と同じ書き戻し。
  *  グループとサマリー以外の全リーフの startDate に、respectManualPins:false の CPM 結果の

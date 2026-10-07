@@ -225,6 +225,10 @@ function cal_addDaysISO(iso, n) {
 }
 
 // src/lib/taskTree.js
+var uidCounter = 1;
+function uid(prefix) {
+  return `${prefix}_${(uidCounter++).toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+}
 function isGroupId(tasks, id) {
   return tasks.some((t) => t.parentId === id);
 }
@@ -796,6 +800,44 @@ function computeAutoSchedule(tasks, cal, projectStart, sprints, resources, opts 
     }
   }
   return { startDates: out, converged };
+}
+
+// src/lib/versionSnapshot.js
+var cloneJSON = (value) => JSON.parse(JSON.stringify(value));
+function buildVersionSnapshot(data, schedule, name) {
+  const tasks = buildFlatList(data.tasks, /* @__PURE__ */ new Set()).map((task) => {
+    const result = schedule.get(task.id) || {};
+    return {
+      id: task.id,
+      name: task.name,
+      level: task.level,
+      wbsNo: task.wbsNo,
+      hasChildren: task.hasChildren,
+      schedStart: result.schedStart,
+      schedFinish: result.schedFinish,
+      critical: !!result.critical,
+      milestone: !!task.milestone,
+      duration: typeof task.duration === "number" ? task.duration : null,
+      assigneeId: task.assigneeId || null,
+      progress: typeof result.progress === "number" ? result.progress : 0
+    };
+  });
+  return {
+    id: uid("v"),
+    name,
+    createdAt: Date.now(),
+    tasks,
+    hasWbsInfo: true,
+    rawTasks: cloneJSON(data.tasks),
+    rawResources: cloneJSON(data.resources || []),
+    rawSprints: cloneJSON(data.sprints || []),
+    rawCalendarExceptions: cloneJSON(data.calendarExceptions || []),
+    rawLevelingOn: !!data.levelingOn,
+    hasFullSnapshot: true
+  };
+}
+function hasFullVersionSnapshot(version) {
+  return !!version && ["rawTasks", "rawResources", "rawSprints"].every((key) => Array.isArray(version[key]));
 }
 
 // src/lib/sprints.js
@@ -3999,7 +4041,8 @@ var ja_default = {
   },
   confirm: {
     defaultLabel: "\u5B9F\u884C\u3059\u308B",
-    restoreVersion: "\u73FE\u5728\u306E\u5185\u5BB9\u3092\u7834\u68C4\u3057\u3001\u30D0\u30FC\u30B8\u30E7\u30F3\u300C{name}\u300D\uFF08{createdAt}\uFF09\u306E\u72B6\u614B\u306B\u623B\u3057\u307E\u3059\u3002\u3088\u308D\u3057\u3044\u3067\u3059\u304B\uFF1F",
+    restoreVersion: "\u73FE\u5728\u306E\u5185\u5BB9\u3092\u7834\u68C4\u3057\u3001\u30D0\u30FC\u30B8\u30E7\u30F3\u300C{name}\u300D\uFF08{createdAt}\uFF09\u306E\u72B6\u614B\u306B\u623B\u3057\u307E\u3059\u3002\u30BF\u30B9\u30AF\u306E Undo/Redo \u5C65\u6B74\u3082\u6D88\u53BB\u3057\u307E\u3059\u3002\u3088\u308D\u3057\u3044\u3067\u3059\u304B\uFF1F",
+    restoreVersionLegacyLeveling: "\u3053\u306E\u53E4\u3044\u30D0\u30FC\u30B8\u30E7\u30F3\u306B\u306F\u30EA\u30BD\u30FC\u30B9\u5E73\u6E96\u5316\u306E\u6761\u4EF6\u304C\u8A18\u9332\u3055\u308C\u3066\u3044\u307E\u305B\u3093\u3002\u73FE\u5728\u306E\u8A2D\u5B9A\u3092\u7DAD\u6301\u3059\u308B\u305F\u3081\u3001\u518D\u8A08\u7B97\u5F8C\u306E\u65E5\u7A0B\u306F\u4FDD\u5B58\u6E08\u307F\u306E\u6BD4\u8F03\u8868\u793A\u3068\u7570\u306A\u308B\u5834\u5408\u304C\u3042\u308A\u307E\u3059\u3002",
     restoreLabel: "\u5143\u306B\u623B\u3059",
     import: "\u73FE\u5728\u306E\u30BF\u30B9\u30AF\u30FB\u62C5\u5F53\u8005\u3092\u3001\u8AAD\u307F\u8FBC\u3093\u3060\u5185\u5BB9\u3067\u7F6E\u304D\u63DB\u3048\u307E\u3059\u3002\u3088\u308D\u3057\u3044\u3067\u3059\u304B\uFF1F",
     importLabel: "\u8AAD\u307F\u8FBC\u3080"
@@ -4301,7 +4344,7 @@ var ja_default = {
     empty: "\u4FDD\u5B58\u3055\u308C\u305F\u30D0\u30FC\u30B8\u30E7\u30F3\u306F\u3042\u308A\u307E\u305B\u3093",
     compareCheck: "\u300C{name}\u300D\u3092\u6BD4\u8F03\u3059\u308B",
     renameTitle: "\u30AF\u30EA\u30C3\u30AF\u3057\u3066\u30D0\u30FC\u30B8\u30E7\u30F3\u540D\u3092\u5909\u66F4",
-    restoreTitle: "\u73FE\u5728\u306E\u30BF\u30B9\u30AF\u30FB\u62C5\u5F53\u8005\u3092\u3053\u306E\u30D0\u30FC\u30B8\u30E7\u30F3\u306E\u72B6\u614B\u306B\u623B\u3057\u307E\u3059",
+    restoreTitle: "\u3053\u306E\u30D0\u30FC\u30B8\u30E7\u30F3\u306E\u30BF\u30B9\u30AF\u30FB\u62C5\u5F53\u8005\u30FB\u30B9\u30D7\u30EA\u30F3\u30C8\u30FB\u30AB\u30EC\u30F3\u30C0\u30FC\u3068\u3001\u8A18\u9332\u3055\u308C\u3066\u3044\u308B\u5E73\u6E96\u5316\u8A2D\u5B9A\u3092\u5FA9\u5143\u3057\u307E\u3059",
     restoreUnsupportedTitle: "\u53E4\u3044\u5F62\u5F0F\u3067\u4FDD\u5B58\u3055\u308C\u305F\u30D0\u30FC\u30B8\u30E7\u30F3\u306E\u305F\u3081\u5FA9\u5143\u3067\u304D\u307E\u305B\u3093",
     compare: "\u30D0\u30FC\u30B8\u30E7\u30F3\u6BD4\u8F03"
   },
@@ -4466,7 +4509,8 @@ var en_default = {
   },
   confirm: {
     defaultLabel: "Run",
-    restoreVersion: 'Discard the current contents and restore version "{name}" ({createdAt})?',
+    restoreVersion: 'Discard the current contents and restore version "{name}" ({createdAt})? Task Undo/Redo history will be cleared.',
+    restoreVersionLegacyLeveling: "This older version did not record resource leveling. Your current setting will be kept, so the recalculated schedule may differ from the saved comparison.",
     restoreLabel: "Restore",
     import: "Replace the current tasks and assignees with the imported contents?",
     importLabel: "Import"
@@ -4768,7 +4812,7 @@ var en_default = {
     empty: "No saved versions",
     compareCheck: 'Compare "{name}"',
     renameTitle: "Click to rename the version",
-    restoreTitle: "Restore the current tasks and assignees to this version",
+    restoreTitle: "Restore this version\u2019s tasks, resources, sprints, calendar, and saved leveling setting",
     restoreUnsupportedTitle: "This version was saved in an old format and cannot be restored",
     compare: "Version comparison"
   },
@@ -5114,7 +5158,8 @@ function checkVersion(value, path, issues, options) {
     nameField,
     field("createdAt", (value2) => isNumber(value2) && Number.isFinite(new Date(value2).getTime()), true, "timestamp"),
     booleanField("hasWbsInfo"),
-    booleanField("hasFullSnapshot")
+    booleanField("hasFullSnapshot"),
+    booleanField("rawLevelingOn")
   ], issues)) return;
   arrayField(value, "tasks", `${path}.tasks`, true, issues, (task, taskPath) => {
     const definitions = [
@@ -5390,12 +5435,13 @@ var PROJECT_JSON_SCHEMA = Object.freeze({
         rawResources: { type: "array", description: "\u5FA9\u5143\u7528\u306E\u5B8C\u5168\u306A resources", items: { $ref: "#/$defs/resource" } },
         rawSprints: { type: "array", description: "\u5FA9\u5143\u7528\u306E\u5B8C\u5168\u306A sprints", items: { $ref: "#/$defs/sprint" } },
         rawCalendarExceptions: { type: "array", description: "\u5FA9\u5143\u7528\u306E\u5B8C\u5168\u306A calendarExceptions\uFF08\u3053\u306E\u9805\u76EE\u304C\u7121\u3044\u53E4\u3044\u30B9\u30CA\u30C3\u30D7\u30B7\u30E7\u30C3\u30C8\u306F\u5FA9\u5143\u6642\u306B\u7A7A\u914D\u5217\u6271\u3044\uFF09", items: { $ref: "#/$defs/calendarException" } },
+        rawLevelingOn: { type: "boolean", description: "\u4FDD\u5B58\u6642\u306E\u30EA\u30BD\u30FC\u30B9\u5E73\u6E96\u5316\u6761\u4EF6\u3002\u3053\u306E\u9805\u76EE\u304C\u7121\u3044\u53E4\u3044\u30B9\u30CA\u30C3\u30D7\u30B7\u30E7\u30C3\u30C8\u306F\u5143\u306E\u6761\u4EF6\u304C\u4E0D\u660E\u306A\u305F\u3081\u3001\u5FA9\u5143\u6642\u306E\u73FE\u5728\u5024\u3092\u7DAD\u6301\u3059\u308B\uFF08\u65E5\u7A0B\u306E\u5B8C\u5168\u306A\u518D\u73FE\u306F\u4FDD\u8A3C\u3057\u306A\u3044\uFF09\u3002" },
         hasFullSnapshot: { type: "boolean", description: "\u5FA9\u5143\u306B\u5FC5\u8981\u306A raw*\uFF08rawTasks/rawResources/rawSprints\uFF09\u304C\u63C3\u3063\u3066\u3044\u308B\u304B" }
       }
     }
   }
 });
-function cloneJSON(value) {
+function cloneJSON2(value) {
   return JSON.parse(JSON.stringify(value));
 }
 function rejectInvalidProject(issues) {
@@ -5405,11 +5451,11 @@ function rejectInvalidProject(issues) {
   throw error;
 }
 function cloneVersionSnapshots(versions) {
-  return cloneJSON(versions).map((version) => {
+  return cloneJSON2(versions).map((version) => {
     if (!version || typeof version !== "object" || Array.isArray(version)) return version;
     return {
       ...version,
-      hasFullSnapshot: Array.isArray(version.rawTasks) && Array.isArray(version.rawResources) && Array.isArray(version.rawSprints)
+      hasFullSnapshot: hasFullVersionSnapshot(version)
     };
   });
 }
@@ -5418,12 +5464,12 @@ function normalizeImportedProject(data, options = {}) {
   return {
     schemaVersion: data.schemaVersion,
     exportedAt: data.exportedAt,
-    tasks: cloneJSON(data.tasks),
-    resources: cloneJSON(data.resources),
-    sprints: cloneJSON(data.sprints),
+    tasks: cloneJSON2(data.tasks),
+    resources: cloneJSON2(data.resources),
+    sprints: cloneJSON2(data.sprints),
     versions: cloneVersionSnapshots(data.versions),
     levelingOn: data.levelingOn === void 0 ? false : data.levelingOn,
-    calendarExceptions: data.calendarExceptions === void 0 ? [] : cloneJSON(data.calendarExceptions)
+    calendarExceptions: data.calendarExceptions === void 0 ? [] : cloneJSON2(data.calendarExceptions)
   };
 }
 var DEFAULT_MERMAID_LABELS = MESSAGES[DEFAULT_LOCALE].mermaid;
@@ -5550,38 +5596,6 @@ function formatSprintConflict(conflict) {
     wbsNo,
     sprintName: formatSprintConflictSprintNames(tJa, conflict),
     reasons: reasons.map((r) => formatSprintConflictReason(tJa, r))
-  };
-}
-function buildVersionSnapshot(data, schedule, name) {
-  const flatAll = buildFlatList(data.tasks, /* @__PURE__ */ new Set());
-  const tasks = flatAll.map((t) => {
-    const s = schedule.get(t.id) || {};
-    return {
-      id: t.id,
-      name: t.name,
-      level: t.level,
-      wbsNo: t.wbsNo,
-      hasChildren: t.hasChildren,
-      schedStart: s.schedStart,
-      schedFinish: s.schedFinish,
-      critical: !!s.critical,
-      milestone: !!t.milestone,
-      duration: typeof t.duration === "number" ? t.duration : null,
-      assigneeId: t.assigneeId || null,
-      progress: typeof s.progress === "number" ? s.progress : 0
-    };
-  });
-  return {
-    id: `v_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
-    name,
-    createdAt: Date.now(),
-    tasks,
-    hasWbsInfo: true,
-    rawTasks: JSON.parse(JSON.stringify(data.tasks)),
-    rawResources: JSON.parse(JSON.stringify(data.resources || [])),
-    rawSprints: JSON.parse(JSON.stringify(data.sprints || [])),
-    rawCalendarExceptions: JSON.parse(JSON.stringify(data.calendarExceptions || [])),
-    hasFullSnapshot: true
   };
 }
 function applyAutoSchedule(data, projectStart, cal, opts = {}) {

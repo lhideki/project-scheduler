@@ -155,6 +155,7 @@ describe("version snapshots", () => {
     const result = normalizeImportedProject(project({ versions: [snapshot({ hasFullSnapshot: false })] }));
     expect(result.versions[0].hasFullSnapshot).toBe(true);
     expect(result.versions[0].rawCalendarExceptions).toBeUndefined();
+    expect(result.versions[0].rawLevelingOn).toBeUndefined();
   });
 
   it.each([
@@ -163,6 +164,9 @@ describe("version snapshots", () => {
     [version({ tasks: {} }), "version-tasks-invalid", "versions[0].tasks"],
     [version({ createdAt: "yesterday" }), "version-createdAt-invalid", "versions[0].createdAt"],
     [version({ hasWbsInfo: "yes" }), "version-hasWbsInfo-invalid", "versions[0].hasWbsInfo"],
+    [snapshot({ rawLevelingOn: "true" }), "version-rawLevelingOn-invalid", "versions[0].rawLevelingOn"],
+    [snapshot({ rawLevelingOn: null }), "version-rawLevelingOn-invalid", "versions[0].rawLevelingOn"],
+    [snapshot({ rawLevelingOn: 0 }), "version-rawLevelingOn-invalid", "versions[0].rawLevelingOn"],
     [version({ hasWbsInfo: true }), "version-task-level-invalid", "versions[0].tasks[0].level"],
     [version({ tasks: [{ id: "x", name: "X", schedFinish: "nope" }] }), "version-task-schedFinish-invalid", "versions[0].tasks[0].schedFinish"],
     [version({ tasks: [{ id: "x", name: "X", duration: "1" }] }), "version-task-duration-invalid", "versions[0].tasks[0].duration"],

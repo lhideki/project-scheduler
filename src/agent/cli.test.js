@@ -8,6 +8,7 @@ import {
   validateProjectData, analyzeIntegrity as sharedAnalyzeIntegrity, checkFieldShapes as sharedCheckFieldShapes,
 } from "../lib/projectValidation.js";
 import { normalizeImportedProject } from "../lib/exportUtils.js";
+import { buildVersionSnapshot as sharedBuildVersionSnapshot, restoreVersionSnapshot } from "../lib/versionSnapshot.js";
 import { createAppTranslator, formatProjectIssue } from "../lib/i18n.js";
 const tJa = createAppTranslator("ja");
 
@@ -366,6 +367,19 @@ describe("checkFieldShapes", () => {
 });
 
 describe("buildVersionSnapshot", () => {
+  it("uses the same snapshot builder as the UI", () => {
+    expect(buildVersionSnapshot).toBe(sharedBuildVersionSnapshot);
+  });
+
+  it.each([true, false])("saves and restores the original leveling condition %s", levelingOn => {
+    const data = { ...seedProject(), levelingOn };
+    const before = computeSchedule(data, { leveling: levelingOn });
+    const version = buildVersionSnapshot(data, before.schedule, "Before adjustment");
+    expect(version.rawLevelingOn).toBe(levelingOn);
+    const restored = restoreVersionSnapshot(version, !levelingOn);
+    expect(computeSchedule(restored, { leveling: restored.levelingOn }).schedule).toEqual(before.schedule);
+  });
+
   it("App.jsx saveVersion と同じ構造（比較用 tasks ＋ 復元用 raw* ＋ 各フラグ）を返す", () => {
     const data = seedProject();
     const r = computeSchedule(data, { leveling: false });
@@ -490,12 +504,33 @@ describe("shared UI/CLI project validation", () => {
     expect(checkFieldShapes).toBe(sharedCheckFieldShapes);
   });
 
+  it.each([true, false])("plan snapshots the original leveling %s even when the proposal switches it", levelingOn => {
+    const directory = mkdtempSync(join(tmpdir(), "scheduler-snapshot-"));
+    temporaryDirectories.push(directory);
+    const original = { ...seedProject(), levelingOn };
+    const edited = { ...original, levelingOn: !levelingOn };
+    const originalPath = join(directory, "original.json"), editedPath = join(directory, "edited.json");
+    writeFileSync(originalPath, JSON.stringify(original));
+    writeFileSync(editedPath, JSON.stringify(edited));
+    const result = spawnSync(process.execPath, [fileURLToPath(new URL("./cli.js", import.meta.url)), "plan", originalPath, editedPath, "--leveling", levelingOn ? "off" : "on"], { encoding: "utf8" });
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe("");
+    const report = JSON.parse(result.stdout);
+    expect(report).toMatchObject({ ok: true, command: "plan", proposed: { levelingOn: !levelingOn } });
+    expect(report.proposed.versions[0].rawLevelingOn).toBe(levelingOn);
+    const restored = restoreVersionSnapshot(report.proposed.versions[0], !levelingOn);
+    expect(computeSchedule(restored, { leveling: restored.levelingOn }).schedule).toEqual(computeSchedule(original, { leveling: levelingOn }).schedule);
+    expect(readFileSync(originalPath, "utf8")).toBe(JSON.stringify(original));
+    expect(readFileSync(editedPath, "utf8")).toBe(JSON.stringify(edited));
+  });
+
   it.each([
     ["null task", data => { data.tasks = [null]; }],
     ["bad number", data => { data.tasks[0].duration = "one"; }],
     ["duplicate IDs", data => { data.resources.push({ ...data.resources[0] }); }],
     ["missing predecessor", data => { data.tasks[1].predecessors = [{ id: "missing", type: "FS", lag: 0 }]; }],
     ["broken version raw data", data => { data.versions = [{ id: "v1", name: "Bad", createdAt: 1, tasks: [], rawTasks: [null] }]; }],
+    ["invalid snapshot leveling", data => { data.versions = [buildVersionSnapshot(data, new Map(), "Bad")]; data.versions[0].rawLevelingOn = "true"; }],
     ["bad top-level schema", data => { data.schemaVersion = 2; }],
   ])("reports identical common issues for %s in UI normalization and CLI stdout", (_, mutate) => {
     const data = seedProject();
