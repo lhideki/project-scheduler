@@ -165,6 +165,8 @@ bee（`@nulab/bee` 1.1 以上、Backlog公式CLI）経由で保存JSONと Backlo
   - `float`/`critical` は CPM（担当者を見ない計算）の値のままなので、平準化による延長・後ろ倒しは `critical` に反映されない。
   - 注意: スプリント開始日を実際の計算済み開始日に近づけて設定すると、そのタスクのESが押し上げられてfloatが縮小し、`critical` 判定が変わることがある（表示上のschedStart/schedFinish自体は変わらない）。これは仕様上の既知の挙動であり、バグではない。
 - スプリント矛盾検出（`sprintConflicts` useMemo）: 最終的な表示スケジュールがタスクの所属スプリント期間からはみ出していないかを判定し、はみ出していればヘッダーのアラートアイコン（`AlertTriangle`）経由でダイアログに一覧表示する。複数スプリントが紐付く場合は、それらの期間の和集合（最も早い開始日〜最も遅い終了日）を基準に判定する。リソース平準化警告（`levelWarnings`、稼働上限内での配置失敗）とは別建てのUI。
+- 自動スケジューリングの実行結果は `SchedulingResult` に保持し、開始日変更件数と残る制約違反を別々に表示する。件数とボールド表示には `applyScheduleStartDates` の同じ `changedIds` を使い、再計算0件ではUndo履歴を増やさない。未解決の件数は既存の `dependencyIssues`・`sprintConflicts`・`levelWarnings` の要素数から求め、循環をタスク数分に重複集計しない。計画または計算条件の編集で結果表示を解除する。非収束・実行エラーは完了と区別する。
+- 依存関係の入力確定には `parseDepInput` を使い、`errors` が1つでもある場合は依存関係全体を未反映のまま保持する。`DepInput` は不正な入力を消さず、理由を入力欄近くに表示する。通常の文字列貼り付けは入力欄に委ね、構造化された行貼り付けは従来のWBS処理に渡す。`parseDepString` は互換用の配列APIであり、入力確定には使わない。
 - 依存関係の矛盾検出（`dependencyIssues` useMemo → `detectDependencyIssues(tasks, schedule, cal)`、`src/lib/dependencyIssues.js`）: 次の4種・5コード（循環参照は `dependency-cycle` と自己依存の `self-dependency` の2コード）を判定する。日程の自動修正はしない（開始日の矛盾は「自動スケジューリング実行」で解消する）。CLI の `validate`/`recalc`/`plan`/`explain` も同じ関数を使う（`src/agent/cli.test.js` でアプリと結果が一致することを確認している）。
   - `dependency-cycle`（error）: 循環参照。`runCPM` と同じ解釈（リーフへの依存辺は `effectivePredecessors`、グループには「子→親」の所属辺）でグラフを作り、依存辺を含む強連結成分を1件とする。グループを介した循環（AがグループGに依存し、G配下のBがAに依存）も検出する。循環に含まれるタスクは日程が確定しないため、下の2種の判定から除外する。
   - `self-dependency`（error）: 自分自身を先行タスクにしている（循環参照の最小形。`effectivePredecessors` が自己参照を除くため `findDependencyCycles` では検出できず、エンジンも無視するので別途 `findSelfDependencies` で検出する。UIのラベルは「循環参照（自己依存）」）。

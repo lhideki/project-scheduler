@@ -1,21 +1,71 @@
-import React, { useState, useEffect } from "react";
-import { parseDepString, formatDeps } from "../lib/deps.js";
+import React, { useState, useEffect, useId, useRef } from "react";
+import { parseDepInput, formatDeps } from "../lib/deps.js";
 import { useI18n } from "./I18nProvider.jsx";
 
 export function DepInput({ deps, idToNo, noToId, onChange, inputRef, inputProps, onKeyDown }) {
   const { t } = useI18n();
-  const [text, setText] = useState(() => formatDeps(deps, idToNo));
-  useEffect(() => { setText(formatDeps(deps, idToNo)); }, [deps, idToNo]);
+  const committedText = formatDeps(deps, idToNo);
+  const [text, setText] = useState(committedText);
+  const [errors, setErrors] = useState([]);
+  const dirty = useRef(false);
+  const depsKey = JSON.stringify(deps || []);
+  const previousDepsKey = useRef(depsKey);
+  const errorId = useId();
+  // Other task edits and recalculation rebuild WBS maps. Never erase an uncommitted draft.
+  useEffect(() => {
+    if (previousDepsKey.current !== depsKey) {
+      dirty.current = false;
+      setErrors([]);
+      previousDepsKey.current = depsKey;
+    }
+    if (!dirty.current) setText(committedText);
+  }, [committedText, depsKey]);
+  function commit() {
+    if (!dirty.current) return;
+    const parsed = parseDepInput(text, noToId);
+    setErrors(parsed.errors);
+    if (parsed.errors.length) return;
+    dirty.current = false;
+    onChange(parsed.deps);
+    setText(formatDeps(parsed.deps, idToNo));
+  }
   return (
-    <input
-      ref={inputRef}
-      {...inputProps}
-      value={text}
-      placeholder={t("wbs.depsPlaceholder")}
-      onChange={e => setText(e.target.value)}
-      onBlur={() => { const parsed = parseDepString(text, noToId); onChange(parsed); setText(formatDeps(parsed, idToNo)); }}
-      onKeyDown={onKeyDown}
-      className="bg-transparent outline-none w-full rounded font-mono text-[11px] border-b border-transparent focus:bg-indigo-100 focus:ring-1 focus:ring-indigo-300"
-    />
+    <div className="relative">
+      <input
+        ref={inputRef}
+        {...inputProps}
+        value={text}
+        placeholder={t("wbs.depsPlaceholder")}
+        aria-invalid={errors.length ? true : undefined}
+        aria-describedby={errors.length ? errorId : undefined}
+        onChange={e => { dirty.current = true; setText(e.target.value); }}
+        onBlur={commit}
+        onPaste={e => {
+          // Plain dependency text belongs to this draft, including invalid/mixed tokens.
+          // Keep the existing row/TSV paste behavior for structured row payloads.
+          const value = e.clipboardData.getData("text/plain");
+          let row = false;
+          try { row = JSON.parse(e.clipboardData.getData("application/x-project-scheduler-wbs"))?.kind === "row"; } catch { /* plain text */ }
+          if (!value.includes("\t") && !row) e.stopPropagation();
+          else {
+            // An explicit structured row paste supersedes the draft, even if deps stay unchanged.
+            dirty.current = false;
+            setErrors([]);
+            setText(committedText);
+          }
+        }}
+        onKeyDown={onKeyDown}
+        className={"bg-transparent outline-none w-full rounded font-mono text-[11px] border-b focus:bg-indigo-100 focus:ring-1 focus:ring-indigo-300 " +
+          (errors.length ? "border-red-500 bg-red-50 text-red-800" : "border-transparent")}
+      />
+      {errors.length > 0 && (
+        <div id={errorId} role="alert" className="absolute right-0 top-full z-30 mt-1 w-64 max-h-40 overflow-y-auto rounded-md border border-red-200 bg-red-50 p-2 text-[11px] text-red-800 shadow-md">
+          {errors.map(error => <div key={error.index}>{error.code === "unknown-wbs"
+            ? t("dependencyInput.unknownWbs", { no: error.no })
+            : t("dependencyInput.invalidFormat", { token: error.token || t("dependencyInput.emptyToken") })}</div>)}
+          <p className="mt-1 text-red-700">{t("dependencyInput.notApplied")}</p>
+        </div>
+      )}
+    </div>
   );
 }

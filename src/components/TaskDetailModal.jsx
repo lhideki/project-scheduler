@@ -7,7 +7,7 @@ import { DepInput } from "./DepInput.jsx";
 
 /** タスク／マイルストーンの詳細パネル。テーブルの1行に収まらない情報（メモ、後続タスク、
  *  スケジュール計算結果など）をまとめて確認・編集できるモーダル。 */
-export function TaskDetailModal({ task, schedule, tasks, resources, sprints, idToNo, noToId, onUpdate, onEdit, onCommitEdit, onToggleMilestone, onClose, autoScheduleHighlightIds }) {
+export function TaskDetailModal({ task, schedule, tasks, resources, sprints, idToNo, noToId, onUpdate, onEdit, onCommitEdit, onToggleMilestone, onClose, autoScheduleHighlightIds, taskContextRevision }) {
   const { t, fmtDate, fmtMonthDay } = useI18n();
   useEffect(() => {
     function onKey(e) { if (e.key === "Escape" && !e.isComposing && e.keyCode !== 229) onClose(); }
@@ -172,7 +172,7 @@ export function TaskDetailModal({ task, schedule, tasks, resources, sprints, idT
               {isSummary && <span className="text-slate-400 font-normal">{t("taskDetail.predecessorsSummaryNote")}</span>}
             </label>
             <div className="border border-slate-200 rounded-md px-2.5 py-1.5">
-              <DepInput deps={task.predecessors} idToNo={idToNo} noToId={noToId} onChange={d => onUpdate({ predecessors: d })} />
+              <DepInput key={taskContextRevision} deps={task.predecessors} idToNo={idToNo} noToId={noToId} onChange={d => onUpdate({ predecessors: d })} />
             </div>
           </div>
 

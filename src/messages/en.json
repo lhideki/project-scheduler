@@ -470,5 +470,24 @@
     "cancel": "Cancel name edit",
     "untitled": "Untitled project",
     "help": "Leave blank for an untitled project."
+  },
+  "dependencyInput": {
+    "unknownWbs": "No task has WBS number \"{no}\".",
+    "invalidFormat": "\"{token}\" is not a valid dependency (example: 1FS+2).",
+    "emptyToken": "empty item",
+    "notApplied": "Not applied. The saved dependencies are kept until all entries are valid."
+  },
+  "schedulingResult": {
+    "completed": "Recalculation complete",
+    "unresolved": "Recalculation complete with unresolved constraints",
+    "notConverged": "Recalculation did not converge",
+    "error": "Recalculation failed. The plan was not changed.",
+    "changed": "Tasks with changed start dates: {count}",
+    "remaining": "Unresolved issues: {count}",
+    "levelingOn": "Resource leveling ON",
+    "levelingOff": "Resource leveling OFF",
+    "details": "View affected tasks and reasons",
+    "dismiss": "Dismiss recalculation result",
+    "title": "Recalculation result"
   }
 }

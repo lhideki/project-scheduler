@@ -4421,6 +4421,25 @@ var ja_default = {
     cancel: "\u540D\u524D\u306E\u7DE8\u96C6\u3092\u53D6\u6D88",
     untitled: "\u7121\u984C\u306E\u30D7\u30ED\u30B8\u30A7\u30AF\u30C8",
     help: "\u7A7A\u6B04\u306B\u3059\u308B\u3068\u7121\u984C\u306E\u30D7\u30ED\u30B8\u30A7\u30AF\u30C8\u306B\u306A\u308A\u307E\u3059\u3002"
+  },
+  dependencyInput: {
+    unknownWbs: "WBS\u756A\u53F7\u300C{no}\u300D\u306E\u30BF\u30B9\u30AF\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3002",
+    invalidFormat: "\u300C{token}\u300D\u306F\u4F9D\u5B58\u95A2\u4FC2\u306E\u66F8\u5F0F\u304C\u6B63\u3057\u304F\u3042\u308A\u307E\u305B\u3093\uFF08\u4F8B: 1FS+2\uFF09\u3002",
+    emptyToken: "\u7A7A\u306E\u9805\u76EE",
+    notApplied: "\u672A\u53CD\u6620\u3067\u3059\u3002\u3059\u3079\u3066\u306E\u5165\u529B\u3092\u4FEE\u6B63\u3059\u308B\u307E\u3067\u3001\u78BA\u5B9A\u6E08\u307F\u306E\u4F9D\u5B58\u95A2\u4FC2\u3092\u4FDD\u6301\u3057\u307E\u3059\u3002"
+  },
+  schedulingResult: {
+    completed: "\u518D\u8A08\u7B97\u5B8C\u4E86",
+    unresolved: "\u518D\u8A08\u7B97\u5B8C\u4E86\u30FB\u672A\u89E3\u6C7A\u306E\u5236\u7D04\u3042\u308A",
+    notConverged: "\u518D\u8A08\u7B97\u304C\u53CE\u675F\u3057\u3066\u3044\u307E\u305B\u3093",
+    error: "\u518D\u8A08\u7B97\u306B\u5931\u6557\u3057\u307E\u3057\u305F\u3002\u8A08\u753B\u306F\u5909\u66F4\u3057\u3066\u3044\u307E\u305B\u3093\u3002",
+    changed: "\u958B\u59CB\u65E5\u3092\u5909\u66F4\u3057\u305F\u30BF\u30B9\u30AF: {count}\u4EF6",
+    remaining: "\u672A\u89E3\u6C7A: {count}\u4EF6",
+    levelingOn: "\u30EA\u30BD\u30FC\u30B9\u5E73\u6E96\u5316 ON",
+    levelingOff: "\u30EA\u30BD\u30FC\u30B9\u5E73\u6E96\u5316 OFF",
+    details: "\u5BFE\u8C61\u30BF\u30B9\u30AF\u3068\u7406\u7531\u3092\u78BA\u8A8D",
+    dismiss: "\u518D\u8A08\u7B97\u7D50\u679C\u3092\u9589\u3058\u308B",
+    title: "\u518D\u8A08\u7B97\u7D50\u679C"
   }
 };
 
@@ -4897,6 +4916,25 @@ var en_default = {
     cancel: "Cancel name edit",
     untitled: "Untitled project",
     help: "Leave blank for an untitled project."
+  },
+  dependencyInput: {
+    unknownWbs: 'No task has WBS number "{no}".',
+    invalidFormat: '"{token}" is not a valid dependency (example: 1FS+2).',
+    emptyToken: "empty item",
+    notApplied: "Not applied. The saved dependencies are kept until all entries are valid."
+  },
+  schedulingResult: {
+    completed: "Recalculation complete",
+    unresolved: "Recalculation complete with unresolved constraints",
+    notConverged: "Recalculation did not converge",
+    error: "Recalculation failed. The plan was not changed.",
+    changed: "Tasks with changed start dates: {count}",
+    remaining: "Unresolved issues: {count}",
+    levelingOn: "Resource leveling ON",
+    levelingOff: "Resource leveling OFF",
+    details: "View affected tasks and reasons",
+    dismiss: "Dismiss recalculation result",
+    title: "Recalculation result"
   }
 };
 
