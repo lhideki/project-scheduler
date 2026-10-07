@@ -10,16 +10,20 @@ export function DepInput({ deps, idToNo, noToId, onChange, inputRef, inputProps,
   const dirty = useRef(false);
   const depsKey = JSON.stringify(deps || []);
   const previousDepsKey = useRef(depsKey);
+  const mappingKey = JSON.stringify(noToId);
+  const previousMappingKey = useRef(mappingKey);
   const errorId = useId();
-  // Other task edits and recalculation rebuild WBS maps. Never erase an uncommitted draft.
+  // Unrelated edits rebuild the map object but keep its bindings. Only keep a draft
+  // while those bindings are unchanged, so old WBS numbers cannot target new tasks.
   useEffect(() => {
-    if (previousDepsKey.current !== depsKey) {
+    if (previousDepsKey.current !== depsKey || previousMappingKey.current !== mappingKey) {
       dirty.current = false;
       setErrors([]);
       previousDepsKey.current = depsKey;
+      previousMappingKey.current = mappingKey;
     }
     if (!dirty.current) setText(committedText);
-  }, [committedText, depsKey]);
+  }, [committedText, depsKey, mappingKey]);
   function commit() {
     if (!dirty.current) return;
     const parsed = parseDepInput(text, noToId);
