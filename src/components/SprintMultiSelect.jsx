@@ -24,7 +24,7 @@ export function SprintMultiSelect({ sprintIds, sprints, onChange, inputRef, inpu
         onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen(o => !o); } onKeyDown && onKeyDown(e); }}
         onClick={() => setOpen(o => !o)}
         title={selected.length ? selected.map(sp => sp.name).join("\n") : t("wbs.sprintSelectTitle")}
-        className="w-full text-left bg-transparent outline-none text-[11px] truncate hover:bg-slate-100 rounded px-0.5 text-slate-700 focus:bg-indigo-100 focus:ring-1 focus:ring-indigo-300">
+        className="w-full text-left bg-transparent outline-hidden text-[11px] truncate hover:bg-slate-100 rounded-sm px-0.5 text-slate-700 focus:bg-indigo-100 focus:ring-1 focus:ring-indigo-300">
         {label}
       </button>
       {open && (

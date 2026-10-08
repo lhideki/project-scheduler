@@ -26,6 +26,8 @@ Project Schedulerは、JiraやBacklogなどの共同管理ツールを置き換�
 3. 画面右上の「自動スケジューリング実行」を押します。
 4. 後続タスクの日程、完了予定日、クリティカルパスが変化することを確認します。
 
+Safari 16.4以上、Chrome/Edge 111以上、Firefox 128以上をご利用ください（Tailwind CSS 4の最低対応バージョン）。それより古いブラウザには対応しません。
+
 ビルドやインストールは不要です。オフラインで利用する場合は、[project_scheduler.html](project_scheduler.html)を開き、GitHub画面右上の「Download raw file」からダウンロードしてブラウザで開きます。
 
 別の端末やLive Demoとダウンロード版の間で計画を移す場合は、画面上部の「書き出し」でJSONファイルを保存し、移行先で「読み込み」を実行します。
@@ -179,6 +181,8 @@ JSON形式のフィールド、型、必須項目は[JSON形式ドキュメン�
 `project_scheduler.html`は、`src/entry.jsx`を起点にReact製のソースを[esbuild](https://esbuild.github.io/)でバンドルし、[Tailwind CSS](https://tailwindcss.com/)のスタイルとともに1つのHTMLへ埋め込んだビルド成果物です。手で直接編集せず、ソースを変更した後に再生成してください。
 
 `master`ブランチへpushすると、GitHub Actionsがテストとビルドを実行し、生成したHTMLをGitHub Pagesの[Live Demo](https://lhideki.github.io/project-scheduler/ja/)へDefault・日本語・英語の3ページとして公開します。Pull Requestでも同じテストとビルドを実行し、生成物が最新でなければ失敗します。
+
+Tailwind CSS 4は専用の`@tailwindcss/cli`パッケージを使います。`src/input.css`でJSXだけを明示的に走査し、`src/theme.css`で既存の配色・フォントを維持します。CLIと本体のバージョンをそろえ、CSS変更時も単一HTMLを再生成してください。
 
 ### 必要環境
 

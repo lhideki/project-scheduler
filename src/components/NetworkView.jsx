@@ -173,7 +173,7 @@ export function NetworkView({ tasks, setTasks, schedule, selectedId, setSelected
           <IconBtn icon={LayoutGrid} label={tr("network.tidy")} onClick={tidyLayout} small />
           {rootGroups.length > 1 && rootGroups.map(g => (
             <span key={g.id} className="flex items-center gap-1 text-[11px] text-slate-500 whitespace-nowrap">
-              <span style={{ width: 8, height: 8, borderRadius: 2, background: outlineColor[g.id] }} className="flex-shrink-0" />
+              <span style={{ width: 8, height: 8, borderRadius: 2, background: outlineColor[g.id] }} className="shrink-0" />
               {g.name}
             </span>
           ))}
@@ -263,10 +263,10 @@ export function NetworkView({ tasks, setTasks, schedule, selectedId, setSelected
       </svg>
       {edgeEdit && (
         <div style={{ position: "absolute", left: edgeEdit.x + 8, top: edgeEdit.y + 8 }} className="bg-white border border-slate-200 rounded-md shadow-lg p-2 flex items-center gap-1 z-20" onClick={e => e.stopPropagation()}>
-          <select value={edgeEdit.type} onChange={e => { updateEdge(edgeEdit.from, edgeEdit.to, { type: e.target.value }); setEdgeEdit({ ...edgeEdit, type: e.target.value }); }} className="text-xs border border-slate-200 rounded px-1 py-0.5">
+          <select value={edgeEdit.type} onChange={e => { updateEdge(edgeEdit.from, edgeEdit.to, { type: e.target.value }); setEdgeEdit({ ...edgeEdit, type: e.target.value }); }} className="text-xs border border-slate-200 rounded-sm px-1 py-0.5">
             {DEP_TYPES.map(dt => <option key={dt} value={dt}>{dt}</option>)}
           </select>
-          <input type="number" value={edgeEdit.lag} onChange={e => { const v = parseInt(e.target.value || "0", 10); updateEdge(edgeEdit.from, edgeEdit.to, { lag: v }); setEdgeEdit({ ...edgeEdit, lag: v }); }} className="w-14 text-xs border border-slate-200 rounded px-1 py-0.5 font-mono" title={tr("network.lagTitle")} aria-label={tr("network.lagTitle")} />
+          <input type="number" value={edgeEdit.lag} onChange={e => { const v = parseInt(e.target.value || "0", 10); updateEdge(edgeEdit.from, edgeEdit.to, { lag: v }); setEdgeEdit({ ...edgeEdit, lag: v }); }} className="w-14 text-xs border border-slate-200 rounded-sm px-1 py-0.5 font-mono" title={tr("network.lagTitle")} aria-label={tr("network.lagTitle")} />
           <button onClick={() => removeEdge(edgeEdit.from, edgeEdit.to)} title={tr("network.removeEdge")} aria-label={tr("network.removeEdge")} className="text-red-500 hover:text-red-700"><Trash2 size={13} /></button>
           <button onClick={() => setEdgeEdit(null)} title={tr("common.close")} aria-label={tr("common.close")} className="text-slate-400 hover:text-slate-700"><X size={13} /></button>
         </div>

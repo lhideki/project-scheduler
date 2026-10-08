@@ -20,7 +20,7 @@ npm run build     # project_scheduler.html を生成（リポジトリ直下に�
 | コマンド | 内容 |
 | --- | --- |
 | `npm run build:js` | `src/entry.jsx` を esbuild でバンドル・minify し `dist/bundle.js` を生成 |
-| `npm run build:css` | `src/input.css`（Tailwindディレクティブ）から `dist/output.css` を生成 |
+| `npm run build:css` | `src/input.css`（Tailwind CSS 4のimport・JSX走査指定）から `dist/output.css` を生成 |
 | `npm run build:html` | `template.html` に `dist/bundle.js` と `dist/output.css` を差し込み `project_scheduler.html` を生成 |
 | `npm run build:docs` | `PROJECT_JSON_SCHEMA` から `docs/json-format.md` を生成 |
 | `npm run build:agent` | `src/agent/cli.js`（と `src/lib/`・メッセージカタログ・`intl-messageformat`）を esbuild でバンドルし `.claude/skills/schedule-adjust/cli.mjs` を生成（AIエージェント用Skillのランタイム。非minify。node_modules なしで動く） |
@@ -31,6 +31,15 @@ npm run build     # project_scheduler.html を生成（リポジトリ直下に�
 `npm run dev:js` で `dist/bundle.dev.js` を watch モードでビルドできる（非minify、デバッグ用）。ただし現状 `template.html` は本番ビルドのプレースホルダー差し込み専用なので、開発中の動作確認は `dist/bundle.dev.js` を手元のHTMLから読み込むか、`npm run build` を都度実行して `project_scheduler.html` をブラウザで開いて確認する。
 
 **重要**: `src/` 配下のソースや `README.en.md` を編集したら、必ず `npm run build` を実行してからビルド成果物（`project_scheduler.html`・`docs/json-format.md`・`.claude/skills/schedule-adjust/cli.mjs`・`README.md`）の差分も一緒にコミットすること。これらの成果物を手で直接編集しない（次回ビルドで上書きされる）。Pull Request の CI（`.github/workflows/ci.yml`）は、ビルドし直した成果物がコミット済みのものと一致しなければ失敗する。
+
+### Tailwind CSS
+
+- Tailwind CSS 4と`@tailwindcss/cli`を同じバージョンで使う。旧`tailwind.config.js`は使わず、`src/input.css`と`src/theme.css`で設定する。
+- `source(none)`と`@source "./**/*.jsx"`によりJSXだけを走査する。生成済みHTML・テスト証跡のクラスを再走査すると再ビルドが安定しないため、自動走査に戻さない。
+- `src/theme.css`には既存v3由来のsRGB配色とフォントを明記する。SVG・ガントの固定色と整合させ、新しいUI色もここで定義する。入力欄・枠線・プレースホルダー・ボタンカーソルには既存表示を保つbase互換設定を置く。
+- 対応ブラウザはSafari 16.4以上、Chrome/Edge 111以上、Firefox 128以上。色を維持しても旧ブラウザ互換にはならない。
+- `scripts/build-css.test.js`で専用CLI・明示走査・CSS再現性・単一HTMLへの埋め込みを検証する。
+- CLI 4.3.3が固定する`@parcel/watcher` 2.5.1のbraces依存を避けるため、CLI配下だけ2.5.6へoverrideする（同じAPIの修正版）。上流CLIが安全な版を採用し、クリーンインストール・監査・ビルドが通るようになったらoverrideを外す。
 
 ### README
 

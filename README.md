@@ -28,6 +28,8 @@ Project Scheduler is a planning simulator, not a replacement for collaborative t
 3. Select `Run auto-scheduling` in the upper-right corner.
 4. Check how the downstream dates, projected completion date, and critical path change.
 
+Use a current browser: Safari 16.4+, Chrome/Edge 111+, or Firefox 128+ (the minimum versions required by Tailwind CSS 4). Older browsers are not supported.
+
 No build or installation is required. For offline use, open [project_scheduler.html](project_scheduler.html), select `Download raw file` on GitHub, and open the downloaded file in your browser.
 
 To move a plan between devices, or between the Live Demo and the downloaded HTML, export it as JSON from the header and import it in the other environment.
@@ -181,6 +183,8 @@ Imports currently accept only `schemaVersion: 1`. Different schema versions are 
 `project_scheduler.html` is a generated artifact. The build bundles the React source from `src/entry.jsx` with [esbuild](https://esbuild.github.io/) and embeds it with the [Tailwind CSS](https://tailwindcss.com/) output into a single HTML file. Do not edit the generated HTML directly; rebuild it after changing the source.
 
 Pushing to `master` runs the tests and build in GitHub Actions, then publishes the generated HTML to the [Live Demo](https://lhideki.github.io/project-scheduler/) on GitHub Pages as the Default, English, and Japanese pages. Pull requests run the same tests and build, and fail if a generated file is not up to date.
+
+Tailwind CSS 4 uses the separate `@tailwindcss/cli` package. `src/input.css` explicitly scans JSX only, and `src/theme.css` keeps the established colors and fonts. Keep the CLI/framework versions aligned and regenerate the single HTML after CSS changes.
 
 ### Requirements
 

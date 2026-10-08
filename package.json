@@ -28,9 +28,17 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",
+    "@tailwindcss/cli": "^4.3.3",
     "esbuild": "^0.28.2",
-    "tailwindcss": "^3.4.19",
+    "pixelmatch": "^7.1.0",
+    "pngjs": "^7.0.0",
+    "tailwindcss": "^4.3.3",
     "vitest": "^4.1.11"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "overrides": {
+    "@tailwindcss/cli": {
+      "@parcel/watcher": "2.5.6"
+    }
+  }
 }

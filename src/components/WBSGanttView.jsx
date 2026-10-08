@@ -950,13 +950,13 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
         <IconBtn icon={Redo2} label={tr("wbs.toolbar.redo")} onClick={onRedo} small disabled={!canRedo} iconOnly />
         <div className="flex-1" />
         <div className="flex items-center gap-1">
-          <ArrowLeftRight size={13} className="text-slate-400 flex-shrink-0" />
+          <ArrowLeftRight size={13} className="text-slate-400 shrink-0" />
           <select
             value={baselineVersionId || ""}
             onChange={e => setBaselineVersionId(e.target.value || null)}
             title={tr("wbs.compare.title")}
             aria-label={tr("wbs.compare.title")}
-            className="text-[11px] border border-slate-200 rounded px-1.5 py-1 bg-white text-slate-600 max-w-[150px]"
+            className="text-[11px] border border-slate-200 rounded-sm px-1.5 py-1 bg-white text-slate-600 max-w-[150px]"
           >
             <option value="">{tr("wbs.compare.none")}</option>
             {versions.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
@@ -976,7 +976,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
               aria-label={tr("gantt.toolbar.baseDate")}
               value={baseDateISO}
               onChange={e => setBaseDateOverride(e.target.value || null)}
-              className="text-[11px] border border-slate-200 rounded px-1.5 py-1 bg-white text-slate-600"
+              className="text-[11px] border border-slate-200 rounded-sm px-1.5 py-1 bg-white text-slate-600"
             />
             {baseDateISO !== todayISO && (
               <button
@@ -1028,7 +1028,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
             return (
               <div
                 style={{ position: "absolute", left: 20 + level * 12, right: 8, top: GANTT_HEADER_H + rowDrag.insertIndex * rowStride - 1, height: 2 }}
-                className="bg-indigo-500 rounded pointer-events-none z-20"
+                className="bg-indigo-500 rounded-sm pointer-events-none z-20"
               />
             );
           })()}
@@ -1072,7 +1072,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                     data-wbs-row-id={t.id}
                     onFocus={() => { activeSelectionRef.current = { kind: "row", taskId: t.id }; setSelectedId(t.id); }}
                     title={tr("wbs.row.selectTitle")}
-                    className="w-full text-left rounded px-1 outline-none focus:bg-indigo-100 focus:ring-1 focus:ring-indigo-300"
+                    className="w-full text-left rounded-sm px-1 outline-hidden focus:bg-indigo-100 focus:ring-1 focus:ring-indigo-300"
                   >
                     {t.wbsNo}
                   </button>
@@ -1091,7 +1091,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                       <button
                         onClick={(e) => { e.stopPropagation(); toggleMilestone(t.id); }}
                         title={t.milestone ? tr("wbs.row.toTask") : tr("wbs.row.toMilestone")}
-                        className="flex-shrink-0"
+                        className="shrink-0"
                       >
                         <Diamond size={10} className={t.milestone ? "text-amber-500" : "text-slate-300 hover:text-slate-400"} fill={t.milestone ? "#F59E0B" : "none"} />
                       </button>
@@ -1121,7 +1121,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                           return;
                         }
                       }}
-                      className={"bg-transparent outline-none truncate w-full rounded focus:bg-indigo-100 focus:ring-1 focus:ring-indigo-300 " + (isSummary ? "font-semibold" : "")}
+                      className={"bg-transparent outline-hidden truncate w-full rounded-sm focus:bg-indigo-100 focus:ring-1 focus:ring-indigo-300 " + (isSummary ? "font-semibold" : "")}
                     />
                   </span>
                   {(() => {
@@ -1138,20 +1138,20 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                         onPointerEnter={e => showBarTooltipAfterDelay(t.id, e.clientX, e.clientY, "issues")}
                         onPointerMove={e => moveBarTooltip(t.id, e.clientX, e.clientY)}
                         onPointerLeave={hideBarTooltip}
-                        className={"flex-shrink-0 flex items-center " + (severity === "error" ? "text-red-500" : "text-amber-500")}
+                        className={"shrink-0 flex items-center " + (severity === "error" ? "text-red-500" : "text-amber-500")}
                       >
                         <AlertTriangle size={12} />
                       </span>
                     );
                   })()}
                   {compareOn && !baselineRow && (
-                    <span className="flex-shrink-0 text-[9px] leading-none px-1 py-0.5 rounded bg-emerald-50 text-emerald-600 border border-emerald-200" title={tr("wbs.compare.newTaskTitle")}>{tr("wbs.compare.newTask")}</span>
+                    <span className="shrink-0 text-[9px] leading-none px-1 py-0.5 rounded-sm bg-emerald-50 text-emerald-600 border border-emerald-200" title={tr("wbs.compare.newTaskTitle")}>{tr("wbs.compare.newTask")}</span>
                   )}
                   <button
                     onClick={(e) => { e.stopPropagation(); setDetailId(t.id); }}
                     title={tr("wbs.row.openDetails")}
                     aria-label={tr("wbs.row.openDetails")}
-                    className="flex-shrink-0 text-slate-300 hover:text-indigo-600"
+                    className="shrink-0 text-slate-300 hover:text-indigo-600"
                   >
                     <Info size={11} />
                   </button>
@@ -1163,12 +1163,12 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                         onChange={e => editTask(t.id, "startDate", { fixedDate: e.target.value, startDate: e.target.value })}
                         ref={cellRefCallback(t.id, "startDate")} {...cellInputProps(t.id, "startDate")}
                         onKeyDown={e => handleGridCellKeyDown(e, t.id, "startDate")}
-                        className={"bg-transparent outline-none w-full rounded font-mono text-[11px] focus:bg-indigo-100 focus:ring-1 focus:ring-indigo-300 " + (autoScheduleHighlightIds.has(t.id) ? "font-bold" : "")} />
+                        className={"bg-transparent outline-hidden w-full rounded-sm font-mono text-[11px] focus:bg-indigo-100 focus:ring-1 focus:ring-indigo-300 " + (autoScheduleHighlightIds.has(t.id) ? "font-bold" : "")} />
                     ) : (
                       <input type="date" value={t.startDate || ""} onChange={e => editTask(t.id, "startDate", { startDate: e.target.value })}
                         ref={cellRefCallback(t.id, "startDate")} {...cellInputProps(t.id, "startDate")}
                         onKeyDown={e => handleGridCellKeyDown(e, t.id, "startDate")}
-                        className={"bg-transparent outline-none w-full rounded font-mono text-[11px] focus:bg-indigo-100 focus:ring-1 focus:ring-indigo-300 " + (autoScheduleHighlightIds.has(t.id) ? "font-bold" : "")} />
+                        className={"bg-transparent outline-hidden w-full rounded-sm font-mono text-[11px] focus:bg-indigo-100 focus:ring-1 focus:ring-indigo-300 " + (autoScheduleHighlightIds.has(t.id) ? "font-bold" : "")} />
                     )
                   )}
                   {isSummary && <span className="font-mono text-[11px] text-slate-400">{fmtDateCompact(sched?.schedStart)}</span>}
@@ -1179,7 +1179,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                       onChange={e => editTask(t.id, "duration", { duration: Math.max(0, Math.round(parseFloat(e.target.value || "0") * 100) / 100) })}
                       ref={cellRefCallback(t.id, "duration")} {...cellInputProps(t.id, "duration")}
                       onKeyDown={e => handleGridCellKeyDown(e, t.id, "duration")}
-                      className="bg-transparent outline-none w-full rounded font-mono text-[11px] focus:bg-indigo-100 focus:ring-1 focus:ring-indigo-300" />
+                      className="bg-transparent outline-hidden w-full rounded-sm font-mono text-[11px] focus:bg-indigo-100 focus:ring-1 focus:ring-indigo-300" />
                   )}
                 </div>
                 <div style={{ width: colWidths.finish }} className="px-1 font-mono text-[11px] text-slate-500">{fmtDateCompact(sched?.schedFinish)}</div>
@@ -1190,7 +1190,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                         title={tr("wbs.row.milestoneModeTitle")}
                         ref={cellRefCallback(t.id, "assignee")} {...cellInputProps(t.id, "assignee")}
                         onKeyDown={e => handleGridCellKeyDown(e, t.id, "assignee")}
-                        className="bg-transparent outline-none w-full rounded text-[11px] focus:bg-indigo-100 focus:ring-1 focus:ring-indigo-300">
+                        className="bg-transparent outline-hidden w-full rounded-sm text-[11px] focus:bg-indigo-100 focus:ring-1 focus:ring-indigo-300">
                         <option value="flexible">{tr("wbs.milestoneMode.flexible")}</option>
                         <option value="fixed">{tr("wbs.milestoneMode.fixed")}</option>
                       </select>
@@ -1198,7 +1198,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                       <select value={t.assigneeId || ""} onChange={e => updateTask(t.id, { assigneeId: e.target.value || null })}
                         ref={cellRefCallback(t.id, "assignee")} {...cellInputProps(t.id, "assignee")}
                         onKeyDown={e => handleGridCellKeyDown(e, t.id, "assignee")}
-                        className="bg-transparent outline-none w-full rounded text-[11px] focus:bg-indigo-100 focus:ring-1 focus:ring-indigo-300">
+                        className="bg-transparent outline-hidden w-full rounded-sm text-[11px] focus:bg-indigo-100 focus:ring-1 focus:ring-indigo-300">
                         <option value="">—</option>
                         {resources.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
                       </select>
@@ -1221,7 +1221,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                         onChange={e => updateTask(t.id, { progress: e.target.checked ? 100 : 0 })}
                         ref={cellRefCallback(t.id, "progress")} {...cellInputProps(t.id, "progress")}
                         onKeyDown={e => handleGridCellKeyDown(e, t.id, "progress")}
-                        className="rounded focus:ring-2 focus:ring-indigo-300" />
+                        className="rounded-sm focus:ring-2 focus:ring-indigo-300" />
                     ) : (
                       <div className="flex items-center gap-0.5">
                         <input type="number" min={0} max={100} step={5} value={t.progress || 0}
@@ -1229,8 +1229,8 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                           onChange={e => editTask(t.id, "progress", { progress: Math.max(0, Math.min(100, Math.round(parseFloat(e.target.value || "0")))) })}
                           ref={cellRefCallback(t.id, "progress")} {...cellInputProps(t.id, "progress")}
                           onKeyDown={e => handleGridCellKeyDown(e, t.id, "progress")}
-                          className="bg-transparent outline-none w-full rounded font-mono text-[11px] focus:bg-indigo-100 focus:ring-1 focus:ring-indigo-300" />
-                        <span className="text-[10px] text-slate-400 flex-shrink-0">%</span>
+                          className="bg-transparent outline-hidden w-full rounded-sm font-mono text-[11px] focus:bg-indigo-100 focus:ring-1 focus:ring-indigo-300" />
+                        <span className="text-[10px] text-slate-400 shrink-0">%</span>
                       </div>
                     )
                   ) : (
@@ -1257,7 +1257,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                   <div style={{ width: colWidths.grip }} />
                   <div style={{ width: colWidths.wbs }} />
                   <div style={{ width: colWidths.name }} className="px-1 flex items-center gap-1.5 min-w-0">
-                    <span style={{ marginLeft: t.level * 12 + 12 }} className="w-[3px] self-stretch my-0.5 rounded-sm bg-slate-300 flex-shrink-0" />
+                    <span style={{ marginLeft: t.level * 12 + 12 }} className="w-[3px] self-stretch my-0.5 rounded-xs bg-slate-300 shrink-0" />
                     {baselineRow ? (
                       <span className="truncate italic text-slate-400" title={tr("wbs.compare.baselineTitle", { name: baselineVersion.name })}>{baselineVersion.name}</span>
                     ) : (
@@ -1274,13 +1274,13 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                     <span>{baselineRow ? fmtDateCompact(baselineRow.schedFinish) : ""}</span>
                     {diffDays != null && diffDays !== 0 && (
                       <span
-                        className={"font-sans font-medium flex-shrink-0 " + (diffDays > 0 ? "text-orange-600" : "text-emerald-600")}
+                        className={"font-sans font-medium shrink-0 " + (diffDays > 0 ? "text-orange-600" : "text-emerald-600")}
                         title={diffDays > 0 ? tr("wbs.compare.later", { days: diffDays }) : tr("wbs.compare.earlier", { days: -diffDays })}
                       >
                         {diffDays > 0 ? `+${diffDays}` : `${diffDays}`}
                       </span>
                     )}
-                    {diffDays === 0 && <span className="font-sans text-slate-300 flex-shrink-0" title={tr("wbs.compare.same")}>±0</span>}
+                    {diffDays === 0 && <span className="font-sans text-slate-300 shrink-0" title={tr("wbs.compare.same")}>±0</span>}
                   </div>
                   <div style={{ width: colWidths.assignee }} className="px-1 text-slate-400 truncate">
                     {baselineRow && !baselineRow.hasChildren && baselineRow.assigneeId
@@ -1302,7 +1302,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
             <div style={{ width: colWidths.wbs }} className="px-2" />
             <div style={{ width: colWidths.name }} className="px-1 flex items-center gap-1">
               <span style={{ width: 12 }} />
-              <Plus size={12} className="text-slate-300 flex-shrink-0" />
+              <Plus size={12} className="text-slate-300 shrink-0" />
               <input
                 ref={newTaskInputRef}
                 value={newTaskName}
@@ -1314,7 +1314,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                   addQuickTask();
                 }}
                 placeholder={tr("wbs.newTaskPlaceholder")}
-                className="flex-1 min-w-0 bg-transparent outline-none text-slate-700 placeholder-slate-400 truncate"
+                className="flex-1 min-w-0 bg-transparent outline-hidden text-slate-700 placeholder-slate-400 truncate"
               />
             </div>
             <div style={{ width: colWidths.start }} />
@@ -1334,7 +1334,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
           onPointerDown={startPaneResize}
           onDoubleClick={resetPaneWidth}
           title={tr("wbs.paneResizeTitle")}
-          className="w-1.5 flex-shrink-0 cursor-col-resize bg-slate-200 hover:bg-indigo-400/60 active:bg-indigo-500/70"
+          className="w-1.5 shrink-0 cursor-col-resize bg-slate-200 hover:bg-indigo-400/60 active:bg-indigo-500/70"
           style={{ touchAction: "none" }}
         />
 
@@ -1586,7 +1586,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
               <div className={(issuesOnly ? "" : "mt-1 pt-1 border-t border-slate-600 ") + "space-y-0.5"}>
                 {issueLines.map((line, idx) => (
                   <div key={`issue-${idx}`} className={"flex gap-1 " + (line.severity === "error" ? "text-red-300" : "text-amber-300")}>
-                    <AlertTriangle size={11} className="flex-shrink-0 mt-[3px]" />
+                    <AlertTriangle size={11} className="shrink-0 mt-[3px]" />
                     <span>{line.text}</span>
                   </div>
                 ))}

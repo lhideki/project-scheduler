@@ -27,7 +27,7 @@ export function TaskDetailModal({ task, schedule, tasks, resources, sprints, idT
     });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-backdrop p-4" onClick={onClose}>
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-full overflow-y-auto" onClick={e => e.stopPropagation()}
         onKeyDown={e => {
           if (e.key === "Enter" && e.target.tagName === "INPUT" && !e.nativeEvent.isComposing && e.keyCode !== 229) {
@@ -48,7 +48,7 @@ export function TaskDetailModal({ task, schedule, tasks, resources, sprints, idT
           <div>
             <label className="block text-[11px] text-slate-500 mb-1">{t("taskDetail.name")}</label>
             <input value={task.name} onChange={e => onEdit("name", { name: e.target.value })}
-              className="w-full border border-slate-200 rounded-md px-2.5 py-1.5 text-sm outline-none focus:border-indigo-400" />
+              className="w-full border border-slate-200 rounded-md px-2.5 py-1.5 text-sm outline-hidden focus:border-indigo-400" />
           </div>
 
           {!isSummary && (
@@ -68,12 +68,12 @@ export function TaskDetailModal({ task, schedule, tasks, resources, sprints, idT
                 <label className="block text-[11px] text-slate-500 mb-1">{t("taskDetail.dueDate")}</label>
                 <input type="date" value={task.milestoneMode === "fixed" ? (task.fixedDate || "") : (sched?.schedStart || "")}
                   onChange={e => onEdit("startDate", { fixedDate: e.target.value, startDate: e.target.value })}
-                  className={"w-full border border-slate-200 rounded-md px-2.5 py-1.5 text-sm font-mono outline-none focus:border-indigo-400 " + (autoScheduleHighlightIds.has(task.id) ? "font-bold" : "")} />
+                  className={"w-full border border-slate-200 rounded-md px-2.5 py-1.5 text-sm font-mono outline-hidden focus:border-indigo-400 " + (autoScheduleHighlightIds.has(task.id) ? "font-bold" : "")} />
               </div>
               <div>
                 <label className="block text-[11px] text-slate-500 mb-1">{t("taskDetail.mode")}</label>
                 <select value={task.milestoneMode || "flexible"} onChange={e => onUpdate({ milestoneMode: e.target.value })}
-                  className="w-full border border-slate-200 rounded-md px-2.5 py-1.5 text-sm outline-none focus:border-indigo-400">
+                  className="w-full border border-slate-200 rounded-md px-2.5 py-1.5 text-sm outline-hidden focus:border-indigo-400">
                   <option value="flexible">{t("taskDetail.modeFlexible")}</option>
                   <option value="fixed">{t("taskDetail.modeFixed")}</option>
                 </select>
@@ -86,13 +86,13 @@ export function TaskDetailModal({ task, schedule, tasks, resources, sprints, idT
               <div>
                 <label className="block text-[11px] text-slate-500 mb-1">{t("taskDetail.startDate")}</label>
                 <input type="date" value={task.startDate || ""} onChange={e => onEdit("startDate", { startDate: e.target.value })}
-                  className={"w-full border border-slate-200 rounded-md px-2.5 py-1.5 text-sm font-mono outline-none focus:border-indigo-400 " + (autoScheduleHighlightIds.has(task.id) ? "font-bold" : "")} />
+                  className={"w-full border border-slate-200 rounded-md px-2.5 py-1.5 text-sm font-mono outline-hidden focus:border-indigo-400 " + (autoScheduleHighlightIds.has(task.id) ? "font-bold" : "")} />
               </div>
               <div>
                 <label className="block text-[11px] text-slate-500 mb-1">{t("taskDetail.duration")}</label>
                 <input type="number" min={0} step={0.5} value={task.duration}
                   onChange={e => onEdit("duration", { duration: Math.max(0, Math.round(parseFloat(e.target.value || "0") * 100) / 100) })}
-                  className="w-full border border-slate-200 rounded-md px-2.5 py-1.5 text-sm font-mono outline-none focus:border-indigo-400" />
+                  className="w-full border border-slate-200 rounded-md px-2.5 py-1.5 text-sm font-mono outline-hidden focus:border-indigo-400" />
               </div>
             </div>
           )}
@@ -101,7 +101,7 @@ export function TaskDetailModal({ task, schedule, tasks, resources, sprints, idT
             <div>
               <label className="block text-[11px] text-slate-500 mb-1">{t("taskDetail.assignee")}</label>
               <select value={task.assigneeId || ""} onChange={e => onUpdate({ assigneeId: e.target.value || null })}
-                className="w-full border border-slate-200 rounded-md px-2.5 py-1.5 text-sm outline-none focus:border-indigo-400">
+                className="w-full border border-slate-200 rounded-md px-2.5 py-1.5 text-sm outline-hidden focus:border-indigo-400">
                 <option value="">{t("taskDetail.unassigned")}</option>
                 {resources.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
               </select>
@@ -156,10 +156,10 @@ export function TaskDetailModal({ task, schedule, tasks, resources, sprints, idT
                 <input type="range" onPointerUp={onCommitEdit} onKeyUp={onCommitEdit} min={0} max={100} step={5} value={task.progress || 0}
                   onChange={e => onEdit("progress", { progress: Math.max(0, Math.min(100, parseInt(e.target.value, 10))) })}
                   className="flex-1" />
-                <div className="flex items-center gap-0.5 w-16 flex-shrink-0">
+                <div className="flex items-center gap-0.5 w-16 shrink-0">
                   <input type="number" min={0} max={100} step={5} value={task.progress || 0}
                     onChange={e => onEdit("progress", { progress: Math.max(0, Math.min(100, Math.round(parseFloat(e.target.value || "0")))) })}
-                    className="w-full border border-slate-200 rounded-md px-1.5 py-1 text-sm font-mono outline-none focus:border-indigo-400" />
+                    className="w-full border border-slate-200 rounded-md px-1.5 py-1 text-sm font-mono outline-hidden focus:border-indigo-400" />
                   <span className="text-xs text-slate-400">%</span>
                 </div>
               </div>
@@ -213,7 +213,7 @@ export function TaskDetailModal({ task, schedule, tasks, resources, sprints, idT
             <label className="block text-[11px] text-slate-500 mb-1">{t("taskDetail.notes")}</label>
             <textarea value={task.notes || ""} onChange={e => onEdit("notes", { notes: e.target.value })} rows={3}
               placeholder={t("taskDetail.notesPlaceholder")}
-              className="w-full border border-slate-200 rounded-md px-2.5 py-1.5 text-sm outline-none focus:border-indigo-400 resize-none" />
+              className="w-full border border-slate-200 rounded-md px-2.5 py-1.5 text-sm outline-hidden focus:border-indigo-400 resize-none" />
           </div>
         </div>
 

@@ -99,14 +99,14 @@ export function CalendarExceptionsEditor({ exceptions, setExceptions, cal, reque
                   <td className="px-3 py-1.5">
                     <div className="flex items-center gap-1.5">
                       <input type="date" value={e.date || ""} onChange={ev => update(index, { date: ev.target.value })}
-                        className="bg-transparent outline-none font-mono" />
+                        className="bg-transparent outline-hidden font-mono" />
                       <span className="text-slate-400">{dowLabel(e.date)}</span>
                     </div>
                   </td>
                   <td className="px-3 py-1.5">
                     <select value={e.type === "workday" ? "workday" : e.type === "holiday" ? "holiday" : ""}
                       onChange={ev => update(index, { type: ev.target.value })}
-                      className="bg-transparent outline-none">
+                      className="bg-transparent outline-hidden">
                       {e.type !== "workday" && e.type !== "holiday" && (
                         <option value="" disabled>{t("calendar.exceptions.invalidType")}</option>
                       )}
@@ -118,10 +118,10 @@ export function CalendarExceptionsEditor({ exceptions, setExceptions, cal, reque
                     <div className="flex items-center gap-1.5">
                       <input value={e.name || ""} onChange={ev => update(index, { name: ev.target.value })}
                         placeholder={e.type === "workday" ? t("calendar.exceptions.placeholder.workday") : t("calendar.exceptions.placeholder.holiday")}
-                        className="bg-transparent outline-none w-full placeholder-slate-300" />
+                        className="bg-transparent outline-hidden w-full placeholder-slate-300" />
                       {hint && (
                         <span title={hint} role="img" aria-label={hint}>
-                          <AlertTriangle size={12} className="text-amber-500 flex-shrink-0" />
+                          <AlertTriangle size={12} className="text-amber-500 shrink-0" />
                         </span>
                       )}
                     </div>
