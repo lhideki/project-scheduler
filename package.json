@@ -33,5 +33,10 @@
     "tailwindcss": "^4.3.3",
     "vitest": "^4.1.11"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "overrides": {
+    "@tailwindcss/cli": {
+      "@parcel/watcher": "2.5.6"
+    }
+  }
 }

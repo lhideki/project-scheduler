@@ -17,10 +17,31 @@
     border-radius: revert;
     opacity: revert;
   }
+  th, td { padding: revert; }
+  /* v4 changed native date-field sizing; retain the prior WBS/toolbar geometry. */
+  ::-webkit-date-and-time-value { min-height: revert; text-align: revert; }
+  ::-webkit-datetime-edit { display: revert; }
+  ::-webkit-datetime-edit-fields-wrapper { padding: revert; }
+  ::-webkit-datetime-edit,
+  ::-webkit-datetime-edit-year-field,
+  ::-webkit-datetime-edit-month-field,
+  ::-webkit-datetime-edit-day-field,
+  ::-webkit-datetime-edit-hour-field,
+  ::-webkit-datetime-edit-minute-field,
+  ::-webkit-datetime-edit-second-field,
+  ::-webkit-datetime-edit-millisecond-field,
+  ::-webkit-datetime-edit-meridiem-field { padding-block: revert; }
+  ::-webkit-calendar-picker-indicator { line-height: revert; }
   button, [role="button"] {
     cursor: pointer;
   }
   :disabled {
     cursor: default;
   }
+}
+
+/* Retain the v3 transparent focus outline, including forced-colors visibility. */
+@utility outline-hidden {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
 }

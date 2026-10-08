@@ -28,3 +28,9 @@ evidence artifact. There are no image masks, replacement fonts, CSS overrides,
 pixel tolerances, or auto-updating reference screenshots. Carets are hidden and
 CSS animations are completed using Playwright's standard screenshot options;
 JavaScript animations must settle before capture.
+
+For direct children of a `space-y-*` container, the style comparison measures
+the exact rendered sibling gaps and all child/container rectangles instead of
+comparing top-versus-bottom margin placement. Tailwind v3 and v4 assign those
+margins to different siblings. The original computed margins remain in each
+report's diagnostics; the zero-difference pixel assertion is unchanged.

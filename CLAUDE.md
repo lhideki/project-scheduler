@@ -39,6 +39,7 @@ npm run build     # project_scheduler.html を生成（リポジトリ直下に�
 - `src/theme.css`には既存v3由来のsRGB配色とフォントを明記する。SVG・ガントの固定色と整合させ、新しいUI色もここで定義する。入力欄・枠線・プレースホルダー・ボタンカーソルには既存表示を保つbase互換設定を置く。
 - 対応ブラウザはSafari 16.4以上、Chrome/Edge 111以上、Firefox 128以上。色を維持しても旧ブラウザ互換にはならない。
 - `scripts/build-css.test.js`で専用CLI・明示走査・CSS再現性・単一HTMLへの埋め込みを検証する。
+- CLI 4.3.3が固定する`@parcel/watcher` 2.5.1のbraces依存を避けるため、CLI配下だけ2.5.6へoverrideする（同じAPIの修正版）。上流CLIが安全な版を採用し、クリーンインストール・監査・ビルドが通るようになったらoverrideを外す。
 
 ### README
 

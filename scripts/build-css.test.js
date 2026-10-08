@@ -22,6 +22,13 @@ describe("Tailwind v4 standalone CSS build", () => {
     expect(lock.packages["node_modules/tailwindcss"].version).toMatch(/^4\./);
     expect(lock.packages["node_modules/@tailwindcss/cli"].version).toBe(lock.packages["node_modules/tailwindcss"].version);
   });
+  it("keeps the scoped watcher fix free of the vulnerable glob dependency", () => {
+    const lock = JSON.parse(read("package-lock.json"));
+    expect(JSON.parse(read("package.json")).overrides["@tailwindcss/cli"]["@parcel/watcher"]).toBe("2.5.6");
+    expect(lock.packages["node_modules/@parcel/watcher"].version).toBe("2.5.6");
+    expect(lock.packages).not.toHaveProperty("node_modules/braces");
+    expect(lock.packages).not.toHaveProperty("node_modules/micromatch");
+  });
   it("scans only JSX, preserving the app palette and migrated utilities", () => {
     const css = read("src/input.css");
     expect(css).toContain('@import "tailwindcss" source(none)');

@@ -1,7 +1,11 @@
 import { test, expect } from "@playwright/test";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { gunzipSync } from "node:zlib";
+
+// Two full single-file app snapshots make traces unnecessarily large. Keep real
+// before/after/diff PNGs, computed reports and failure context instead.
+test.use({ trace: "off", actionTimeout: 10_000 });
 
 // A live rendering of the immutable v3 build avoids OS/font-dependent golden
 // screenshots and cannot accidentally bless the candidate via --update-snapshots.
@@ -89,7 +93,7 @@ const scenarios = [
       await page.getByRole("button", { name: "Network", exact: true }).click();
       await expect(page.getByRole("button", { name: "Auto layout", exact: true })).toBeVisible();
       await expect(page.locator("svg").getByText("Design", { exact: true })).toBeVisible();
-      await expect(page.locator("svg").getByText("Build and verify", { exact: true })).toBeVisible();
+      await expect(page.locator("svg").getByText("Build and verif…", { exact: true })).toBeVisible();
     },
   },
   {
@@ -138,7 +142,7 @@ const scenarios = [
   {
     name: "calendar",
     async open(page) {
-      await page.getByRole("button", { name: /^Calendar/ }).click();
+      await openTab(page, /^Calendar/);
       await expect(page.getByRole("heading", { name: "Non-working day calendar", exact: true })).toBeVisible();
       await expect(page.locator('input[value="Team day"]')).toBeVisible();
     },
@@ -146,7 +150,7 @@ const scenarios = [
   {
     name: "versions-comparison",
     async open(page) {
-      await page.getByRole("button", { name: /^Versions/ }).click();
+      await openTab(page, /^Versions/);
       await page.getByRole("checkbox", { name: 'Compare "Approved baseline"', exact: true }).check();
       await page.getByRole("checkbox", { name: 'Compare "Earlier comparison"', exact: true }).check();
       await expect(page.getByRole("heading", { name: "Version comparison", exact: true })).toBeVisible();
@@ -161,6 +165,20 @@ const scenarios = [
     },
   },
 ];
+
+async function openTab(page, name) {
+  const tab = page.getByRole("button", { name });
+  if (page.viewportSize().width < 600) {
+    // The immutable v3 tab row already overflows on narrow screens. Exercise its
+    // keyboard path to reach the last tabs without forcing a click or changing
+    // layout/CSS; comparison still uses the untouched mobile rendering.
+    await tab.focus();
+    await expect(tab).toBeFocused();
+    await tab.press("Enter");
+  } else {
+    await tab.click();
+  }
+}
 
 async function boot(context, html, errors, blockedRequests, project) {
   // Every request is fulfilled locally or rejected. A newly introduced CDN/font
@@ -220,6 +238,16 @@ async function computedEvidence(page) {
       "outlineStyle", "outlineWidth", "outlineOffset",
     ];
     const colors = ["color", "backgroundColor", "borderTopColor", "borderRightColor", "borderBottomColor", "borderLeftColor", "outlineColor"];
+    const round = value => Math.round(value * 1000) / 1000;
+    const rectOf = element => {
+      const rect = element.getBoundingClientRect();
+      return Object.fromEntries(["x", "y", "width", "height"].map(key => [key, round(rect[key])]));
+    };
+    const isRendered = element => {
+      const rect = element.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0 && getComputedStyle(element).visibility !== "hidden";
+    };
+    const spacingClasses = element => [...(element?.classList || [])].filter(name => /^space-y-/.test(name));
     const canvas = document.createElement("canvas");
     canvas.width = canvas.height = 1;
     const context = canvas.getContext("2d", { willReadFrequently: true });
@@ -234,28 +262,43 @@ async function computedEvidence(page) {
       return colorCache.get(color);
     }
     const selectors = ".ps-app-root, .ps-app-root > div, button, input, select, textarea, table, thead, th, td, h3, [role=menu], [data-wbs-cell], .fixed, .fixed > div, svg";
-    const elements = [...document.querySelectorAll(selectors)].filter(element => {
-      const rect = element.getBoundingClientRect();
+    const elements = [...document.querySelectorAll(selectors)].filter(isRendered).map((element, index) => {
       const style = getComputedStyle(element);
-      return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden";
-    }).map((element, index) => {
-      const rect = element.getBoundingClientRect();
-      const style = getComputedStyle(element);
-      const round = value => Math.round(value * 1000) / 1000;
+      const verticalSpaceChild = spacingClasses(element.parentElement).length > 0;
       return {
         key: `${index}:${element.tagName.toLowerCase()}:${element.getAttribute("data-wbs-cell") || element.getAttribute("data-testid") || element.getAttribute("aria-label") || element.getAttribute("role") || (element.value ?? element.textContent).trim().slice(0, 70)}`,
-        rect: Object.fromEntries(["x", "y", "width", "height"].map(key => [key, round(rect[key])])),
-        style: Object.fromEntries(properties.map(property => [property, style[property]])),
+        rect: rectOf(element),
+        // v3 puts space-y on the following child's top; v4 puts it on the
+        // preceding child's bottom. Compare the resulting gaps below, while
+        // retaining both raw margins and every element's exact geometry.
+        style: Object.fromEntries(properties.filter(property => !verticalSpaceChild || !["marginTop", "marginBottom"].includes(property)).map(property => [property, style[property]])),
         colors: Object.fromEntries(colors.map(property => [property, rgba(style[property])])),
         // Equivalent shadow lists can serialize differently in v3 and v4. Keep
         // their complete strings for diagnosis; exact pixels verify the effect.
-        diagnostic: { boxShadow: style.boxShadow, backgroundImage: style.backgroundImage, rawColors: Object.fromEntries(colors.map(property => [property, style[property]])) },
+        diagnostic: { boxShadow: style.boxShadow, backgroundImage: style.backgroundImage, rawColors: Object.fromEntries(colors.map(property => [property, style[property]])), rawVerticalMargins: { marginTop: style.marginTop, marginBottom: style.marginBottom }, verticalSpacingClasses: spacingClasses(element.parentElement) },
       };
     });
+    const verticalSpacing = [...document.querySelectorAll("[class]")]
+      .filter(element => spacingClasses(element).length > 0 && isRendered(element))
+      .map((element, index) => {
+        const children = [...element.children].filter(isRendered);
+        return {
+          key: `${index}:${element.tagName.toLowerCase()}:${spacingClasses(element).join(" ")}`,
+          rect: rectOf(element),
+          children: children.map((child, childIndex) => {
+            const rect = child.getBoundingClientRect();
+            const previous = children[childIndex - 1]?.getBoundingClientRect();
+            return {
+              tag: child.tagName.toLowerCase(), rect: rectOf(child),
+              gapFromPrevious: previous ? round(rect.top - previous.bottom) : null,
+            };
+          }),
+        };
+      });
     return {
       environment: { width: innerWidth, height: innerHeight, devicePixelRatio, language: navigator.language, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, clock: new Date().toISOString(), fonts: document.fonts.status },
       document: { width: document.documentElement.scrollWidth, height: document.documentElement.scrollHeight, scrollX, scrollY },
-      elements,
+      elements, verticalSpacing,
     };
   });
 }
@@ -351,6 +394,7 @@ for (const [device, viewport] of [["desktop", { width: 1600, height: 1000 }], ["
       const browserErrors = { before: [], after: [] };
       const blockedRequests = { before: [], after: [] };
       const project = scenario.prepareProject ? scenario.prepareProject(projectFixture()) : projectFixture();
+      let primaryError;
       try {
         pages.before = await boot(beforeContext, baselineBytes, browserErrors.before, blockedRequests.before, project);
         pages.after = await boot(afterContext, await readFile("project_scheduler.html"), browserErrors.after, blockedRequests.after, project);
@@ -370,27 +414,37 @@ for (const [device, viewport] of [["desktop", { width: 1600, height: 1000 }], ["
           candidateHtmlSha256: sha256(await readFile("project_scheduler.html")),
           chromium: browser.version(), device, scenario: scenario.name, viewport, fixedTime: NOW,
           pixelPolicy: "Exact RGBA equality; zero changed pixels allowed; no masks or tolerances",
+          styleNormalization: "Only direct children of a /^space-y-/ utility container compare exact visible sibling gaps and child/container rectangles instead of marginTop/marginBottom placement. Raw vertical margins remain in diagnostics. All other computed styles, geometry, and pixels remain strict.",
           pixels, styleAndGeometryDifferences, browserErrors, blockedRequests, ...evidence,
         };
         await testInfo.attach(`${prefix}-diff.png`, { body: Buffer.from(diffPng, "base64"), contentType: "image/png" });
-        await testInfo.attach(`${prefix}-comparison.json`, { body: Buffer.from(JSON.stringify(report, null, 2)), contentType: "application/json" });
+        const reportPath = testInfo.outputPath(`${prefix}-comparison.json`);
+        await writeFile(reportPath, JSON.stringify(report, null, 2));
+        await testInfo.attach(`${prefix}-comparison.json`, { path: reportPath, contentType: "application/json" });
         expect.soft(browserErrors, "Neither build has uncaught browser errors").toEqual({ before: [], after: [] });
         expect.soft(blockedRequests, "Both single-file builds work without external requests").toEqual({ before: [], after: [] });
         expect.soft(evidence.before.elements.length, "Exercise a populated UI, not an empty screenshot").toBeGreaterThan(20);
-        expect.soft(styleAndGeometryDifferences, "Every measured control, table, header, modal, and chart retains v3 geometry and computed styles; see comparison JSON").toEqual([]);
+        const sample = styleAndGeometryDifferences.slice(0, 5).map(diff => `${diff.path}: ${JSON.stringify(diff.before).slice(0, 80)} -> ${JSON.stringify(diff.after).slice(0, 80)}`).join("; ");
+        expect.soft(styleAndGeometryDifferences.length, `${styleAndGeometryDifferences.length} geometry/computed-style differences (${sample}); full values are in ${prefix}-comparison.json`).toBe(0);
         expect.soft(pixels.after, "Before and after screenshot dimensions match").toEqual(pixels.before);
         expect.soft(pixels.changedPixels, `Exact visual regression: ${pixels.changedPixels}/${pixels.totalPixels} pixels changed; see before, after, diff and comparison attachments`).toBe(0);
+      } catch (error) {
+        primaryError = error;
+        throw error;
       } finally {
         // Keep evidence even if a selector/action fails before the normal captures.
         for (const [side, page] of Object.entries(pages)) {
           if (!captured.has(side) && !page.isClosed()) {
             try {
-              await testInfo.attach(`${prefix}-${side}-interrupted.png`, { body: await page.screenshot(screenshotOptions), contentType: "image/png" });
+              await testInfo.attach(`${prefix}-${side}-interrupted.png`, { body: await page.screenshot({ ...screenshotOptions, timeout: 5_000 }), contentType: "image/png" });
             } catch { /* Preserve the original actionable failure. */ }
           }
         }
-        await beforeContext.close();
-        await afterContext.close();
+        const cleanup = await Promise.allSettled([beforeContext.close(), afterContext.close()]);
+        const cleanupErrors = cleanup.filter(result => result.status === "rejected").map(result => String(result.reason));
+        if (cleanupErrors.length && !primaryError && testInfo.errors.length === 0) {
+          throw new Error(`Context cleanup failed: ${cleanupErrors.join("; ")}`);
+        }
       }
     });
   }
