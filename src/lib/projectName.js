@@ -1,4 +1,5 @@
 /** Names are display metadata, never storage keys, file paths, or identifiers.
+ * Export suggestions use a separate sanitized copy (exportFilename.js).
  * Keep internal whitespace and Unicode intact; an empty value means unnamed.
  * External data must pass projectValidation before reaching this helper.
  */
