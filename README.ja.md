@@ -26,6 +26,8 @@ Project Schedulerは、JiraやBacklogなどの共同管理ツールを置き換�
 3. 画面右上の「自動スケジューリング実行」を押します。
 4. 後続タスクの日程、完了予定日、クリティカルパスが変化することを確認します。
 
+Safari 16.4以上、Chrome/Edge 111以上、Firefox 128以上をご利用ください（Tailwind CSS 4の最低対応バージョン）。それより古いブラウザには対応しません。
+
 ビルドやインストールは不要です。オフラインで利用する場合は、[project_scheduler.html](project_scheduler.html)を開き、GitHub画面右上の「Download raw file」からダウンロードしてブラウザで開きます。
 
 別の端末やLive Demoとダウンロード版の間で計画を移す場合は、画面上部の「書き出し」でJSONファイルを保存し、移行先で「読み込み」を実行します。
@@ -88,7 +90,9 @@ Live Demoは、表示言語の異なる3つのページで公開しています�
 
 ヘッダーの名前を押すと設定・変更でき、適用または取消を選べます（Enter / Escapeにも対応）。名前はヘッダーとブラウザのタブに表示します。空欄は選択した言語の「無題のプロジェクト」と表示し、その既定表示名自体は保存しません。
 
-名前は、タスク0件の場合もブラウザ保存、JSON、連携JSON、共有HTML、CLIの提案JSONで保持します。日程バージョンを復元しても現在の名前は維持します。名前の変更でファイル名、`schedule`の関連付け、保存先は変わらず、別の保存枠も増えません。同名を付けることもできます。
+名前は、タスク0件の場合もブラウザ保存、JSON、連携JSON、共有HTML、CLIの提案JSONで保持します。日程バージョンを復元しても現在の名前は維持します。名前の変更で既存のファイル名、`schedule`の関連付け、保存先は変わらず、別の保存枠も増えません。同名を付けることもできます。
+
+新規ダウンロード時の既定ファイル名は、適用済みのプロジェクト名を使った`プロジェクト名_YYYY-MM-DD.json`、`プロジェクト名-share_YYYY-MM-DD.html`、`プロジェクト名-gantt_YYYY-MM-DD.png`（PNGのクリップボードコピーに非対応、または失敗した場合）です。ファイル名に使えない文字は置換し、制御文字は除去、長い名前は短縮しますが、保存されたプロジェクト名は変更しません。空欄や利用できる文字がない名前では従来の既定名（`project-scheduler_…`、`project-scheduler-share_…`、`gantt_…`）を使います。ブラウザの保存ダイアログが有効な場合は、そこでファイル名を変更できます。
 
 名前のない既存の`schemaVersion: 1` JSONも読み込めます。名前対応前のHTML・CLIでは、再書き出し時に`projectName`が失われ、旧Schemaでも検証に失敗するため、対応版のHTML・CLIを組み合わせて使用してください。[読み込み検証と互換性](docs/import-validation.md)も参照してください。
 
@@ -177,6 +181,8 @@ JSON形式のフィールド、型、必須項目は[JSON形式ドキュメン�
 `project_scheduler.html`は、`src/entry.jsx`を起点にReact製のソースを[esbuild](https://esbuild.github.io/)でバンドルし、[Tailwind CSS](https://tailwindcss.com/)のスタイルとともに1つのHTMLへ埋め込んだビルド成果物です。手で直接編集せず、ソースを変更した後に再生成してください。
 
 `master`ブランチへpushすると、GitHub Actionsがテストとビルドを実行し、生成したHTMLをGitHub Pagesの[Live Demo](https://lhideki.github.io/project-scheduler/ja/)へDefault・日本語・英語の3ページとして公開します。Pull Requestでも同じテストとビルドを実行し、生成物が最新でなければ失敗します。
+
+Tailwind CSS 4は専用の`@tailwindcss/cli`パッケージを使います。`src/input.css`でJSXだけを明示的に走査し、`src/theme.css`で既存の配色・フォントを維持します。CLIと本体のバージョンをそろえ、CSS変更時も単一HTMLを再生成してください。
 
 ### 必要環境
 

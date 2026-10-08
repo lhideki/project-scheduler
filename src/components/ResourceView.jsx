@@ -65,9 +65,9 @@ export function ResourceView({ resources, setResources, tasks, schedule, request
             <tbody>
               {resources.map(r => (
                 <tr key={r.id} className="border-t border-slate-100">
-                  <td className="px-3 py-1.5"><input value={r.name} onChange={e => update(r.id, { name: e.target.value })} className="bg-transparent outline-none w-full" /></td>
-                  <td className="px-3 py-1.5"><input type="number" min={0} max={7} value={r.weeklyCapacity} onChange={e => update(r.id, { weeklyCapacity: parseFloat(e.target.value || "0") })} className="bg-transparent outline-none w-20 font-mono" /></td>
-                  <td className="px-3 py-1.5"><input type="number" min={0} value={r.monthlyCapacity} onChange={e => update(r.id, { monthlyCapacity: parseFloat(e.target.value || "0") })} className="bg-transparent outline-none w-20 font-mono" /></td>
+                  <td className="px-3 py-1.5"><input value={r.name} onChange={e => update(r.id, { name: e.target.value })} className="bg-transparent outline-hidden w-full" /></td>
+                  <td className="px-3 py-1.5"><input type="number" min={0} max={7} value={r.weeklyCapacity} onChange={e => update(r.id, { weeklyCapacity: parseFloat(e.target.value || "0") })} className="bg-transparent outline-hidden w-20 font-mono" /></td>
+                  <td className="px-3 py-1.5"><input type="number" min={0} value={r.monthlyCapacity} onChange={e => update(r.id, { monthlyCapacity: parseFloat(e.target.value || "0") })} className="bg-transparent outline-hidden w-20 font-mono" /></td>
                   <td className="px-1"><button onClick={() => remove(r.id)} title={t("common.delete")} aria-label={t("common.delete")} className="text-slate-300 hover:text-red-500"><Trash2 size={13} /></button></td>
                 </tr>
               ))}
@@ -79,7 +79,7 @@ export function ResourceView({ resources, setResources, tasks, schedule, request
       <div>
         <div className="flex items-center gap-2 mb-2">
           <h3 className="text-sm font-semibold text-slate-700">{t("resources.weeklyLoad")}</h3>
-          <select value={selRes || ""} aria-label={t("resources.selectAssignee")} onChange={e => setSelRes(e.target.value)} className="text-xs border border-slate-200 rounded px-2 py-1">
+          <select value={selRes || ""} aria-label={t("resources.selectAssignee")} onChange={e => setSelRes(e.target.value)} className="text-xs border border-slate-200 rounded-sm px-2 py-1">
             {resources.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
           </select>
         </div>

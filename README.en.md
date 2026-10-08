@@ -26,6 +26,8 @@ Project Scheduler is a planning simulator, not a replacement for collaborative t
 3. Select `Run auto-scheduling` in the upper-right corner.
 4. Check how the downstream dates, projected completion date, and critical path change.
 
+Use a current browser: Safari 16.4+, Chrome/Edge 111+, or Firefox 128+ (the minimum versions required by Tailwind CSS 4). Older browsers are not supported.
+
 No build or installation is required. For offline use, open [project_scheduler.html](project_scheduler.html), select `Download raw file` on GitHub, and open the downloaded file in your browser.
 
 To move a plan between devices, or between the Live Demo and the downloaded HTML, export it as JSON from the header and import it in the other environment.
@@ -88,7 +90,9 @@ All three pages are served from the same site, so they share the plan saved in y
 
 Click the name in the header to set or change it, then apply or cancel the edit (Enter/Escape also work). The header and browser tab show the name. Blank names display “Untitled project” in the selected language; that translated label is not stored.
 
-Names are kept in browser storage, JSON, linked JSON, shareable HTML, and the CLI's proposed JSON, including projects with no tasks. Restoring a schedule version keeps the current project name. Changing a name does not rename files, change the `schedule` association or storage location, or create a separate project slot. Duplicate names are allowed.
+Names are kept in browser storage, JSON, linked JSON, shareable HTML, and the CLI's proposed JSON, including projects with no tasks. Restoring a schedule version keeps the current project name. Changing a name does not rename existing files, change the `schedule` association or storage location, or create a separate project slot. Duplicate names are allowed.
+
+New downloads use the applied project name as their default filename: `Project Name_YYYY-MM-DD.json`, `Project Name-share_YYYY-MM-DD.html`, and `Project Name-gantt_YYYY-MM-DD.png` (when PNG clipboard copying is unavailable or fails). Forbidden filename characters are replaced, control characters are removed, and long names are shortened without changing the stored name. Blank or unusable names keep the previous defaults (`project-scheduler_…`, `project-scheduler-share_…`, and `gantt_…`). You can still change the suggested name in the browser’s save dialog when enabled.
 
 Existing nameless `schemaVersion: 1` files remain readable. Use updated HTML and CLI versions together: older versions discard the new `projectName` field on re-export, and their schema rejects it. See [import validation and compatibility](docs/import-validation.md).
 
@@ -177,6 +181,8 @@ Imports currently accept only `schemaVersion: 1`. Different schema versions are 
 `project_scheduler.html` is a generated artifact. The build bundles the React source from `src/entry.jsx` with [esbuild](https://esbuild.github.io/) and embeds it with the [Tailwind CSS](https://tailwindcss.com/) output into a single HTML file. Do not edit the generated HTML directly; rebuild it after changing the source.
 
 Pushing to `master` runs the tests and build in GitHub Actions, then publishes the generated HTML to the [Live Demo](https://lhideki.github.io/project-scheduler/en/) on GitHub Pages as the Default, English, and Japanese pages. Pull requests run the same tests and build, and fail if a generated file is not up to date.
+
+Tailwind CSS 4 uses the separate `@tailwindcss/cli` package. `src/input.css` explicitly scans JSX only, and `src/theme.css` keeps the established colors and fonts. Keep the CLI/framework versions aligned and regenerate the single HTML after CSS changes.
 
 ### Requirements
 

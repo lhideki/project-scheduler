@@ -41,7 +41,7 @@ export function VersionsView({ versions, onSave, onDelete, onRename, onRestore, 
   return (
     <div className="h-full overflow-auto p-4 space-y-5">
       <div className="flex items-center gap-2">
-        <input value={name} onChange={e => setName(e.target.value)} placeholder={t("versions.namePlaceholder")} aria-label={t("versions.nameLabel")} className="text-xs border border-slate-200 rounded px-2 py-1.5 w-56" />
+        <input value={name} onChange={e => setName(e.target.value)} placeholder={t("versions.namePlaceholder")} aria-label={t("versions.nameLabel")} className="text-xs border border-slate-200 rounded-sm px-2 py-1.5 w-56" />
         <IconBtn icon={Save} label={t("versions.save")} onClick={() => { onSave(name || t("versions.defaultName", { n: versions.length + 1 })); setName(""); }} small />
       </div>
 
@@ -69,7 +69,7 @@ export function VersionsView({ versions, onSave, onDelete, onRename, onRestore, 
                       value={v.name}
                       onChange={e => onRename(v.id, e.target.value)}
                       title={t("versions.renameTitle")}
-                      className="bg-transparent outline-none w-full rounded px-1 py-0.5 -mx-1 hover:bg-slate-50 focus:bg-white focus:ring-1 focus:ring-indigo-300"
+                      className="bg-transparent outline-hidden w-full rounded-sm px-1 py-0.5 -mx-1 hover:bg-slate-50 focus:bg-white focus:ring-1 focus:ring-indigo-300"
                     />
                   </td>
                   <td className="px-3 py-1.5 font-mono text-slate-500">{fmtDateTime(v.createdAt)}</td>
@@ -110,7 +110,7 @@ export function VersionsView({ versions, onSave, onDelete, onRename, onRestore, 
             <div style={{ width: chartWidth + 220 }}>
               {allTaskIds.map(([id, name]) => (
                 <div key={id} className="flex items-center border-b border-slate-50" style={{ height: 26 }}>
-                  <div style={{ width: 220 }} className="text-[11px] text-slate-600 truncate px-2 flex-shrink-0">{name}</div>
+                  <div style={{ width: 220 }} className="text-[11px] text-slate-600 truncate px-2 shrink-0">{name}</div>
                   <svg width={chartWidth} height={26}>
                     {selected.map((v, vi) => {
                       const vt = v.tasks.find(x => x.id === id);

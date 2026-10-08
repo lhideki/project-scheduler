@@ -20,6 +20,7 @@ import {
   downloadJSON, downloadTextFile, copyTextToClipboard, generateMermaidGantt,
   buildProjectExport, prepareProjectImport,
 } from "./lib/exportUtils.js";
+import { buildExportFilename } from "./lib/exportFilename.js";
 import { seedData } from "./lib/seedData.js";
 import { buildVersionSnapshot, hasFullVersionSnapshot, restoreVersionSnapshot } from "./lib/versionSnapshot.js";
 import { createTaskHistory, taskHistoryReducer, canUndoTasks, canRedoTasks } from "./lib/history.js";
@@ -528,14 +529,14 @@ export default function App() {
 
   function exportProject() {
     const data = buildProjectExport(tasks, resources, sprints, versions, levelingOn, calendarExceptions, projectName);
-    downloadJSON(`project-scheduler_${toISO(new Date())}.json`, data);
+    downloadJSON(buildExportFilename(projectName, "json", toISO(new Date())), data);
     showToast(t("toast.exportedJson"));
   }
   function exportSharedHtml() {
     try {
       const data = buildProjectExport(tasks, resources, sprints, versions, levelingOn, calendarExceptions, projectName);
       const html = buildSharedHtml(data);
-      downloadTextFile(`project-scheduler-share_${toISO(new Date())}.html`, html, "text/html");
+      downloadTextFile(buildExportFilename(projectName, "html", toISO(new Date())), html, "text/html");
       showToast(t("toast.exportedSharedHtml"));
     } catch (e) {
       showToast(t("toast.exportSharedHtmlFailed"));
@@ -558,7 +559,8 @@ export default function App() {
       return;
     }
     try {
-      const result = await ganttViewRef.current.copyVisiblePng();
+      const filename = buildExportFilename(projectName, "png", new Date().toISOString().slice(0, 10));
+      const result = await ganttViewRef.current.copyVisiblePng(filename);
       showToast(result === "copied" ? t("toast.pngCopied") : t("toast.pngDownloaded"));
     } catch (e) {
       // src/dom/ganttPngExport.js のエラーは code を持つので表示中の言語で出す（それ以外はブラウザのメッセージ）
@@ -713,7 +715,7 @@ export default function App() {
             value={locale}
             onChange={e => setLocale(e.target.value)}
             aria-label={t("header.language")}
-            className="text-xs border border-slate-200 rounded px-1 py-0.5 bg-white"
+            className="text-xs border border-slate-200 rounded-sm px-1 py-0.5 bg-white"
           >
             {LOCALES.map(l => <option key={l} value={l}>{t(`header.languageName.${l}`)}</option>)}
           </select>
@@ -728,8 +730,8 @@ export default function App() {
         </span>
         {!autoSaveDisabled && saveStatus === "failed" && <>
           <span className="flex-1">{t("save.failureHelp")}</span>
-          <button type="button" onClick={exportProject} className="px-2 py-1 rounded border border-red-200 bg-white flex items-center gap-1"><Download size={12} />{t("save.export")}</button>
-          <button type="button" onClick={retrySave} className="px-2 py-1 rounded bg-red-700 text-white flex items-center gap-1"><RefreshCw size={12} />{t("save.retry")}</button>
+          <button type="button" onClick={exportProject} className="px-2 py-1 rounded-sm border border-red-200 bg-white flex items-center gap-1"><Download size={12} />{t("save.export")}</button>
+          <button type="button" onClick={retrySave} className="px-2 py-1 rounded-sm bg-red-700 text-white flex items-center gap-1"><RefreshCw size={12} />{t("save.retry")}</button>
         </>}
       </div>
 
@@ -752,7 +754,7 @@ export default function App() {
 
       {linkedProjectKey && linkedProjectState && (
         <div className="bg-indigo-50 border-b border-indigo-200 text-xs px-4 py-2 flex items-center gap-3">
-          <Link size={14} className="text-indigo-600 flex-shrink-0" />
+          <Link size={14} className="text-indigo-600 shrink-0" />
           <div className="min-w-0 flex-1">
             <div className="text-indigo-900 flex items-center gap-2 flex-wrap">
               {linkedProjectState.status === "loading" && (
@@ -790,7 +792,7 @@ export default function App() {
                 : ""}
             </div>
           </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="flex items-center gap-2 shrink-0">
             {linkedProjectState.status === "loaded" && linkedProjectState.persistent && (
               <button
                 type="button"
@@ -821,7 +823,7 @@ export default function App() {
 
       {embeddedProject && (
         <div className="bg-amber-50 border-b border-amber-200 text-xs px-4 py-2 flex items-center gap-3">
-          <Camera size={14} className="text-amber-600 flex-shrink-0" />
+          <Camera size={14} className="text-amber-600 shrink-0" />
           <div className="min-w-0 flex-1 text-amber-900">
             {embeddedProject.ok ? (
               t.rich("embedded.banner", {
@@ -843,7 +845,7 @@ export default function App() {
 
       {levelWarnings.length > 0 && (
         <div className="bg-amber-50 border-b border-amber-200 text-amber-800 text-xs px-4 py-1.5 flex items-center gap-2">
-          <AlertTriangle size={13} className="flex-shrink-0" />
+          <AlertTriangle size={13} className="shrink-0" />
           <span>{levelWarnings.map(w => formatLevelWarning(t, w)).join(" / ")}</span>
         </div>
       )}
@@ -927,7 +929,7 @@ export default function App() {
       {sprintConflictOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onClick={() => setSprintConflictOpen(false)}>
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 flex-shrink-0">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 shrink-0">
               <div className="flex items-center gap-2 text-sm font-semibold text-amber-700">
                 <AlertTriangle size={15} />
                 {t("sprintConflicts.title", { count: sprintConflicts.length })}
@@ -955,7 +957,7 @@ export default function App() {
                 </div>
               ))}
             </div>
-            <div className="flex justify-end gap-2 px-4 py-3 border-t border-slate-100 flex-shrink-0">
+            <div className="flex justify-end gap-2 px-4 py-3 border-t border-slate-100 shrink-0">
               <IconBtn label={t("common.close")} onClick={() => setSprintConflictOpen(false)} small />
             </div>
           </div>
@@ -970,7 +972,7 @@ export default function App() {
             className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col"
             onClick={e => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 flex-shrink-0">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 shrink-0">
               <div id="dependency-issues-dialog-title" className={"flex items-center gap-2 text-sm font-semibold " + (dependencyIssueErrorCount > 0 ? "text-red-700" : "text-amber-700")}>
                 <AlertTriangle size={15} />
                 {t("dependencyIssues.dialogTitle", { count: dependencyIssues.length })}
@@ -993,12 +995,12 @@ export default function App() {
                     type="button"
                     onClick={() => revealTask(issue.ids[0])}
                     className={
-                      "w-full text-left border rounded-lg px-3 py-2 hover:shadow-sm " +
+                      "w-full text-left border rounded-lg px-3 py-2 hover:shadow-xs " +
                       (isError ? "border-red-200 bg-red-50 hover:bg-red-100/60" : "border-amber-200 bg-amber-50 hover:bg-amber-100/60")
                     }
                   >
                     <div className="text-xs font-medium text-slate-700 flex items-center gap-1.5 flex-wrap">
-                      <span className={"text-[10px] leading-none px-1.5 py-0.5 rounded border " + (isError ? "bg-white text-red-700 border-red-200" : "bg-white text-amber-700 border-amber-200")}>{kind}</span>
+                      <span className={"text-[10px] leading-none px-1.5 py-0.5 rounded-sm border " + (isError ? "bg-white text-red-700 border-red-200" : "bg-white text-amber-700 border-amber-200")}>{kind}</span>
                       {issue.code === "dependency-cycle"
                         ? <span>{t("dependencyIssues.cycleTargets", { count: target.length })}</span>
                         : target.map(t => (
@@ -1013,7 +1015,7 @@ export default function App() {
                 );
               })}
             </div>
-            <div className="flex justify-end gap-2 px-4 py-3 border-t border-slate-100 flex-shrink-0">
+            <div className="flex justify-end gap-2 px-4 py-3 border-t border-slate-100 shrink-0">
               <IconBtn label={t("common.close")} onClick={() => setDependencyIssuesOpen(false)} small />
             </div>
           </div>

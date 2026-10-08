@@ -59,7 +59,7 @@ export function DepInput({ deps, idToNo, noToId, onChange, inputRef, inputProps,
           }
         }}
         onKeyDown={onKeyDown}
-        className={"bg-transparent outline-none w-full rounded font-mono text-[11px] border-b focus:bg-indigo-100 focus:ring-1 focus:ring-indigo-300 " +
+        className={"bg-transparent outline-hidden w-full rounded-sm font-mono text-[11px] border-b focus:bg-indigo-100 focus:ring-1 focus:ring-indigo-300 " +
           (errors.length ? "border-red-500 bg-red-50 text-red-800" : "border-transparent")}
       />
       {errors.length > 0 && (

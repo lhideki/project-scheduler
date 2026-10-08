@@ -52,7 +52,7 @@ export function SprintsView({ sprints, setSprints, tasks, requestConfirm }) {
     <div className="h-full overflow-auto p-4 space-y-6">
       {overlapIds.size > 0 && (
         <div className="bg-amber-50 border border-amber-200 text-amber-800 text-xs px-3 py-2 rounded-lg flex items-center gap-2">
-          <AlertTriangle size={13} className="flex-shrink-0" />
+          <AlertTriangle size={13} className="shrink-0" />
           {t("sprints.overlapWarning")}
         </div>
       )}
@@ -83,28 +83,28 @@ export function SprintsView({ sprints, setSprints, tasks, requestConfirm }) {
                   <tr key={sp.id} className={"border-t border-slate-100" + (overlapping || invalidRange ? " bg-amber-50/60" : "")}>
                     <td className="px-3 py-1.5">
                       <input value={sp.name} onChange={e => update(sp.id, { name: e.target.value })}
-                        className="bg-transparent outline-none w-full font-medium" />
+                        className="bg-transparent outline-hidden w-full font-medium" />
                     </td>
                     <td className="px-3 py-1.5">
                       <input value={sp.theme || ""} onChange={e => update(sp.id, { theme: e.target.value })}
                         placeholder={t("sprints.themePlaceholder")}
-                        className="bg-transparent outline-none w-full placeholder-slate-300" />
+                        className="bg-transparent outline-hidden w-full placeholder-slate-300" />
                     </td>
                     <td className="px-3 py-1.5">
                       <input type="date" value={sp.startDate || ""} onChange={e => update(sp.id, { startDate: e.target.value })}
-                        className="bg-transparent outline-none w-full font-mono" />
+                        className="bg-transparent outline-hidden w-full font-mono" />
                     </td>
                     <td className="px-3 py-1.5">
                       <div className="flex items-center gap-1">
                         <input type="date" value={sp.endDate || ""} onChange={e => update(sp.id, { endDate: e.target.value })}
-                          className="bg-transparent outline-none w-full font-mono" />
+                          className="bg-transparent outline-hidden w-full font-mono" />
                         {(overlapping || invalidRange) && (
                           <span
                             title={invalidRange ? t("sprints.invalidRange") : t("sprints.overlapping")}
                             role="img"
                             aria-label={invalidRange ? t("sprints.invalidRange") : t("sprints.overlapping")}
                           >
-                            <AlertTriangle size={12} className="text-amber-500 flex-shrink-0" />
+                            <AlertTriangle size={12} className="text-amber-500 shrink-0" />
                           </span>
                         )}
                       </div>
@@ -134,7 +134,7 @@ export function SprintsView({ sprints, setSprints, tasks, requestConfirm }) {
               const x = xOf(sp.startDate), w = Math.max(2, xOf(sp.endDate) + dayWidth - x);
               return (
                 <div key={sp.id} className="flex items-center" style={{ height: 26 }}>
-                  <div style={{ width: 100, color: c.text }} className="text-[11px] flex-shrink-0 truncate font-medium">{sp.name}</div>
+                  <div style={{ width: 100, color: c.text }} className="text-[11px] shrink-0 truncate font-medium">{sp.name}</div>
                   <div style={{ position: "relative", width: timelineWidth, height: 18, background: "#F8FAFC", borderRadius: 4, flexShrink: 0 }}>
                     <div title={sp.theme || sp.name} style={{ position: "absolute", left: x, width: w, top: 0, height: 18, background: c.band, border: `1px solid ${c.tagBorder}`, borderRadius: 4 }} />
                   </div>

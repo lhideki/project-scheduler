@@ -1,3 +1,26 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss" source(none);
+@import "./theme.css";
+@source "./**/*.jsx";
+
+/* Preserve the v3 defaults used by the existing UI and its SVG/PNG exports. */
+@layer base {
+  *, ::before, ::after, ::backdrop, ::file-selector-button {
+    border-color: var(--color-gray-200, currentColor);
+  }
+  input::placeholder, textarea::placeholder {
+    color: var(--color-gray-400);
+    opacity: 1;
+  }
+  input:where(:not([type="button"], [type="reset"], [type="submit"])), select, textarea {
+    /* v3 left these native control defaults to the browser. Explicit utilities still win. */
+    background-color: revert;
+    border-radius: revert;
+    opacity: revert;
+  }
+  button, [role="button"] {
+    cursor: pointer;
+  }
+  :disabled {
+    cursor: default;
+  }
+}
