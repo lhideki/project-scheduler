@@ -442,7 +442,7 @@ for (const [device, viewport] of [["desktop", { width: 1600, height: 1000 }], ["
           candidateHtmlSha256: sha256(await readFile("project_scheduler.html")),
           chromium: browser.version(), device, scenario: scenario.name, viewport, fixedTime: NOW,
           pixelPolicy: "Pixelmatch threshold=0, includeAA=false; zero non-antialiased changed pixels allowed. Exact raw RGBA counts/diffs are retained separately. No masks, color-distance tolerance, or changed-pixel budget.",
-          styleNormalization: "Only direct children of a /^space-y-/ utility container compare exact visible sibling gaps and child/container rectangles instead of marginTop/marginBottom placement. Raw vertical margins remain in diagnostics. All other computed styles, geometry, and pixels remain strict.",
+          styleNormalization: "Only direct children of a /^space-y-/ utility container compare exact visible sibling gaps and child/container rectangles instead of marginTop/marginBottom placement. Raw vertical margins remain in diagnostics. The explicit property and color allowlists in computedEvidence are compared strictly. boxShadow, backgroundImage, and raw color serialization are diagnostic-only; their rendered effects are covered by the separately documented pixel gate.",
           pixels, antialiasComparison, styleAndGeometryDifferences, browserErrors, blockedRequests, ...evidence,
         };
         await testInfo.attach(`${prefix}-diff.png`, { body: Buffer.from(diffPng, "base64"), contentType: "image/png" });

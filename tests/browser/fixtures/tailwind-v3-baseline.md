@@ -45,3 +45,8 @@ with the identical immutable v3 HTML and replays the same scenario. Its separate
 control screenshot, v3-to-v3 and control-to-candidate pixel reports, coordinate
 samples, and diff images help distinguish rendering variance from a migration
 change. Control results never relax the candidate's zero-non-AA-pixel assertion.
+
+The style gate is the explicit properties/colors allowlist in computedEvidence,
+not every possible computed CSS property. Box shadows, background images and
+raw color serialization are diagnostic-only; their rendered effects are checked
+by the separately documented zero-non-AA-pixel gate.

@@ -10,7 +10,7 @@
   "all_first_attempt": true,
   "audit_vulnerabilities": 0,
   "pixel_policy": "Pixelmatch threshold=0, includeAA=false; zero non-antialiased changed pixels allowed. Exact raw RGBA counts/diffs are retained separately. No masks, color-distance tolerance, or changed-pixel budget.",
-  "style_normalization": "Only direct children of a /^space-y-/ utility container compare exact visible sibling gaps and child/container rectangles instead of marginTop/marginBottom placement. Raw vertical margins remain in diagnostics. All other computed styles, geometry, and pixels remain strict.",
+  "style_normalization": "Only direct children of a /^space-y-/ utility container compare exact visible sibling gaps and child/container rectangles instead of marginTop/marginBottom placement. Raw vertical margins remain in diagnostics. The explicit property and color allowlists in computedEvidence are compared strictly. boxShadow, backgroundImage, and raw color serialization are diagnostic-only; their rendered effects are covered by the separately documented pixel gate.",
   "cases": [
     {
       "device": "mobile",
@@ -372,5 +372,15 @@
       },
       "geometry_style_differences": 0
     }
-  ]
+  ],
+  "style_comparison_scope": {
+    "definition": "tests/browser/tailwind-migration.pw.js: computedEvidence properties and colors allowlists",
+    "diagnostic_only": [
+      "boxShadow",
+      "backgroundImage",
+      "raw color serialization",
+      "original space-y vertical margins"
+    ],
+    "rendered_effects": "covered by the pixel gate, including its documented antialias handling"
+  }
 }
