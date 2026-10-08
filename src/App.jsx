@@ -20,6 +20,7 @@ import {
   downloadJSON, downloadTextFile, copyTextToClipboard, generateMermaidGantt,
   buildProjectExport, prepareProjectImport,
 } from "./lib/exportUtils.js";
+import { buildExportFilename } from "./lib/exportFilename.js";
 import { seedData } from "./lib/seedData.js";
 import { buildVersionSnapshot, hasFullVersionSnapshot, restoreVersionSnapshot } from "./lib/versionSnapshot.js";
 import { createTaskHistory, taskHistoryReducer, canUndoTasks, canRedoTasks } from "./lib/history.js";
@@ -528,14 +529,14 @@ export default function App() {
 
   function exportProject() {
     const data = buildProjectExport(tasks, resources, sprints, versions, levelingOn, calendarExceptions, projectName);
-    downloadJSON(`project-scheduler_${toISO(new Date())}.json`, data);
+    downloadJSON(buildExportFilename(projectName, "json", toISO(new Date())), data);
     showToast(t("toast.exportedJson"));
   }
   function exportSharedHtml() {
     try {
       const data = buildProjectExport(tasks, resources, sprints, versions, levelingOn, calendarExceptions, projectName);
       const html = buildSharedHtml(data);
-      downloadTextFile(`project-scheduler-share_${toISO(new Date())}.html`, html, "text/html");
+      downloadTextFile(buildExportFilename(projectName, "html", toISO(new Date())), html, "text/html");
       showToast(t("toast.exportedSharedHtml"));
     } catch (e) {
       showToast(t("toast.exportSharedHtmlFailed"));
@@ -558,7 +559,8 @@ export default function App() {
       return;
     }
     try {
-      const result = await ganttViewRef.current.copyVisiblePng();
+      const filename = buildExportFilename(projectName, "png", new Date().toISOString().slice(0, 10));
+      const result = await ganttViewRef.current.copyVisiblePng(filename);
       showToast(result === "copied" ? t("toast.pngCopied") : t("toast.pngDownloaded"));
     } catch (e) {
       // src/dom/ganttPngExport.js のエラーは code を持つので表示中の言語で出す（それ以外はブラウザのメッセージ）

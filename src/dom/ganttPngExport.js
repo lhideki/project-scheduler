@@ -49,9 +49,10 @@ function pngExportError(code) {
  * @param {string} params.headerMarkup - ヘッダー部分のSVG断片（呼び出し側でネイティブSVG要素として組み立てたもの）
  * @param {number} params.chartWidth
  * @param {number} params.headerHeight
+ * @param {string} [params.filename] - Suggested filename when clipboard copying is unavailable.
  * @returns {Promise<"copied"|"downloaded">}
  */
-export async function copyVisibleGanttAsPng({ container, bgSvg, barsSvg, headerMarkup, chartWidth, headerHeight }) {
+export async function copyVisibleGanttAsPng({ container, bgSvg, barsSvg, headerMarkup, chartWidth, headerHeight, filename }) {
   if (!container || !bgSvg || !barsSvg) throw pngExportError("gantt-dom-missing");
 
   const scrollLeft = container.scrollLeft;
@@ -105,7 +106,7 @@ export async function copyVisibleGanttAsPng({ container, bgSvg, barsSvg, headerM
       }
     }
 
-    downloadBlob(`gantt_${new Date().toISOString().slice(0, 10)}.png`, pngBlob);
+    downloadBlob(filename ?? `gantt_${new Date().toISOString().slice(0, 10)}.png`, pngBlob);
     return "downloaded";
   } finally {
     URL.revokeObjectURL(svgUrl);

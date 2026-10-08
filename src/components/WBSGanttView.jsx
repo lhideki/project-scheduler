@@ -915,7 +915,8 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
   }
 
   useImperativeHandle(ref, () => ({
-    copyVisiblePng: () => copyVisibleGanttAsPng({
+    copyVisiblePng: filename => copyVisibleGanttAsPng({
+      filename,
       container: rightRef.current,
       bgSvg: bgSvgRef.current,
       barsSvg: barsSvgRef.current,
