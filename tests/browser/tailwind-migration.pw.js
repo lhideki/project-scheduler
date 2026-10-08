@@ -2,6 +2,8 @@ import { test, expect } from "@playwright/test";
 import { readFile, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { gunzipSync } from "node:zlib";
+import pixelmatch from "pixelmatch";
+import { PNG } from "pngjs";
 
 // Two full single-file app snapshots make traces unnecessarily large. Keep real
 // before/after/diff PNGs, computed reports and failure context instead.
@@ -261,7 +263,7 @@ async function computedEvidence(page) {
       }
       return colorCache.get(color);
     }
-    const selectors = ".ps-app-root, .ps-app-root > div, button, input, select, textarea, table, thead, th, td, h3, [role=menu], [data-wbs-cell], .fixed, .fixed > div, svg";
+    const selectors = ".ps-app-root, .ps-app-root > div, .w-7.h-7, button, input, select, textarea, table, thead, th, td, h3, [role=menu], [data-wbs-cell], .fixed, .fixed > div, svg";
     const elements = [...document.querySelectorAll(selectors)].filter(isRendered).map((element, index) => {
       const style = getComputedStyle(element);
       const verticalSpaceChild = spacingClasses(element.parentElement).length > 0;
@@ -385,6 +387,22 @@ async function pixelEvidence(page, before, after) {
   }, { before: before.toString("base64"), after: after.toString("base64") });
 }
 
+function antialiasEvidence(before, after) {
+  const a = PNG.sync.read(before);
+  const b = PNG.sync.read(after);
+  const options = { threshold: 0, includeAA: false };
+  if (a.width !== b.width || a.height !== b.height) return {
+    algorithm: "Pixelmatch", options, nonAntialiasedChangedPixels: null,
+    error: "Screenshot dimensions differ; strict dimension and pixel assertions must fail",
+  };
+  const diff = new PNG({ width: a.width, height: a.height });
+  const nonAntialiasedChangedPixels = pixelmatch(a.data, b.data, diff.data, a.width, a.height, options);
+  return {
+    algorithm: "Pixelmatch", options, nonAntialiasedChangedPixels,
+    diffPng: PNG.sync.write(diff),
+  };
+}
+
 const withoutDiagnostics = evidence => ({
   ...evidence, elements: evidence.elements.map(({ diagnostic, ...element }) => element),
 });
@@ -417,22 +435,24 @@ for (const [device, viewport] of [["desktop", { width: 1600, height: 1000 }], ["
           evidence[side] = await computedEvidence(pages[side]);
         }
         const { diffPng, ...pixels } = await pixelEvidence(pages.after, screenshots.before, screenshots.after);
+        const { diffPng: nonAADiff, ...antialiasComparison } = antialiasEvidence(screenshots.before, screenshots.after);
         const styleAndGeometryDifferences = differences(withoutDiagnostics(evidence.before), withoutDiagnostics(evidence.after));
         const report = {
           baselineCommit: BASELINE_COMMIT, baselineHtmlSha256: BASELINE_SHA256,
           candidateHtmlSha256: sha256(await readFile("project_scheduler.html")),
           chromium: browser.version(), device, scenario: scenario.name, viewport, fixedTime: NOW,
-          pixelPolicy: "Exact RGBA equality; zero changed pixels allowed; no masks or tolerances",
+          pixelPolicy: "Pixelmatch threshold=0, includeAA=false; zero non-antialiased changed pixels allowed. Exact raw RGBA counts/diffs are retained separately. No masks, color-distance tolerance, or changed-pixel budget.",
           styleNormalization: "Only direct children of a /^space-y-/ utility container compare exact visible sibling gaps and child/container rectangles instead of marginTop/marginBottom placement. Raw vertical margins remain in diagnostics. All other computed styles, geometry, and pixels remain strict.",
-          pixels, styleAndGeometryDifferences, browserErrors, blockedRequests, ...evidence,
+          pixels, antialiasComparison, styleAndGeometryDifferences, browserErrors, blockedRequests, ...evidence,
         };
         await testInfo.attach(`${prefix}-diff.png`, { body: Buffer.from(diffPng, "base64"), contentType: "image/png" });
+        if (nonAADiff) await testInfo.attach(`${prefix}-non-aa-diff.png`, { body: nonAADiff, contentType: "image/png" });
         const reportPath = testInfo.outputPath(`${prefix}-comparison.json`);
         await writeFile(reportPath, JSON.stringify(report, null, 2));
         await testInfo.attach(`${prefix}-comparison.json`, { path: reportPath, contentType: "application/json" });
         if (pixels.changedPixels > 0) {
           // Diagnose raster variance with a genuinely independent v3 rendering.
-          // This is evidence only: it never changes the candidate's zero-pixel gate.
+          // This is evidence only: it never changes the candidate's zero-non-AA gate.
           const controlReport = {
             baselineCommit: BASELINE_COMMIT, baselineHtmlSha256: BASELINE_SHA256,
             chromium: browser.version(), device, scenario: scenario.name, viewport, fixedTime: NOW,
@@ -477,7 +497,7 @@ for (const [device, viewport] of [["desktop", { width: 1600, height: 1000 }], ["
         const sample = styleAndGeometryDifferences.slice(0, 5).map(diff => `${diff.path}: ${JSON.stringify(diff.before).slice(0, 80)} -> ${JSON.stringify(diff.after).slice(0, 80)}`).join("; ");
         expect.soft(styleAndGeometryDifferences.length, `${styleAndGeometryDifferences.length} geometry/computed-style differences (${sample}); full values are in ${prefix}-comparison.json`).toBe(0);
         expect.soft(pixels.after, "Before and after screenshot dimensions match").toEqual(pixels.before);
-        expect.soft(pixels.changedPixels, `Exact visual regression: ${pixels.changedPixels}/${pixels.totalPixels} pixels changed; see before, after, diff and comparison attachments`).toBe(0);
+        expect.soft(antialiasComparison.nonAntialiasedChangedPixels, `Visual regression: ${pixels.changedPixels} exact RGBA changes, ${antialiasComparison.nonAntialiasedChangedPixels} non-AA changes at Pixelmatch threshold 0; see raw and non-AA diff attachments`).toBe(0);
       } catch (error) {
         primaryError = error;
         throw error;

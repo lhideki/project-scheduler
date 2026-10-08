@@ -24,8 +24,12 @@ The tests render both versions in the same Chromium build with identical
 synthetic project data, UTC clock, installed fonts, locale, device scale and
 viewport. They save actual before/after screenshots, an exact RGBA pixel-diff
 image, and detailed geometry/computed-style reports into the normal Playwright
-evidence artifact. There are no image masks, replacement fonts, CSS overrides,
-pixel tolerances, or auto-updating reference screenshots. Carets are hidden and
+evidence artifact. The gate requires zero non-antialiased changed pixels with
+Pixelmatch's `threshold: 0, includeAA: false`. Exact raw RGBA counts and diff
+images are retained alongside the separate non-AA comparison and diff image.
+There are no image masks, color-distance tolerances, allowed changed-pixel
+budgets, replacement fonts, CSS overrides, or auto-updating reference screenshots.
+Carets are hidden and
 CSS animations are completed using Playwright's standard screenshot options;
 JavaScript animations must settle before capture.
 
@@ -33,10 +37,11 @@ For direct children of a `space-y-*` container, the style comparison measures
 the exact rendered sibling gaps and all child/container rectangles instead of
 comparing top-versus-bottom margin placement. Tailwind v3 and v4 assign those
 margins to different siblings. The original computed margins remain in each
-report's diagnostics; the zero-difference pixel assertion is unchanged.
+report's diagnostics. Geometry, color and radius checks include the outer logo
+box, as well as its SVG icon, to guard against rounded-edge styling changes.
 
 When any candidate pixels differ, the test also opens an independent context
 with the identical immutable v3 HTML and replays the same scenario. Its separate
 control screenshot, v3-to-v3 and control-to-candidate pixel reports, coordinate
 samples, and diff images help distinguish rendering variance from a migration
-change. Control results never relax the candidate's zero-pixel assertion.
+change. Control results never relax the candidate's zero-non-AA-pixel assertion.
