@@ -113,7 +113,7 @@ bee（`@nulab/bee` 1.1 以上、Backlog公式CLI）経由で保存JSONと Backlo
 ### データモデル（すべてトップレベルReact state、`window.storage` に永続化）
 
 - `tasks`: フラット配列。`parentId` によりWBS階層（グループ／リーフタスク）を表現。グループ専用のエンティティは存在せず、共通ヘルパー `isGroupId(tasks, id)` で判定する。
-- `projectName`: 表示用の名前（文字列、既定 `""`）。`src/lib/projectName.js` で前後の空白を除き、未設定・空白のみは翻訳可能な既定名を表示する（既定表示名を保存しない）。全読み込み経路・自動保存・JSON・共有HTML・CLI提案で保持する。ID・保存先・ファイル名・`schedule`関連付けとは独立。同名可。タスクUndo・日程バージョンのスナップショット/復元には含めず、復元で現在の名前を巻き戻さない。
+- `projectName`: 表示用の名前（文字列、既定 `""`）。`src/lib/projectName.js` で前後の空白を除き、未設定・空白のみは翻訳可能な既定名を表示する（既定表示名を保存しない）。全読み込み経路・自動保存・JSON・共有HTML・CLI提案で保持する。ID・保存先・既存ファイル名・`schedule`関連付けとは独立。新規ダウンロードの既定名には`exportFilename.js`で安全化したコピーを使う。同名可。タスクUndo・日程バージョンのスナップショット/復元には含めず、復元で現在の名前を巻き戻さない。
 - `resources`: 担当者（週次・月次の稼働上限を持つ。上限値 `0`・未設定は「その上限を適用しない」。日次の上限は1人日固定）。
 - `sprints`: `{id, name, theme, startDate, endDate, order}`。タスク側は `sprintIds`（配列）で複数参照できる（1タスク=複数スプリント可、グループには持たせない）。旧形式の単一 `sprintId` で保存されたデータは `migrateSprintIds()` で自動変換する（適用しているのは localStorage からの読み込み・共有用HTML（embedded）の初期化・バージョン復元。JSONの「読み込み」と linked の読み込みでは変換しない）。
 - `versions`: 任意タイミングのスナップショット（`rawTasks`/`rawResources`/`rawSprints`/`rawCalendarExceptions`/`rawLevelingOn` を保持。UI/CLI とも `src/lib/versionSnapshot.js` を使用し、復元時はタスク履歴をリセットする。旧スナップショットで `rawLevelingOn` が無ければ現在の平準化設定を維持し、保存時の日程を完全に再現できるとは扱わない）。`pm_versions` に保存する。
@@ -190,6 +190,8 @@ bee（`@nulab/bee` 1.1 以上、Backlog公式CLI）経由で保存JSONと Backlo
 ヘッダーの「書き出し」ドロップダウン（`ExportMenu`）に、JSON書き出し（`exportProject`）・共有用HTML書き出し（`exportSharedHtml`、下記「起動モード」参照）・Mermaidコピー（`generateMermaidGantt`。表示スケジュールの `schedStart`/`schedFinish` をそのまま使ったガント記法）・PNGとしてコピー（WBS/ガント画面の表示中のみ）をまとめている。
 
 - PNGコピー（`copyVisibleGanttAsPng`、`src/dom/ganttPngExport.js`）は、ガントの「現在見えている範囲」を画像にする。Chrome は `foreignObject` を含む SVG を canvas に描くと tainted 扱いにして `toBlob` を拒否するため、HTML要素で描いている日付ヘッダーは `WBSGanttView` 側で SVG ネイティブ要素だけの断片として組み直し、実DOMのバー・背景SVGと合成する（`foreignObject` を使わないこと）。クリップボードへの画像書き込みに対応していない環境では、PNGファイルのダウンロードに切り替える。
+
+- JSON・共有HTML・PNGフォールバックダウンロードの既定名は`src/lib/exportFilename.js`で生成する。確定済みの`projectName`を使用し、JSONは`名前_日付.json`、HTMLは`名前-share_日付.html`、PNGは`名前-gantt_日付.png`。空・利用可能文字なしなら従来の既定名を維持する。禁止文字を`_`へ置換、制御文字を除去、Windows予約名を保護し、名前部分はUTF-8で200バイト以内にする。保存値や既存ファイルは変更しない。日付は既存動作どおり全形式でUTC日付。PNG用の既定名はコピー開始時に確定し、非同期の画像生成中の名前変更には追従させない。
 
 ### 起動モード（local / linked / embedded）
 

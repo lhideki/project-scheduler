@@ -90,7 +90,9 @@ All three pages are served from the same site, so they share the plan saved in y
 
 Click the name in the header to set or change it, then apply or cancel the edit (Enter/Escape also work). The header and browser tab show the name. Blank names display “Untitled project” in the selected language; that translated label is not stored.
 
-Names are kept in browser storage, JSON, linked JSON, shareable HTML, and the CLI's proposed JSON, including projects with no tasks. Restoring a schedule version keeps the current project name. Changing a name does not rename files, change the `schedule` association or storage location, or create a separate project slot. Duplicate names are allowed.
+Names are kept in browser storage, JSON, linked JSON, shareable HTML, and the CLI's proposed JSON, including projects with no tasks. Restoring a schedule version keeps the current project name. Changing a name does not rename existing files, change the `schedule` association or storage location, or create a separate project slot. Duplicate names are allowed.
+
+New downloads use the applied project name as their default filename: `Project Name_YYYY-MM-DD.json`, `Project Name-share_YYYY-MM-DD.html`, and `Project Name-gantt_YYYY-MM-DD.png` (when PNG clipboard copying is unavailable or fails). Forbidden filename characters are replaced, control characters are removed, and long names are shortened without changing the stored name. Blank or unusable names keep the previous defaults (`project-scheduler_…`, `project-scheduler-share_…`, and `gantt_…`). You can still change the suggested name in the browser’s save dialog when enabled.
 
 Existing nameless `schemaVersion: 1` files remain readable. Use updated HTML and CLI versions together: older versions discard the new `projectName` field on re-export, and their schema rejects it. See [import validation and compatibility](docs/import-validation.md).
 
