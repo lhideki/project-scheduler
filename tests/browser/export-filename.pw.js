@@ -1,5 +1,7 @@
 import { test, expect } from "@playwright/test";
-import { readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 // Keep the local day different from UTC to protect the existing UTC date convention.
 test.use({ timezoneId: "America/Los_Angeles" });
@@ -288,4 +290,77 @@ test("a PNG pending clipboard permission keeps the filename from its original ex
   expect(first.suggestedFilename()).toBe(`Name at click-gantt_${UTC_DATE}.png`);
   expectPng(await readFile(await first.path()));
   expect((await exportJSON(page, `Name after click_${UTC_DATE}.json`)).projectName).toBe("Name after click");
+});
+
+test.describe("browser download filename evidence", () => {
+  test("the real Downloads page shows the JSON, shared HTML and PNG filenames", async ({ playwright, baseURL, launchOptions }, testInfo) => {
+    test.slow();
+    const directory = await mkdtemp(join(tmpdir(), "scheduler-filename-evidence-"));
+    const downloadDirectory = join(directory, "downloads");
+    await mkdir(downloadDirectory);
+    let context;
+    try {
+      // Full Chromium provides chrome://downloads; chromium-headless-shell does not.
+      // A disposable regular profile keeps Downloads history isolated and available for the screenshot.
+      context = await playwright.chromium.launchPersistentContext(join(directory, "profile"), {
+        ...launchOptions, channel: "chromium", headless: true, acceptDownloads: true,
+        baseURL, locale: "en-US", timezoneId: "America/Los_Angeles",
+        viewport: { width: 1600, height: 1000 },
+      });
+      const app = context.pages()[0] || await context.newPage();
+      const appErrors = [];
+      app.on("pageerror", error => appErrors.push(error.message));
+      await app.clock.setFixedTime(new Date(NOW));
+      await clipboardMode(app, "unavailable");
+      await boot(app, fixture("Release plan"));
+
+      // Playwright normally uses GUIDs on disk. Let Chromium retain its natural filenames
+      // so the native Downloads page is evidence of the actual user-visible file names.
+      const session = await context.newCDPSession(app);
+      await session.send("Browser.setDownloadBehavior", {
+        behavior: "allow", downloadPath: downloadDirectory, eventsEnabled: true,
+      });
+      const actualNames = [];
+      for (const [projectName, stem] of [["Release plan", "Release plan"], ["新製品リリース / Q4", "新製品リリース _ Q4"]]) {
+        if (projectName !== "Release plan") await rename(app, projectName);
+        for (const [label, expectedName] of [
+          ["Export JSON", `${stem}_${UTC_DATE}.json`],
+          ["Export shareable HTML", `${stem}-share_${UTC_DATE}.html`],
+          ["Copy as PNG (visible area)", `${stem}-gantt_${UTC_DATE}.png`],
+        ]) {
+          const event = app.waitForEvent("download");
+          await chooseExport(app, label);
+          const file = await event;
+          expect(file.suggestedFilename()).toBe(expectedName);
+          expect(await file.failure()).toBeNull();
+          const bytes = await readFile(join(downloadDirectory, expectedName));
+          if (expectedName.endsWith(".json")) expect(JSON.parse(bytes.toString("utf8")).projectName).toBe(projectName);
+          else if (expectedName.endsWith(".png")) expectPng(bytes);
+          else expect(bytes.toString("utf8")).toContain('id="project-scheduler-embedded"');
+          actualNames.push(expectedName);
+        }
+      }
+      await app.getByRole("button", { name: "Export", exact: true }).click();
+      await screenshot(app, testInfo, "55-04-filename-evidence-app-en.png");
+      await app.keyboard.press("Escape");
+      await app.getByRole("combobox", { name: "Display language" }).selectOption("ja");
+      await app.getByRole("button", { name: "書き出し", exact: true }).click();
+      await screenshot(app, testInfo, "55-04-filename-evidence-app-ja.png");
+
+      const downloads = await context.newPage();
+      await downloads.goto("chrome://downloads/");
+      for (const name of actualNames) {
+        // Text locators pierce Chromium's open shadow roots without depending on translated UI labels.
+        await expect(downloads.getByText(name, { exact: true }).first()).toBeVisible();
+      }
+      await screenshot(downloads, testInfo, "55-05-actual-browser-download-filenames.png");
+      await testInfo.attach("browser-download-filenames.json", {
+        body: Buffer.from(JSON.stringify(actualNames, null, 2)), contentType: "application/json",
+      });
+      expect(appErrors).toEqual([]);
+    } finally {
+      if (context) await context.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
 });
