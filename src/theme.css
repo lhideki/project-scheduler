@@ -1,6 +1,8 @@
 /* Preserve the existing sRGB UI colors, including the chart/SVG palette.
  * Values from Tailwind CSS 3.4.19 (MIT); keep new UI colors explicit here. */
 @theme {
+  /* Keep backdrop blending in sRGB; color-mix(in oklab, ...) can round edge pixels differently. */
+  --color-backdrop: rgb(15 23 42 / 0.4);
   --color-amber-100: #fef3c7;
   --color-amber-200: #fde68a;
   --color-amber-300: #fcd34d;

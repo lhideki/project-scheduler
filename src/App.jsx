@@ -910,7 +910,7 @@ export default function App() {
         </div>
       )}
       {confirmState && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onClick={() => setConfirmState(null)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-backdrop p-4" onClick={() => setConfirmState(null)}>
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-5" onClick={e => e.stopPropagation()}>
             <p className="text-sm text-slate-700 mb-5 whitespace-pre-wrap">{confirmState.message}</p>
             <div className="flex justify-end gap-2">
@@ -927,7 +927,7 @@ export default function App() {
         </div>
       )}
       {sprintConflictOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onClick={() => setSprintConflictOpen(false)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-backdrop p-4" onClick={() => setSprintConflictOpen(false)}>
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 shrink-0">
               <div className="flex items-center gap-2 text-sm font-semibold text-amber-700">
@@ -964,7 +964,7 @@ export default function App() {
         </div>
       )}
       {dependencyIssuesOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onClick={() => setDependencyIssuesOpen(false)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-backdrop p-4" onClick={() => setDependencyIssuesOpen(false)}>
           <div
             role="dialog"
             aria-modal="true"

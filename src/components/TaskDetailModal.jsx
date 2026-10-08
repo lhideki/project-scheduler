@@ -27,7 +27,7 @@ export function TaskDetailModal({ task, schedule, tasks, resources, sprints, idT
     });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-backdrop p-4" onClick={onClose}>
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-full overflow-y-auto" onClick={e => e.stopPropagation()}
         onKeyDown={e => {
           if (e.key === "Enter" && e.target.tagName === "INPUT" && !e.nativeEvent.isComposing && e.keyCode !== 229) {

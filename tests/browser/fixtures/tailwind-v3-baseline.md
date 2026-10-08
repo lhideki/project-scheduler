@@ -34,3 +34,9 @@ the exact rendered sibling gaps and all child/container rectangles instead of
 comparing top-versus-bottom margin placement. Tailwind v3 and v4 assign those
 margins to different siblings. The original computed margins remain in each
 report's diagnostics; the zero-difference pixel assertion is unchanged.
+
+When any candidate pixels differ, the test also opens an independent context
+with the identical immutable v3 HTML and replays the same scenario. Its separate
+control screenshot, v3-to-v3 and control-to-candidate pixel reports, coordinate
+samples, and diff images help distinguish rendering variance from a migration
+change. Control results never relax the candidate's zero-pixel assertion.

@@ -339,6 +339,8 @@ async function pixelEvidence(page, before, after) {
     let changedChannels = 0;
     let absoluteChannelDifference = 0;
     let maximumChannelDifference = 0;
+    const changedPixelSample = [];
+    const sampleLimit = 256;
     let minX = width, minY = height, maxX = -1, maxY = -1;
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
@@ -356,6 +358,11 @@ async function pixelEvidence(page, before, after) {
         }
         if (changed) {
           changedPixels++;
+          if (changedPixelSample.length < sampleLimit) changedPixelSample.push({
+            x, y,
+            before: aInside ? Array.from(a.data.subarray(ai, ai + 4)) : [0, 0, 0, 0],
+            after: bInside ? Array.from(b.data.subarray(bi, bi + 4)) : [0, 0, 0, 0],
+          });
           minX = Math.min(minX, x); minY = Math.min(minY, y);
           maxX = Math.max(maxX, x); maxY = Math.max(maxY, y);
           diff.data.set([255, 0, 160, 255], di);
@@ -371,6 +378,7 @@ async function pixelEvidence(page, before, after) {
       before: { width: a.width, height: a.height }, after: { width: b.width, height: b.height },
       changedPixels, totalPixels: width * height, changedPixelRatio: changedPixels / (width * height),
       changedChannels, absoluteChannelDifference, maximumChannelDifference,
+      changedPixelSample, changedPixelSampleComplete: changedPixels <= sampleLimit,
       boundingBox: changedPixels ? { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 } : null,
       diffPng: canvas.toDataURL("image/png").split(",")[1],
     };
@@ -388,6 +396,7 @@ for (const [device, viewport] of [["desktop", { width: 1600, height: 1000 }], ["
       const contextOptions = { viewport, deviceScaleFactor: 1, locale: "en-US", timezoneId: "UTC", colorScheme: "light", reducedMotion: "reduce", serviceWorkers: "block", isMobile: device === "mobile", hasTouch: device === "mobile" };
       const beforeContext = await browser.newContext(contextOptions);
       const afterContext = await browser.newContext(contextOptions);
+      const contexts = [beforeContext, afterContext];
       const pages = {};
       const captured = new Set();
       const prefix = `57-${device}-${scenario.name}`;
@@ -421,6 +430,47 @@ for (const [device, viewport] of [["desktop", { width: 1600, height: 1000 }], ["
         const reportPath = testInfo.outputPath(`${prefix}-comparison.json`);
         await writeFile(reportPath, JSON.stringify(report, null, 2));
         await testInfo.attach(`${prefix}-comparison.json`, { path: reportPath, contentType: "application/json" });
+        if (pixels.changedPixels > 0) {
+          // Diagnose raster variance with a genuinely independent v3 rendering.
+          // This is evidence only: it never changes the candidate's zero-pixel gate.
+          const controlReport = {
+            baselineCommit: BASELINE_COMMIT, baselineHtmlSha256: BASELINE_SHA256,
+            chromium: browser.version(), device, scenario: scenario.name, viewport, fixedTime: NOW,
+            purpose: "Independent immutable-v3 versus immutable-v3 rendering control; does not relax candidate assertions",
+            browserErrors: [], blockedRequests: [],
+          };
+          try {
+            const controlContext = await browser.newContext(contextOptions);
+            contexts.push(controlContext);
+            pages.control = await boot(controlContext, baselineBytes, controlReport.browserErrors, controlReport.blockedRequests, project);
+            await scenario.open(pages.control);
+            const controlScreenshot = await stableScreenshot(pages.control);
+            await testInfo.attach(`${prefix}-baseline-control.png`, { body: controlScreenshot, contentType: "image/png" });
+            captured.add("control");
+            const { diffPng: controlDiff, ...controlPixels } = await pixelEvidence(pages.control, screenshots.before, controlScreenshot);
+            const { diffPng: candidateControlDiff, ...candidateControlPixels } = await pixelEvidence(pages.control, controlScreenshot, screenshots.after);
+            const controlEvidence = await computedEvidence(pages.control);
+            const controlCoordinates = new Set(controlPixels.changedPixelSample.map(pixel => `${pixel.x},${pixel.y}`));
+            const overlappingSample = pixels.changedPixelSample.filter(pixel => controlCoordinates.has(`${pixel.x},${pixel.y}`));
+            Object.assign(controlReport, {
+              beforeToControl: controlPixels, controlToCandidate: candidateControlPixels,
+              coordinateOverlap: {
+                candidateChangedPixels: pixels.changedPixels, controlChangedPixels: controlPixels.changedPixels,
+                complete: pixels.changedPixelSampleComplete && controlPixels.changedPixelSampleComplete,
+                overlappingSampleCoordinates: overlappingSample.map(({ x, y }) => ({ x, y })),
+              },
+              styleAndGeometryDifferences: differences(withoutDiagnostics(evidence.before), withoutDiagnostics(controlEvidence)),
+              evidence: controlEvidence,
+            });
+            await testInfo.attach(`${prefix}-baseline-control-diff.png`, { body: Buffer.from(controlDiff, "base64"), contentType: "image/png" });
+            await testInfo.attach(`${prefix}-control-candidate-diff.png`, { body: Buffer.from(candidateControlDiff, "base64"), contentType: "image/png" });
+          } catch (error) {
+            controlReport.error = String(error);
+          }
+          const controlPath = testInfo.outputPath(`${prefix}-baseline-control.json`);
+          await writeFile(controlPath, JSON.stringify(controlReport, null, 2));
+          await testInfo.attach(`${prefix}-baseline-control.json`, { path: controlPath, contentType: "application/json" });
+        }
         expect.soft(browserErrors, "Neither build has uncaught browser errors").toEqual({ before: [], after: [] });
         expect.soft(blockedRequests, "Both single-file builds work without external requests").toEqual({ before: [], after: [] });
         expect.soft(evidence.before.elements.length, "Exercise a populated UI, not an empty screenshot").toBeGreaterThan(20);
@@ -440,7 +490,7 @@ for (const [device, viewport] of [["desktop", { width: 1600, height: 1000 }], ["
             } catch { /* Preserve the original actionable failure. */ }
           }
         }
-        const cleanup = await Promise.allSettled([beforeContext.close(), afterContext.close()]);
+        const cleanup = await Promise.allSettled(contexts.map(context => context.close()));
         const cleanupErrors = cleanup.filter(result => result.status === "rejected").map(result => String(result.reason));
         if (cleanupErrors.length && !primaryError && testInfo.errors.length === 0) {
           throw new Error(`Context cleanup failed: ${cleanupErrors.join("; ")}`);

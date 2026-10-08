@@ -17,7 +17,8 @@
     border-radius: revert;
     opacity: revert;
   }
-  th, td { padding: revert; }
+  /* HTML table cells had an implicit 1px inset before v4 reset all elements. */
+  th, td { padding: 1px; }
   /* v4 changed native date-field sizing; retain the prior WBS/toolbar geometry. */
   ::-webkit-date-and-time-value { min-height: revert; text-align: revert; }
   ::-webkit-datetime-edit { display: revert; }
