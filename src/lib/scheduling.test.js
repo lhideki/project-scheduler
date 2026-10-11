@@ -600,3 +600,80 @@ describe("deriveProjectStart", () => {
     expect(deriveProjectStart(undefined, "2024-01-01")).toBe("2024-01-01");
   });
 });
+
+describe("fixed calendar recurring tasks", () => {
+  const recurring = (changes = {}) => ({ id: "R", name: "Review", parentId: null, order: 10, duration: 2, startDate: "2024-01-13", predecessors: [], assigneeId: "r", recurrence: { frequency: "weekly", interval: 1, endDate: "2024-01-20" }, ...changes });
+  const resource = { id: "r", name: "Reviewer", weeklyCapacity: 5, monthlyCapacity: 20 };
+  it("preserves weekend/holiday dates under CPM, sprints, progress and leveling", () => {
+    const tasks = [recurring({ progress: 50, sprintIds: ["future"], predecessors: [{ id: "P", type: "FS", lag: 0 }] }), { id: "P", parentId: null, order: 0, duration: 5, startDate: "2024-02-01" }];
+    const sprints = [{ id: "future", startDate: "2024-03-01" }];
+    for (const respectManualPins of [true, false]) {
+      const cpm = runCPM(tasks, cal, "2024-01-01", sprints, { respectManualPins });
+      for (const leveling of [true, false]) {
+        const { schedule } = buildDisplaySchedule(tasks, cpm.result, [resource], cal, sprints, { leveling });
+        expect(schedule.get("R").occurrences.map(o => [o.schedStart, o.schedFinish])).toEqual([["2024-01-13", "2024-01-14"], ["2024-01-20", "2024-01-21"]]);
+        expect(schedule.get("R").occurrences[0].allocation.alloc).toEqual([{ date: "2024-01-13", load: 1 }, { date: "2024-01-14", load: 1 }]);
+      }
+    }
+  });
+  it("reserves fixed slots before movable work even when the movable task sorts first", () => {
+    const tasks = [{ id: "A", parentId: null, order: 0, duration: 1, startDate: "2024-01-09", assigneeId: "r" }, recurring({ startDate: "2024-01-09", duration: 1, recurrence: { frequency: "daily", interval: 1, endDate: "2024-01-09" } })];
+    const cpm = runCPM(tasks, cal, "2024-01-09", []);
+    const { schedule } = buildDisplaySchedule(tasks, cpm.result, [resource], cal, [], { leveling: true });
+    expect(schedule.get("R").occurrences[0].schedStart).toBe("2024-01-09");
+    expect(schedule.get("A").schedStart).toBe("2024-01-10");
+    expect(schedule.get("A").allocation.alloc).toEqual([{ date: "2024-01-10", load: 1 }]);
+  });
+  it("reserves weekly capacity for weekend occurrences before weekday movable work", () => {
+    const tasks = [recurring({ recurrence: { frequency: "weekly", interval: 1, endDate: "2024-01-13" } }), { id: "A", parentId: null, order: 0, duration: 1, startDate: "2024-01-09", assigneeId: "r" }];
+    const cpm = runCPM(tasks, cal, "2024-01-09", []);
+    const { schedule } = buildDisplaySchedule(tasks, cpm.result, [{ ...resource, weeklyCapacity: 2 }], cal, [], { leveling: true });
+    expect(schedule.get("A").schedStart).toBe("2024-01-15");
+  });
+  it("reports fixed over-capacity without shifting or stretching the occurrence", () => {
+    const tasks = [recurring({ recurrence: { frequency: "weekly", interval: 1, endDate: "2024-01-13" }, occurrenceOverrides: { "2024-01-13": { endDate: "2024-01-13" } } })];
+    const cpm = runCPM(tasks, cal, "2024-01-09", []);
+    for (const leveling of [true, false]) {
+      const { schedule, levelWarnings } = buildDisplaySchedule(tasks, cpm.result, [resource], cal, [], { leveling });
+      expect(schedule.get("R").occurrences[0]).toMatchObject({ schedStart: "2024-01-13", schedFinish: "2024-01-13", allocation: { overCapacity: true, alloc: [{ date: "2024-01-13", load: 2 }] } });
+      expect(levelWarnings).toContainEqual(expect.objectContaining({ code: "fixed-occurrence-capacity-exceeded", taskId: "R", params: expect.objectContaining({ occurrenceDate: "2024-01-13" }) }));
+    }
+  });
+  it("resolves specific occurrence dependencies using overridden actual finish and series rollup", () => {
+    const tasks = [recurring({ duration: 1, occurrenceOverrides: { "2024-01-13": { startDate: "2024-01-14", endDate: "2024-01-16" } } }),
+      { id: "specific", parentId: null, order: 20, duration: 1, predecessors: [{ id: "R", occurrenceDate: "2024-01-13", type: "FS", lag: 0 }] },
+      { id: "rollup", parentId: null, order: 21, duration: 1, predecessors: [{ id: "R", type: "FS", lag: 0 }] }];
+    const cpm = runCPM(tasks, cal, "2024-01-09", [], { respectManualPins: false });
+    expect(cpm.result.get("specific").schedStart).toBe("2024-01-17");
+    expect(cpm.result.get("rollup").schedStart).toBe("2024-01-22");
+  });
+  it("does not return series origins or synthetic IDs for automatic writeback", () => {
+    const tasks = [recurring(), { id: "A", parentId: null, order: 0, duration: 1, startDate: "2024-01-09", predecessors: [{ id: "R", type: "FS", lag: 0 }] }];
+    const before = structuredClone(tasks);
+    for (const leveling of [false, true]) {
+      const startDates = autoScheduleStartDates(tasks, cal, "2024-01-09", [], [resource], { leveling });
+      expect([...startDates.keys()]).toEqual(["A"]);
+      expect(startDates.get("A")).toBe("2024-01-22");
+    }
+    expect(tasks).toEqual(before);
+  });
+  it("treats imported internal marker names as ordinary extension data", () => {
+    const tasks = [recurring({ isOccurrence: true, isRecurringSummary: true }), { id: "A", parentId: null, duration: 1, startDate: "2024-01-13", endDate: "2024-01-14", isOccurrence: true }];
+    const cpm = runCPM(tasks, cal, "2024-01-09", []);
+    expect(cpm.result.get("R").occurrences).toHaveLength(2);
+    expect(cpm.result.get("A").schedStart).toBe("2024-01-15");
+  });
+});
+
+
+describe("workday successors of fixed calendar occurrences", () => {
+  it.each(["SS", "FF", "SF"])("keeps normal successors on workdays and satisfies %s at a weekend boundary", type => {
+    const tasks = [
+      { id: "R", name: "Weekend", parentId: null, duration: 2, startDate: "2024-01-13", recurrence: { frequency: "daily", interval: 1, endDate: "2024-01-13" } },
+      { id: "A", name: "Normal", parentId: null, duration: 1, predecessors: [{ id: "R", occurrenceDate: "2024-01-13", type, lag: 0 }] },
+    ];
+    const { result } = runCPM(tasks, cal, "2024-01-09", []);
+    expect(result.get("A").schedStart).toBe("2024-01-15");
+    expect(result.get("A").schedFinish).toBe("2024-01-15");
+  });
+});

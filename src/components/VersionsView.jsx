@@ -115,9 +115,11 @@ export function VersionsView({ versions, onSave, onDelete, onRename, onRestore, 
                     {selected.map((v, vi) => {
                       const vt = v.tasks.find(x => x.id === id);
                       if (!vt || !vt.schedStart) return null;
-                      const x1 = xOf(vt.schedStart), x2 = xOf(vt.schedFinish) + dayWidth;
                       const y = 4 + vi * 6;
-                      return <rect key={v.id} x={x1} y={y} width={Math.max(2, x2 - x1)} height={4} fill={colors[vi % colors.length]} opacity={0.9} rx={1} />;
+                      return (vt.occurrences || [vt]).map((occurrence, index) => {
+                        const x1 = xOf(occurrence.schedStart), x2 = xOf(occurrence.schedFinish) + dayWidth;
+                        return <rect key={`${v.id}:${occurrence.occurrenceDate || index}`} x={x1} y={y} width={Math.max(2, x2 - x1)} height={4} fill={colors[vi % colors.length]} opacity={0.9} rx={1} />;
+                      });
                     })}
                   </svg>
                 </div>

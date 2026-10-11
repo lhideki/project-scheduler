@@ -230,3 +230,16 @@ describe("generateMermaidGantt", () => {
     expect(out).toContain("B :t2, 2024-01-09, 2024-01-10");
   });
 });
+
+it("exports individual recurring dates to Mermaid without excluding fixed weekends", () => {
+  const tasks = [{ id: "r", name: "Review", parentId: null, order: 0, recurrence: { frequency: "weekly", interval: 1 } }];
+  const schedule = new Map([["r", { schedStart: "2026-10-11", schedFinish: "2026-10-18", occurrences: [
+    { occurrenceDate: "2026-10-11", schedStart: "2026-10-11", schedFinish: "2026-10-11" },
+    { occurrenceDate: "2026-10-18", schedStart: "2026-10-20", schedFinish: "2026-10-21" },
+  ] }]]);
+  const output = generateMermaidGantt(tasks, schedule);
+  expect(output).toContain("Review [2026-10-11]");
+  expect(output).toContain("Review [2026-10-18]");
+  expect(output).toContain("2026-10-20, 2026-10-21");
+  expect(output).not.toContain("excludes weekends");
+});

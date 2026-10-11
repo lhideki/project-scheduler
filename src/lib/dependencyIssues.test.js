@@ -343,3 +343,76 @@ describe("自動スケジューリング実行後の開始日との矛盾", () =
     });
   }
 });
+
+describe("recurring occurrence diagnostics", () => {
+  const recurring = (changes = {}) => task({ id: "R", name: "Review", startDate: "2024-01-13", duration: 1, recurrence: { frequency: "weekly", interval: 1, endDate: "2024-01-20" }, ...changes });
+  it("maps fixed-date dependency conflicts to the stored series, even with progress", () => {
+    const tasks = [task({ id: "P", startDate: "2024-01-15", duration: 1 }), recurring({ progress: 50, predecessors: [fs("P")] })];
+    const issues = detect(tasks).filter(i => i.code === "dependency-violation");
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toMatchObject({ ids: ["R"], params: { occurrenceDate: "2024-01-13", required: "2024-01-16", actual: "2024-01-13" } });
+  });
+  it("checks FF/SF against the actual fixed finish, not an effort-derived start", () => {
+    for (const type of ["FF", "SF"]) {
+      const tasks = [task({ id: "P", startDate: "2024-01-16", duration: 1 }), recurring({ predecessors: [{ id: "P", type, lag: 0 }], occurrenceOverrides: { "2024-01-13": { endDate: "2024-01-18" } } })];
+      expect(detect(tasks).filter(i => i.code === "dependency-violation")).toEqual([]);
+      tasks[1].occurrenceOverrides["2024-01-13"].endDate = "2024-01-14";
+      const issues = detect(tasks).filter(i => i.code === "dependency-violation");
+      expect(issues).toHaveLength(1);
+      expect(issues[0]).toMatchObject({ ids: ["R"], requiredDate: "2024-01-16", actualDate: "2024-01-14", params: { side: "finish", occurrenceDate: "2024-01-13" } });
+    }
+  });
+  it("reports absent specific occurrences without preventing a rule edit from reloading", () => {
+    const tasks = [recurring(), task({ id: "A", predecessors: [{ ...fs("R"), occurrenceDate: "2024-01-14" }] })];
+    const issue = detectDependencyIssues(tasks).find(i => i.code === "predecessor-missing");
+    expect(issue).toMatchObject({ ids: ["A"], blocking: false, predecessorId: "R", params: { predecessorSeriesId: "R", predecessorOccurrenceDate: "2024-01-14" } });
+  });
+  it("detects cycles through specific occurrences and presents stored series IDs", () => {
+    const tasks = [recurring({ predecessors: [fs("A")] }), task({ id: "A", predecessors: [{ ...fs("R"), occurrenceDate: "2024-01-13" }] })];
+    const issue = detectDependencyIssues(tasks).find(i => i.code === "dependency-cycle");
+    expect(issue.ids.sort()).toEqual(["A", "R"]);
+    expect(issue.params.occurrences).toEqual([expect.objectContaining({ seriesId: "R", occurrenceDate: "2024-01-13" })]);
+    expect(issue.params.route.some(r => r.name.includes("2024-01-13"))).toBe(true);
+  });
+  it("supports override predecessor replacement and specific self-dependency detection", () => {
+    const tasks = [task({ id: "P", startDate: "2024-01-15" }), recurring({ predecessors: [fs("P")], occurrenceOverrides: { "2024-01-13": { predecessors: [] }, "2024-01-20": { predecessors: [{ ...fs("R"), occurrenceDate: "2024-01-20" }] } } })];
+    const issues = detect(tasks);
+    expect(issues.filter(i => i.code === "dependency-violation")).toEqual([]);
+    expect(issues.find(i => i.code === "self-dependency")).toMatchObject({ ids: ["R"], params: { occurrenceDate: "2024-01-20" } });
+  });
+  it("surfaces explicit hard-bound warnings even without scheduling", () => {
+    const issues = detectDependencyIssues([recurring({ startDate: "1000-01-01", recurrence: { frequency: "daily", interval: 1, endDate: "9999-12-31" } })]);
+    expect(issues.find(i => i.code === "recurrence-truncated")).toMatchObject({ ids: ["R"], severity: "warning", params: { limit: 2000, occurrenceCount: 2000, requestedCalculationEndDate: "9999-12-31" } });
+  });
+});
+
+
+describe("recurring group and exceptional graph edges", () => {
+  const recurring = (changes = {}) => task({ id: "R", startDate: "2024-01-13", recurrence: { frequency: "weekly", interval: 1, endDate: "2024-01-20" }, ...changes });
+  it("inherits outer group dependencies even when an occurrence clears series defaults", () => {
+    const tasks = [task({ id: "P", startDate: "2024-01-15" }), task({ id: "G", predecessors: [fs("P")] }), recurring({ parentId: "G", predecessors: [fs("missing")], occurrenceOverrides: { "2024-01-13": { predecessors: [] } } })];
+    const issues = detect(tasks);
+    expect(issues.find(i => i.code === "dependency-violation")).toMatchObject({ ids: ["R"], predecessorId: "P", params: { occurrenceDate: "2024-01-13" } });
+    expect(issues.filter(i => i.code === "predecessor-missing")).toHaveLength(1);
+  });
+  it("detects cycles through both series and ancestor rollups without leaking synthetic IDs", () => {
+    const tasks = [task({ id: "G" }), recurring({ parentId: "G", predecessors: [fs("A")] }), task({ id: "A", predecessors: [fs("G")] })];
+    const cycle = detectDependencyIssues(tasks).find(i => i.code === "dependency-cycle");
+    expect(cycle.ids.sort()).toEqual(["A", "G", "R"]);
+    expect(cycle.params.occurrences).toHaveLength(2);
+  });
+  it("detects a two-occurrence cycle within one stored series", () => {
+    const tasks = [recurring({ occurrenceOverrides: {
+      "2024-01-13": { predecessors: [{ ...fs("R"), occurrenceDate: "2024-01-20" }] },
+      "2024-01-20": { predecessors: [{ ...fs("R"), occurrenceDate: "2024-01-13" }] },
+    } })];
+    const cycles = detectDependencyIssues(tasks).filter(i => i.code === "dependency-cycle");
+    expect(cycles).toHaveLength(1);
+    expect(cycles[0].ids).toEqual(["R"]);
+    expect(cycles[0].params.occurrences.map(o => o.occurrenceDate)).toEqual(["2024-01-13", "2024-01-20"]);
+  });
+  it("warns when a valid horizon generates no occurrences", () => {
+    const tasks = [recurring({ startDate: "2024-01-31", recurrence: { frequency: "monthly", interval: 1, monthDay: "start", endDate: "2024-01-31" } })];
+    expect(detect(tasks)).toEqual([expect.objectContaining({ code: "recurrence-empty", ids: ["R"], blocking: false })]);
+  });
+});

@@ -15,6 +15,7 @@
 import { buildFlatList, effectivePredecessors } from "./taskTree.js";
 import { formatDepLabel } from "./deps.js";
 import { candidateFromDep } from "./scheduling.js";
+import { expandRecurringTasks, isOccurrenceTask, isRecurringSummaryTask, MAX_RECURRENCE_OCCURRENCES } from "./recurrence.js";
 
 /** 依存関係の矛盾の種別。 */
 export const DEPENDENCY_ISSUE_CODES = Object.freeze({
@@ -23,6 +24,9 @@ export const DEPENDENCY_ISSUE_CODES = Object.freeze({
   missing: "predecessor-missing",
   violation: "dependency-violation",
   overrun: "fixed-milestone-overrun",
+  truncated: "recurrence-truncated",
+  invalidRecurrence: "invalid-recurrence",
+  emptyRecurrence: "recurrence-empty",
 });
 
 /** スケジュール（表示日程）を使って判定する種別。CLI の validate で、スケジュール計算の結果から追加する。 */
@@ -37,6 +41,9 @@ const CODE_ORDER = [
   DEPENDENCY_ISSUE_CODES.missing,
   DEPENDENCY_ISSUE_CODES.violation,
   DEPENDENCY_ISSUE_CODES.overrun,
+  DEPENDENCY_ISSUE_CODES.truncated,
+  DEPENDENCY_ISSUE_CODES.invalidRecurrence,
+  DEPENDENCY_ISSUE_CODES.emptyRecurrence,
 ];
 
 /**
@@ -62,7 +69,8 @@ const CODE_ORDER = [
 /** 表示用のタスク名。存在しないタスクはID、名前が空のタスクは null（表示側で「無題のタスク」に置き換える）。 */
 function taskName(task, id) {
   if (!task) return id;
-  return task.name && task.name.trim() ? task.name : null;
+  const name = task.name && task.name.trim() ? task.name : null;
+  return isOccurrenceTask(task) ? `${name || task.seriesId} [${task.occurrenceDate}]` : name;
 }
 
 function isFixedMilestone(t) {
@@ -72,7 +80,7 @@ function isFixedMilestone(t) {
 /** 他タスクから parentId で参照されているID（＝グループ）の集合。isGroupId をタスクごとに呼ぶと O(n^2) になるため1回だけ作る。 */
 function collectGroupIds(tasks) {
   const ids = new Set();
-  tasks.forEach(t => { if (t.parentId != null) ids.add(t.parentId); });
+  tasks.forEach(t => { if (t.parentId != null) ids.add(t.parentId); if (isRecurringSummaryTask(t)) ids.add(t.id); });
   return ids;
 }
 
@@ -93,9 +101,11 @@ function wbsRankOf(tasks) {
  * @returns {{taskId: string}[]}
  */
 export function findSelfDependencies(tasks) {
+  tasks = expandRecurringTasks(tasks);
   const out = [];
   tasks.forEach(t => {
-    if ((t.predecessors || []).some(p => p && p.id === t.id)) out.push({ taskId: t.id });
+    if ((isRecurringSummaryTask(t) ? t.recurrencePredecessors || [] : t.predecessors || []).some(p => p && p.id === t.id && !p.occurrenceDate)
+      || (t.predecessors || []).some(p => p && (p.id === t.id || (isOccurrenceTask(t) && p.id === t.seriesId && !p.occurrenceDate)))) out.push({ taskId: t.id });
   });
   return out;
 }
@@ -107,12 +117,13 @@ export function findSelfDependencies(tasks) {
  * @returns {{taskId: string, predecessorId: string}[]}
  */
 export function findMissingPredecessors(tasks) {
+  tasks = expandRecurringTasks(tasks);
   const ids = new Set(tasks.map(t => t.id));
   const out = [];
   tasks.forEach(t => {
     (t.predecessors || []).forEach(p => {
       if (!p || p.id === t.id) return;
-      if (!ids.has(p.id)) out.push({ taskId: t.id, predecessorId: p.id });
+      if (!ids.has(p.id)) out.push({ taskId: t.id, predecessorId: p.id, ...(p.occurrenceDate ? { predecessorSeriesId: p.occurrenceSeriesId, predecessorOccurrenceDate: p.occurrenceDate } : {}) });
     });
   });
   return out;
@@ -135,6 +146,7 @@ export function findMissingPredecessors(tasks) {
  *   memberEdges: path のうち所属辺（[子, 親グループ]）の一覧
  */
 export function findDependencyCycles(tasks) {
+  tasks = expandRecurringTasks(tasks);
   const byId = {};
   tasks.forEach(t => { if (!(t.id in byId)) byId[t.id] = t; });
   const groupIds = collectGroupIds(tasks);
@@ -272,6 +284,7 @@ function violationParams(cal, dep, predName, predDates, required, sched) {
  * @returns {DependencyIssue[]}
  */
 export function detectScheduleDependencyIssues(tasks, schedule, cal, opts = {}) {
+  tasks = expandRecurringTasks(tasks);
   const excludeIds = opts.excludeIds || new Set();
   const byId = {};
   tasks.forEach(t => { if (!(t.id in byId)) byId[t.id] = t; });
@@ -321,21 +334,22 @@ export function detectScheduleDependencyIssues(tasks, schedule, cal, opts = {}) 
       }
     }
 
-    if ((t.progress || 0) > 0) return; // 着手済みタスクは実績として日付を固定するため対象外
+    if (!isOccurrenceTask(t) && (t.progress || 0) > 0) return; // 着手済みタスクは実績として日付を固定するため対象外
     checks.forEach(({ dep, predDates, required }) => {
-      if (s.schedStart >= required) return;
+      const params = violationParams(cal, dep, taskName(byId[dep.id], dep.id), predDates, required, s);
+      if (params.actual >= params.required) return;
       issues.push({
         code: DEPENDENCY_ISSUE_CODES.violation,
         severity: "warning",
         ids: [t.id],
         predecessorId: dep.id,
-        requiredDate: required,
-        actualDate: s.schedStart,
-        params: violationParams(cal, dep, taskName(byId[dep.id], dep.id), predDates, required, s),
+        requiredDate: params.required,
+        actualDate: params.actual,
+        params,
       });
     });
   });
-  return issues;
+  return opts.preserveOccurrenceIds ? issues : mapOccurrenceIssues(issues, byId);
 }
 
 /**
@@ -349,7 +363,7 @@ export function detectScheduleDependencyIssues(tasks, schedule, cal, opts = {}) 
  * @returns {DependencyIssue[]} WBS表示順・種別順に並べた一覧
  */
 export function detectDependencyIssues(tasks, schedule = null, cal = null) {
-  const list = tasks || [];
+  const list = expandRecurringTasks(tasks || []);
   const byId = {};
   list.forEach(t => { if (!(t.id in byId)) byId[t.id] = t; });
   const issues = [];
@@ -377,22 +391,38 @@ export function detectDependencyIssues(tasks, schedule = null, cal = null) {
     });
   });
 
-  findMissingPredecessors(list).forEach(({ taskId, predecessorId }) => {
+  findMissingPredecessors(list).forEach(({ taskId, predecessorId, predecessorSeriesId, predecessorOccurrenceDate }) => {
     issues.push({
       code: DEPENDENCY_ISSUE_CODES.missing,
       severity: "error",
+      ...(predecessorOccurrenceDate ? { blocking: false } : {}),
       ids: [taskId],
       predecessorId,
-      params: { predecessorId },
+      params: { predecessorId: predecessorOccurrenceDate ? `${predecessorSeriesId} [${predecessorOccurrenceDate}]` : predecessorId,
+        ...(predecessorOccurrenceDate ? { predecessorSeriesId, predecessorOccurrenceDate } : {}) },
     });
   });
 
   if (schedule && cal) {
-    issues.push(...detectScheduleDependencyIssues(list, schedule, cal, { excludeIds: inCycle }));
+    issues.push(...detectScheduleDependencyIssues(list, schedule, cal, { excludeIds: inCycle, preserveOccurrenceIds: true }));
   }
 
+  list.filter(t => isRecurringSummaryTask(t)).forEach(t => {
+    const metadata = t.recurrenceMetadata;
+    if (metadata && metadata.occurrenceCount === 0 && !metadata.invalidReason) {
+      issues.push({ code: DEPENDENCY_ISSUE_CODES.emptyRecurrence, severity: "warning", blocking: false, ids: [t.id],
+        params: { origin: t.startDate, startDate: t.startDate, calculationEndDate: metadata.calculationEndDate } });
+    }
+    if (!metadata?.truncated && !metadata?.invalidReason) return;
+    issues.push({ code: metadata.invalidReason ? DEPENDENCY_ISSUE_CODES.invalidRecurrence : DEPENDENCY_ISSUE_CODES.truncated,
+      severity: metadata.invalidReason ? "error" : "warning", ids: [t.id],
+      params: { calculationEndDate: metadata.calculationEndDate, requestedCalculationEndDate: metadata.requestedCalculationEndDate,
+        truncationReasons: metadata.truncationReasons, occurrenceCount: metadata.occurrenceCount,
+        limit: MAX_RECURRENCE_OCCURRENCES, ...(metadata.invalidReason ? { reason: metadata.invalidReason } : {}) },
+    });
+  });
   const rank = wbsRankOf(list);
-  return issues
+  return mapOccurrenceIssues(issues
     .map((issue, i) => ({ issue, i }))
     .sort((a, b) => {
       const ra = rank.get(a.issue.ids[0]) ?? 0, rb = rank.get(b.issue.ids[0]) ?? 0;
@@ -401,7 +431,25 @@ export function detectDependencyIssues(tasks, schedule = null, cal = null) {
       if (ca !== cb) return ca - cb;
       return a.i - b.i;
     })
-    .map(x => x.issue);
+    .map(x => x.issue), byId);
+}
+
+
+/** Public diagnostics point at stored series while retaining exact occurrence identities. */
+function mapOccurrenceIssues(issues, byId) {
+  return issues.map(issue => {
+    const occurrences = issue.ids.map(id => byId[id]).filter(t => isOccurrenceTask(t))
+      .map(t => ({ id: t.id, seriesId: t.seriesId, occurrenceDate: t.occurrenceDate }));
+    const predecessor = byId[issue.predecessorId];
+    if (!occurrences.length && !isOccurrenceTask(predecessor) && !issue.params?.predecessorSeriesId) return issue;
+    return { ...issue, ids: [...new Set(issue.ids.map(id => isOccurrenceTask(byId[id]) ? byId[id].seriesId : id))],
+      ...(issue.predecessorId ? { predecessorId: (isOccurrenceTask(predecessor) ? predecessor.seriesId : null) || issue.params?.predecessorSeriesId || issue.predecessorId } : {}),
+      params: { ...issue.params,
+        ...(occurrences.length ? { occurrences, occurrenceId: occurrences[0].id, occurrenceDate: occurrences[0].occurrenceDate, seriesId: occurrences[0].seriesId } : {}),
+        ...(isOccurrenceTask(predecessor) ? { predecessorOccurrenceDate: predecessor.occurrenceDate, predecessorSeriesId: predecessor.seriesId } : {}),
+      },
+    };
+  });
 }
 
 /**

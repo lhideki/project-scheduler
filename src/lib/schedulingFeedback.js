@@ -3,7 +3,7 @@ export function applyScheduleStartDates(tasks, startDates) {
   const groups = new Set(tasks.map(task => task.parentId).filter(id => id != null));
   const changedIds = new Set();
   const next = tasks.map(task => {
-    if (groups.has(task.id) || !startDates.has(task.id) || task.startDate === startDates.get(task.id)) return task;
+    if (task.recurrence || groups.has(task.id) || !startDates.has(task.id) || task.startDate === startDates.get(task.id)) return task;
     changedIds.add(task.id);
     return { ...task, startDate: startDates.get(task.id) };
   });

@@ -64,7 +64,7 @@ export function taskCellPatch(task, column, rawText, context) {
     case "name":
       return { ok: true, patch: { name: text } };
     case "startDate":
-      if (hasChildren || (!emptyMark(text) && !validISODate(text))) return { ok: false, patch: {} };
+      if (task.recurrence || hasChildren || (!emptyMark(text) && !validISODate(text))) return { ok: false, patch: {} };
       return task.milestone
         ? { ok: true, patch: { fixedDate: emptyMark(text) ? "" : text, startDate: emptyMark(text) ? "" : text } }
         : { ok: true, patch: { startDate: emptyMark(text) ? "" : text } };

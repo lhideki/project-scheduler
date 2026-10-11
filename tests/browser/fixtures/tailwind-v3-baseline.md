@@ -50,3 +50,12 @@ The style gate is the explicit properties/colors allowlist in computedEvidence,
 not every possible computed CSS property. Box shadows, background images and
 raw color serialization are diagnostic-only; their rendered effects are checked
 by the separately documented zero-non-AA-pixel gate.
+
+## Intentional UI updates after the migration
+
+Issue #60 adds a recurring-task section to task details. The two detail scenarios
+therefore use the separate [recurring-task detail reference](recurrence-detail-issue60.md)
+and are named recurring-task detail visual regressions. The remaining 22 scenarios
+still compare **live current HTML** against this unchanged v3 fixture. Every
+scenario retains the original strict gates; no visual comparison is frozen to a
+pair of historical builds or skipped when a candidate differs.

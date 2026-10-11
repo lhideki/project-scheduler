@@ -79,17 +79,56 @@ function arrayField(object, key, path, required, issues, visit, code = `${key}-i
   for (let i = 0; i < object[key].length; i++) visit(object[key][i], `${path}[${i}]`, i);
 }
 
+function checkDependencies(value, path, issues) {
+  arrayField(value, "predecessors", `${path}.predecessors`, false, issues, (dep, itemPath) => {
+    fields(dep, itemPath, "dependency", [idField,
+      field("type", type => ["FS", "SS", "FF", "SF"].includes(type), true, "dependencyType"),
+      numberField("lag", true), dateField("occurrenceDate"),
+    ], issues);
+  }, "task-predecessors-invalid");
+}
+
+function checkRecurrence(task, path, issues) {
+  const invalid = (suffix, key = "recurrence") => issues.push(issue("error", `task-${key}-invalid`, `${path}.${suffix}`, key, { field: suffix }, { ids: [task.id] }));
+  if (has(task, "recurrence")) {
+    const rule = task.recurrence;
+    if (!isObject(rule)) { invalid("recurrence"); return; }
+    if (!isISODate(task.startDate)) invalid("startDate");
+    if (typeof task.duration === "number" && Math.ceil(task.duration) > 3660) invalid("duration");
+    if (task.milestone) issues.push(issue("error", "recurrence-leaf-required", `${path}.recurrence`, "recurrenceLeaf", {}, { ids: [task.id] }));
+    if (!["daily", "weekly", "monthly"].includes(rule.frequency)) invalid("recurrence.frequency");
+    if (!Number.isInteger(rule.interval) || rule.interval < 1 || rule.interval > 365) invalid("recurrence.interval");
+    if (has(rule, "weekdays") && (!Array.isArray(rule.weekdays) || rule.weekdays.length === 0 || rule.weekdays.some(day => !Number.isInteger(day) || day < 0 || day > 6) || new Set(rule.weekdays).size !== rule.weekdays.length)) invalid("recurrence.weekdays");
+    if (has(rule, "monthDay") && !["day", "start", "end"].includes(rule.monthDay)) invalid("recurrence.monthDay");
+    for (const key of ["endDate", "calculationEndDate"]) {
+      if (has(rule, key) && (!isISODate(rule[key]) || (isISODate(task.startDate) && rule[key] < task.startDate))) invalid(`recurrence.${key}`);
+    }
+  }
+  if (has(task, "occurrenceOverrides")) {
+    if (!isObject(task.occurrenceOverrides)) { invalid("occurrenceOverrides", "recurrenceOverride"); return; }
+    for (const [originalDate, override] of Object.entries(task.occurrenceOverrides)) {
+      const overridePath = `occurrenceOverrides.${originalDate}`;
+      if (!isISODate(originalDate) || !isObject(override)) { invalid(overridePath, "recurrenceOverride"); continue; }
+      for (const key of ["startDate", "endDate"]) {
+        if (has(override, key) && !isISODate(override[key])) invalid(`${overridePath}.${key}`, "recurrenceOverride");
+      }
+      const start = override.startDate || originalDate;
+      if (isISODate(start) && isISODate(originalDate) && Math.abs(Date.parse(start) - Date.parse(originalDate)) / 86400000 > 3660) invalid(`${overridePath}.startDate`, "recurrenceOverride");
+      if (isISODate(start) && isISODate(override.endDate) && override.endDate < start) invalid(`${overridePath}.endDate`, "recurrenceOverride");
+      if (isISODate(start) && isISODate(override.endDate) && (Date.parse(override.endDate) - Date.parse(start)) / 86400000 + 1 > 3660) invalid(`${overridePath}.endDate`, "recurrenceOverride");
+      checkDependencies(override, `${path}.${overridePath}`, issues);
+    }
+  }
+}
+
 function checkTask(value, path, issues) {
   if (!fields(value, path, "task", taskFields, issues)) return;
   arrayField(value, "sprintIds", `${path}.sprintIds`, false, issues, (id, itemPath) => {
     if (!isId(id)) issues.push(issue("error", "task-sprintId-invalid", itemPath, "id", {}, { ids: [value.id] }));
   }, "task-sprintIds-invalid");
-  arrayField(value, "predecessors", `${path}.predecessors`, false, issues, (dep, itemPath) => {
-    fields(dep, itemPath, "dependency", [idField,
-      field("type", type => ["FS", "SS", "FF", "SF"].includes(type), true, "dependencyType"),
-      numberField("lag", true),
-    ], issues);
-  }, "task-predecessors-invalid");
+  if (typeof value.id === "string" && value.id.startsWith("@recurrence:")) issues.push(issue("error", "task-id-invalid", `${path}.id`, "id", {}, { ids: [value.id] }));
+  checkDependencies(value, path, issues);
+  checkRecurrence(value, path, issues);
 }
 
 function checkCollections(data, paths, issues, { allowEditingValues = false } = {}) {
@@ -140,8 +179,16 @@ function checkVersion(value, path, issues, options) {
         if (["level", "wbsNo", "hasChildren", "critical", "milestone", "assigneeId", "progress"].includes(definition[0])) definition[2] = true;
       }
     }
-    if (fields(task, taskPath, "version-task", definitions, issues) && isISODate(task.schedStart) && isISODate(task.schedFinish) && task.schedFinish < task.schedStart) {
-      issues.push(issue("error", "version-task-date-range-invalid", `${taskPath}.schedFinish`, "dateRange", {}, { ids: [task.id] }));
+    if (fields(task, taskPath, "version-task", definitions, issues)) {
+      if (isISODate(task.schedStart) && isISODate(task.schedFinish) && task.schedFinish < task.schedStart) {
+        issues.push(issue("error", "version-task-date-range-invalid", `${taskPath}.schedFinish`, "dateRange", {}, { ids: [task.id] }));
+      }
+      arrayField(task, "occurrences", `${taskPath}.occurrences`, false, issues, (occurrence, occurrencePath) => {
+        if (fields(occurrence, occurrencePath, "version-occurrence", [dateField("occurrenceDate", true), dateField("schedStart", true), dateField("schedFinish", true)], issues)
+          && isISODate(occurrence.schedStart) && isISODate(occurrence.schedFinish) && occurrence.schedFinish < occurrence.schedStart) {
+          issues.push(issue("error", "version-occurrence-date-range-invalid", `${occurrencePath}.schedFinish`, "dateRange"));
+        }
+      });
     }
   }, "version-tasks-invalid");
   const snapshot = rawSnapshot(value, path);
@@ -198,8 +245,15 @@ export function projectDependencyIssue(value, tasks, path = "tasks") {
   const { params, path: dependencyPath, ...detail } = value;
   const index = tasks.findIndex(task => task.id === value.ids[0]);
   const task = tasks[index];
-  const depIndex = task?.predecessors?.findIndex(dep => dep.id === value.predecessorId) ?? -1;
-  const location = index < 0 ? path : `${path}[${index}].predecessors${depIndex < 0 ? "" : `[${depIndex}].id`}`;
+  const occurrenceDate = params?.occurrenceDate;
+  const override = occurrenceDate && task?.occurrenceOverrides?.[occurrenceDate];
+  const hasOverrideDeps = override && Object.hasOwn(override, "predecessors");
+  const predecessors = hasOverrideDeps ? override.predecessors : task?.predecessors;
+  const depIndex = predecessors?.findIndex(dep => dep.id === value.predecessorId && (!params?.predecessorOccurrenceDate || dep.occurrenceDate === params.predecessorOccurrenceDate)) ?? -1;
+  const fieldPath = hasOverrideDeps ? `occurrenceOverrides.${occurrenceDate}.predecessors` : "predecessors";
+  const location = index < 0 ? path : ["recurrence-truncated", "recurrence-empty", "invalid-recurrence"].includes(value.code)
+    ? `${path}[${index}].recurrence`
+    : `${path}[${index}].${fieldPath}${depIndex < 0 ? "" : `[${depIndex}].id`}`;
   return {
     ...detail, path: location,
     ...(dependencyPath ? { dependencyPath } : {}),
@@ -227,6 +281,7 @@ function collectionIntegrity(data, paths, issues) {
     (task.sprintIds || (task.sprintId ? [task.sprintId] : [])).forEach((id, j) => {
       if (!sprintIds.has(id)) issues.push(issue("warning", "sprint-missing", task.sprintIds ? `${path}.sprintIds[${j}]` : `${path}.sprintId`, "sprintMissing", { id }, { ids: [task.id] }));
     });
+    if (task.recurrence && groups.has(task.id)) issues.push(issue("error", "recurrence-leaf-required", `${path}.recurrence`, "recurrenceLeaf", {}, { ids: [task.id] }));
     if (task.predecessors?.length && groups.has(task.id)) issues.push(issue("warning", "group-has-predecessors", `${path}.predecessors`, "groupPredecessors", { name: task.name }, { ids: [task.id] }));
   });
   // Invalid trees/duplicate IDs must not reach graph and WBS traversal helpers.

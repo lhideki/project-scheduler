@@ -224,54 +224,6 @@ function cal_addDaysISO(iso, n) {
   return toISO(d);
 }
 
-// src/lib/taskTree.js
-var uidCounter = 1;
-function uid(prefix) {
-  return `${prefix}_${(uidCounter++).toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
-}
-function isGroupId(tasks, id) {
-  return tasks.some((t) => t.parentId === id);
-}
-function buildFlatList(tasks, collapsed) {
-  const byParent = /* @__PURE__ */ new Map();
-  tasks.forEach((t) => {
-    const key = t.parentId || "__root__";
-    if (!byParent.has(key)) byParent.set(key, []);
-    byParent.get(key).push(t);
-  });
-  for (const arr of byParent.values()) arr.sort((a, b) => a.order - b.order);
-  const flat = [];
-  function walk(parentKey, level, wbsPrefix) {
-    const children = byParent.get(parentKey) || [];
-    children.forEach((t, idx) => {
-      const wbsNo = wbsPrefix ? `${wbsPrefix}.${idx + 1}` : `${idx + 1}`;
-      const hasChildren = (byParent.get(t.id) || []).length > 0;
-      flat.push({ ...t, level, wbsNo, hasChildren });
-      if (hasChildren && !collapsed.has(t.id)) walk(t.id, level + 1, wbsNo);
-    });
-  }
-  walk("__root__", 0, "");
-  flat.forEach((t, i) => t.taskNo = i + 1);
-  return flat;
-}
-function ancestorChain(byId, id) {
-  const out = [];
-  const seen = /* @__PURE__ */ new Set([id]);
-  let cur = byId[id];
-  while (cur && cur.parentId && !seen.has(cur.parentId)) {
-    seen.add(cur.parentId);
-    cur = byId[cur.parentId];
-    if (cur) out.push(cur);
-  }
-  return out;
-}
-function effectivePredecessors(byId, leaf) {
-  const chain = [leaf, ...ancestorChain(byId, leaf.id)];
-  const chainIds = new Set(chain.map((x) => x.id));
-  const merged = chain.flatMap((x) => x.predecessors || []);
-  return merged.filter((dep) => !chainIds.has(dep.id));
-}
-
 // src/lib/workAllocation.js
 var ALLOCATION_UNITS_PER_DAY = 1e6;
 var DAILY_CAPACITY = 1;
@@ -377,29 +329,259 @@ function idleSegments(idle, alloc) {
   });
   return segments;
 }
+function allocationExceedsCapacity(ledger, resource, alloc) {
+  const u = usageOf(ledger, resource.id);
+  return alloc.some(({ date }) => (u.day.get(date) || 0) > toUnits(DAILY_CAPACITY) || (u.week.get(weekKey(date)) || 0) > capUnits(resource.weeklyCapacity) || (u.month.get(monthKey(date)) || 0) > capUnits(resource.monthlyCapacity));
+}
+
+// src/lib/recurrence.js
+var MAX_RECURRENCE_OCCURRENCES = 2e3;
+var MAX_RECURRENCE_SPAN_DAYS = 3660;
+var MAX_RECURRENCE_CALENDAR_DAYS = 3660;
+var MAX_RECURRENCE_MOVE_DAYS = 3660;
+var DAY_MS = 864e5;
+var INTERNAL_KIND = /* @__PURE__ */ Symbol("recurrence-expansion");
+var RESOLVED_DEP = /* @__PURE__ */ Symbol("recurrence-dependency");
+var isOccurrenceTask = (task) => task?.[INTERNAL_KIND] === "occurrence";
+var isRecurringSummaryTask = (task) => task?.[INTERNAL_KIND] === "series";
+var DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+function isISODate(value) {
+  if (typeof value !== "string" || !DATE_RE.test(value)) return false;
+  const d = /* @__PURE__ */ new Date(`${value}T00:00:00Z`);
+  return Number.isFinite(d.getTime()) && d.toISOString().slice(0, 10) === value;
+}
+function addCalendarDays(iso, days) {
+  if (!isISODate(iso) || !Number.isInteger(days)) return null;
+  const d = /* @__PURE__ */ new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return Number.isFinite(d.getTime()) && d.getUTCFullYear() >= 0 && d.getUTCFullYear() <= 9999 ? d.toISOString().slice(0, 10) : null;
+}
+function defaultCalculationEndDate(origin) {
+  if (!isISODate(origin)) return null;
+  const d = /* @__PURE__ */ new Date(`${origin}T00:00:00Z`);
+  d.setUTCFullYear(d.getUTCFullYear() + 1);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.getUTCFullYear() > 9999 ? "9999-12-31" : d.toISOString().slice(0, 10);
+}
+function isRecurringTask(task) {
+  return !!(task && task.recurrence && !isOccurrenceTask(task));
+}
+function occurrenceId(seriesId, date) {
+  return `@recurrence:${JSON.stringify([String(seriesId), date])}`;
+}
+function monthDate(origin, offset, mode) {
+  const d = /* @__PURE__ */ new Date(`${origin}T00:00:00Z`);
+  const day = d.getUTCDate();
+  d.setUTCDate(1);
+  d.setUTCMonth(d.getUTCMonth() + offset);
+  if (d.getUTCFullYear() > 9999 || !Number.isFinite(d.getTime())) return null;
+  const end = new Date(d);
+  end.setUTCMonth(end.getUTCMonth() + 1, 0);
+  d.setUTCDate(mode === "start" ? 1 : mode === "end" ? end.getUTCDate() : Math.min(day, end.getUTCDate()));
+  return d.toISOString().slice(0, 10);
+}
+function generateOccurrences(task) {
+  const origin = task?.startDate;
+  const rule = task?.recurrence || {};
+  const requestedCalculationEndDate = rule.endDate || rule.calculationEndDate || defaultCalculationEndDate(origin);
+  let calculationEndDate = requestedCalculationEndDate;
+  const result = { occurrences: [], calculationEndDate, requestedCalculationEndDate, truncated: false, truncationReasons: [] };
+  if (!isISODate(origin) || !["daily", "weekly", "monthly"].includes(rule.frequency) || !Number.isInteger(rule.interval) || rule.interval < 1 || rule.interval > 365 || !isISODate(calculationEndDate) || calculationEndDate < origin || rule.endDate && !isISODate(rule.endDate)) {
+    return { ...result, invalidReason: "invalid-recurrence" };
+  }
+  const maxHorizon = addCalendarDays(origin, MAX_RECURRENCE_CALENDAR_DAYS - 1) || "9999-12-31";
+  if (calculationEndDate > maxHorizon) {
+    calculationEndDate = maxHorizon;
+    result.truncated = true;
+    result.truncationReasons.push("calendar-horizon-limit");
+  }
+  const horizon = calculationEndDate;
+  result.calculationEndDate = horizon;
+  const duration = Number.isFinite(task.duration) ? Math.max(0, task.duration) : 0;
+  const span = Math.max(1, Math.ceil(duration));
+  if (span > MAX_RECURRENCE_SPAN_DAYS) return { ...result, invalidReason: "recurrence-span-exceeded" };
+  const weekdays = rule.weekdays?.length ? [...new Set(rule.weekdays)].filter((d) => Number.isInteger(d) && d >= 0 && d <= 6) : [(/* @__PURE__ */ new Date(`${origin}T00:00:00Z`)).getUTCDay()];
+  if (rule.frequency === "weekly" && !weekdays.length) return { ...result, invalidReason: "invalid-weekdays" };
+  function append(date) {
+    if (date < origin) return true;
+    if (date > horizon) return false;
+    if (result.occurrences.length === MAX_RECURRENCE_OCCURRENCES) {
+      result.truncated = true;
+      result.truncationReasons.push("occurrence-limit");
+      result.calculationEndDate = result.occurrences[result.occurrences.length - 1].occurrenceDate;
+      return false;
+    }
+    const override = task.occurrenceOverrides?.[date] || {};
+    const startDate = override.startDate || date;
+    const endDate = override.endDate || addCalendarDays(startDate, span - 1);
+    if (!isISODate(startDate) || !isISODate(endDate) || endDate < startDate) {
+      result.invalidReason = "invalid-occurrence-dates";
+      return false;
+    }
+    if (Math.abs(Date.parse(startDate) - Date.parse(date)) / DAY_MS > MAX_RECURRENCE_MOVE_DAYS) {
+      result.invalidReason = "occurrence-move-exceeded";
+      return false;
+    }
+    if ((Date.parse(endDate) - Date.parse(startDate)) / DAY_MS + 1 > MAX_RECURRENCE_SPAN_DAYS) {
+      result.invalidReason = "occurrence-span-exceeded";
+      return false;
+    }
+    const { recurrence, occurrenceOverrides, ...base } = task;
+    result.occurrences.push({
+      ...base,
+      id: occurrenceId(task.id, date),
+      seriesId: task.id,
+      occurrenceDate: date,
+      parentId: task.id,
+      order: result.occurrences.length,
+      isOccurrence: true,
+      isRecurringSummary: false,
+      [INTERNAL_KIND]: "occurrence",
+      startDate,
+      endDate,
+      milestone: false,
+      milestoneMode: void 0,
+      fixedDate: void 0,
+      predecessors: (Array.isArray(override.predecessors) ? override.predecessors : task.predecessors || []).map((d) => ({ ...d }))
+    });
+    return true;
+  }
+  if (rule.frequency === "daily") {
+    for (let date = origin; date && date <= horizon; date = addCalendarDays(date, rule.interval)) if (!append(date)) break;
+  } else if (rule.frequency === "weekly") {
+    const originTime = Date.parse(`${origin}T00:00:00Z`);
+    const horizonTime = Date.parse(`${horizon}T00:00:00Z`);
+    const day = new Date(originTime).getUTCDay();
+    const mondayTime = originTime - (day + 6) % 7 * DAY_MS;
+    const offsets = weekdays.map((d) => (d + 6) % 7).sort((a, b) => a - b);
+    outer: for (let week = mondayTime; week <= horizonTime; week += rule.interval * 7 * DAY_MS) {
+      for (const offset of offsets) {
+        const time = week + offset * DAY_MS;
+        if (time < originTime) continue;
+        if (time > horizonTime) break outer;
+        if (!append(new Date(time).toISOString().slice(0, 10))) break outer;
+      }
+    }
+  } else {
+    for (let month = 0; ; month += rule.interval) {
+      const date = monthDate(origin, month, rule.monthDay || "day");
+      if (!date || !append(date)) break;
+    }
+  }
+  return result;
+}
+function occurrenceLoads(task) {
+  if (!(task.duration > 0) || !isISODate(task.startDate) || !isISODate(task.endDate)) return [];
+  const days = Math.round((Date.parse(task.endDate) - Date.parse(task.startDate)) / DAY_MS) + 1;
+  if (days <= 0 || days > MAX_RECURRENCE_SPAN_DAYS) return [];
+  const units = Math.max(1, Math.round(task.duration * ALLOCATION_UNITS_PER_DAY));
+  const perDay = Math.floor(units / days), extra = units % days;
+  return Array.from({ length: days }, (_, i) => ({ date: addCalendarDays(task.startDate, i), load: (perDay + (i < extra ? 1 : 0)) / ALLOCATION_UNITS_PER_DAY }));
+}
+function expandRecurringTasks(tasks = []) {
+  const expanded = [];
+  const rawIds = new Set(tasks.filter((t) => !isOccurrenceTask(t)).map((t) => t.id));
+  for (const task of tasks) {
+    if (!isRecurringTask(task) || isRecurringSummaryTask(task)) {
+      expanded.push(task);
+      continue;
+    }
+    const generated = generateOccurrences(task);
+    let { occurrences, ...metadata } = generated;
+    if (occurrences.some((t) => rawIds.has(t.id))) {
+      metadata.invalidReason = "occurrence-id-collision";
+      occurrences = [];
+    }
+    expanded.push({ ...task, isRecurringSummary: true, isOccurrence: false, [INTERNAL_KIND]: "series", recurrencePredecessors: task.predecessors || [], predecessors: [], recurrenceMetadata: { ...metadata, occurrenceCount: occurrences.length } });
+    expanded.push(...occurrences);
+  }
+  return expanded.map((task) => {
+    if (!(task.predecessors || []).some((dep) => dep.occurrenceDate && !dep[RESOLVED_DEP])) return task;
+    return { ...task, predecessors: task.predecessors.map((dep) => dep.occurrenceDate && !dep[RESOLVED_DEP] ? { ...dep, id: occurrenceId(dep.id, dep.occurrenceDate), occurrenceSeriesId: dep.id, [RESOLVED_DEP]: true } : dep) };
+  });
+}
+
+// src/lib/taskTree.js
+var uidCounter = 1;
+function uid(prefix) {
+  return `${prefix}_${(uidCounter++).toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+}
+function isGroupId(tasks, id) {
+  return tasks.some((t) => t.parentId === id);
+}
+function buildFlatList(tasks, collapsed) {
+  const byParent = /* @__PURE__ */ new Map();
+  tasks.forEach((t) => {
+    const key = t.parentId || "__root__";
+    if (!byParent.has(key)) byParent.set(key, []);
+    byParent.get(key).push(t);
+  });
+  for (const arr of byParent.values()) arr.sort((a, b) => a.order - b.order);
+  const flat = [];
+  function walk(parentKey, level, wbsPrefix) {
+    const children = byParent.get(parentKey) || [];
+    children.forEach((t, idx) => {
+      const wbsNo = wbsPrefix ? `${wbsPrefix}.${idx + 1}` : `${idx + 1}`;
+      const hasChildren = (byParent.get(t.id) || []).length > 0;
+      flat.push({ ...t, level, wbsNo, hasChildren });
+      if (hasChildren && !collapsed.has(t.id)) walk(t.id, level + 1, wbsNo);
+    });
+  }
+  walk("__root__", 0, "");
+  flat.forEach((t, i) => t.taskNo = i + 1);
+  return flat;
+}
+function ancestorChain(byId, id) {
+  const out = [];
+  const seen = /* @__PURE__ */ new Set([id]);
+  let cur = byId[id];
+  while (cur && cur.parentId && !seen.has(cur.parentId)) {
+    seen.add(cur.parentId);
+    cur = byId[cur.parentId];
+    if (cur) out.push(cur);
+  }
+  return out;
+}
+function effectivePredecessors(byId, leaf) {
+  const chain = [leaf, ...ancestorChain(byId, leaf.id)];
+  const chainIds = new Set(chain.map((x) => x.id));
+  const merged = chain.flatMap((x) => x.predecessors || []);
+  return merged.filter((dep) => !chainIds.has(dep.id));
+}
 
 // src/lib/scheduling.js
+function indexScheduleTree(tasks) {
+  const summaryIds = /* @__PURE__ */ new Set(), childrenById = /* @__PURE__ */ new Map();
+  for (const task of tasks) {
+    if (isRecurringSummaryTask(task)) summaryIds.add(task.id);
+    if (task.parentId == null) continue;
+    summaryIds.add(task.parentId);
+    if (!childrenById.has(task.parentId)) childrenById.set(task.parentId, []);
+    childrenById.get(task.parentId).push(task);
+  }
+  return { summaryIds, childrenById };
+}
 function candidateFromDep(cal, dep, predDates, succDuration) {
   const { type, lag } = dep;
   if (type === "FS") return { start: cal.shift(predDates.finish, 1 + lag) };
   if (type === "SS") return { start: cal.shift(predDates.start, lag) };
   if (type === "FF") {
     const f2 = cal.shift(predDates.finish, lag);
-    return { start: succDuration <= 0 ? f2 : cal.startFromEnd(f2, succDuration) };
+    return { start: succDuration <= 0 ? cal.snapForward(f2) : cal.startFromEnd(cal.snapForward(f2), succDuration) };
   }
   const f = cal.shift(predDates.start, lag);
-  return { start: succDuration <= 0 ? f : cal.startFromEnd(f, succDuration) };
+  return { start: succDuration <= 0 ? cal.snapForward(f) : cal.startFromEnd(cal.snapForward(f), succDuration) };
 }
 function candidateForPredFromSucc(cal, dep, succLateDates, predDuration) {
   const { type, lag } = dep;
   if (type === "FS") return { finish: cal.shift(succLateDates.start, -(1 + lag)) };
   if (type === "SS") {
     const s2 = cal.shift(succLateDates.start, -lag);
-    return { finish: predDuration <= 0 ? s2 : cal.endFromStart(s2, predDuration) };
+    return { finish: predDuration <= 0 ? s2 : cal.endFromStart(cal.snapBackward(s2), predDuration) };
   }
   if (type === "FF") return { finish: cal.shift(succLateDates.finish, -lag) };
   const s = cal.shift(succLateDates.finish, -lag);
-  return { finish: predDuration <= 0 ? s : cal.endFromStart(s, predDuration) };
+  return { finish: predDuration <= 0 ? s : cal.endFromStart(cal.snapBackward(s), predDuration) };
 }
 function topoOrder(ids, edgesByTo) {
   const indeg = {};
@@ -445,8 +627,10 @@ function earliestSprintFloor(sprintIds, sprintById, cal) {
   return floor;
 }
 function runCPM(tasks, cal, projectStart, sprints, opts = {}) {
+  tasks = expandRecurringTasks(tasks);
+  const { summaryIds, childrenById } = indexScheduleTree(tasks);
   const respectManualPins = opts.respectManualPins !== false;
-  const leaves = tasks.filter((t) => !isGroupId(tasks, t.id));
+  const leaves = tasks.filter((t) => !summaryIds.has(t.id));
   const leafIds = leaves.map((t) => t.id);
   const byId = {};
   tasks.forEach((t) => byId[t.id] = t);
@@ -459,10 +643,10 @@ function runCPM(tasks, cal, projectStart, sprints, opts = {}) {
   function computeGroupRollup(leafDates) {
     const rolled = /* @__PURE__ */ new Map();
     function rec(id) {
-      const children = tasks.filter((t) => t.parentId === id);
+      const children = childrenById.get(id) || [];
       let min = null, max = null;
       children.forEach((c) => {
-        const r2 = isGroupId(tasks, c.id) ? rec(c.id) : leafDates.get(c.id);
+        const r2 = summaryIds.has(c.id) ? rec(c.id) : leafDates.get(c.id);
         if (!r2 || !r2.start) return;
         if (min === null || r2.start < min) min = r2.start;
         if (max === null || r2.finish > max) max = r2.finish;
@@ -471,7 +655,7 @@ function runCPM(tasks, cal, projectStart, sprints, opts = {}) {
       rolled.set(id, r);
       return r;
     }
-    tasks.filter((t) => isGroupId(tasks, t.id)).forEach((t) => {
+    tasks.filter((t) => summaryIds.has(t.id)).forEach((t) => {
       if (!rolled.has(t.id)) rec(t.id);
     });
     return rolled;
@@ -486,7 +670,7 @@ function runCPM(tasks, cal, projectStart, sprints, opts = {}) {
         if (predsOf2[dep.id]) {
           predsOf2[t.id].push({ from: dep.id, type: dep.type, lag: dep.lag });
           succsOf2[dep.id].push({ to: t.id, type: dep.type, lag: dep.lag });
-        } else if (groupRollup2 && isGroupId(tasks, dep.id) && groupRollup2.get(dep.id)?.start) {
+        } else if (groupRollup2 && summaryIds.has(dep.id) && groupRollup2.get(dep.id)?.start) {
           predsOf2[t.id].push({ from: dep.id, type: dep.type, lag: dep.lag, groupDates: groupRollup2.get(dep.id) });
         }
       });
@@ -498,6 +682,11 @@ function runCPM(tasks, cal, projectStart, sprints, opts = {}) {
     order2.forEach((id) => {
       const t = byId[id];
       const preds = predsOf2[id];
+      if (isOccurrenceTask(t)) {
+        ES2[id] = t.startDate;
+        EF2[id] = t.endDate;
+        return;
+      }
       let best = null;
       preds.forEach((dep) => {
         const predDates = dep.groupDates || { start: ES2[dep.from], finish: EF2[dep.from] };
@@ -512,6 +701,7 @@ function runCPM(tasks, cal, projectStart, sprints, opts = {}) {
       } else {
         start = best !== null ? best : cal.snapForward(t.startDate || projectStart);
       }
+      start = cal.snapForward(start);
       const sprintFloor = earliestSprintFloor(t.sprintIds, sprintById, cal);
       if (sprintFloor && sprintFloor > start) start = sprintFloor;
       ES2[id] = start;
@@ -535,6 +725,11 @@ function runCPM(tasks, cal, projectStart, sprints, opts = {}) {
   [...order].reverse().forEach((id) => {
     const t = byId[id];
     const succs = succsOf[id];
+    if (isOccurrenceTask(t)) {
+      LS[id] = t.startDate;
+      LF[id] = t.endDate;
+      return;
+    }
     let finish;
     if (succs.length === 0) {
       finish = t.milestone && t.milestoneMode === "fixed" && t.fixedDate ? t.fixedDate : projectEnd;
@@ -567,19 +762,23 @@ function runCPM(tasks, cal, projectStart, sprints, opts = {}) {
       governed: useBackward,
       schedStart: useBackward ? LS[id] : ES[id],
       schedFinish: useBackward ? LF[id] : EF[id],
-      progress: typeof t.progress === "number" ? t.progress : 0
+      progress: typeof t.progress === "number" ? t.progress : 0,
+      ...isOccurrenceTask(t) ? { id: t.id, seriesId: t.seriesId, occurrenceDate: t.occurrenceDate, isOccurrence: true, startDate: t.startDate, endDate: t.endDate } : {}
     });
   });
   rollupSummaries(tasks, result);
   return { result, projectEnd };
 }
 function rollupSummaries(tasks, result) {
-  const summaries = tasks.filter((t) => isGroupId(tasks, t.id));
+  tasks = expandRecurringTasks(tasks);
+  const { summaryIds, childrenById } = indexScheduleTree(tasks);
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const summaries = tasks.filter((t) => summaryIds.has(t.id));
   function rollup(id) {
-    const children = tasks.filter((t) => t.parentId === id);
+    const children = childrenById.get(id) || [];
     let min = null, max = null, anyCritical = false, progressSum = 0, progressCount = 0;
     children.forEach((c) => {
-      const r2 = isGroupId(tasks, c.id) ? rollup(c.id) : result.get(c.id);
+      const r2 = summaryIds.has(c.id) ? rollup(c.id) : result.get(c.id);
       if (!r2) return;
       if (min === null || r2.schedStart < min) min = r2.schedStart;
       if (max === null || r2.schedFinish > max) max = r2.schedFinish;
@@ -591,19 +790,45 @@ function rollupSummaries(tasks, result) {
     });
     const progress = progressCount ? Math.round(progressSum / progressCount) : 0;
     const r = { ES: min, EF: max, LS: min, LF: max, float: 0, critical: anyCritical, governed: false, schedStart: min, schedFinish: max, isSummary: true, progress };
+    const task = byId.get(id);
+    if (isRecurringSummaryTask(task)) {
+      r.occurrences = children.filter((t) => isOccurrenceTask(t)).map((t) => ({ ...t, ...result.get(t.id) }));
+      r.recurrenceMetadata = task.recurrenceMetadata;
+    }
     result.set(id, r);
     return r;
   }
   tasks.filter((t) => !t.parentId).forEach((t) => {
-    if (isGroupId(tasks, t.id)) rollup(t.id);
+    if (summaryIds.has(t.id)) rollup(t.id);
   });
   summaries.forEach((t) => {
     if (!result.has(t.id)) rollup(t.id);
   });
   return result;
 }
+function fixedCapacityWarning(task, resource) {
+  return {
+    code: "fixed-occurrence-capacity-exceeded",
+    taskId: task.seriesId,
+    params: {
+      taskName: task.name,
+      resourceName: resource.name,
+      duration: task.duration,
+      occurrenceId: task.id,
+      occurrenceDate: task.occurrenceDate,
+      seriesId: task.seriesId,
+      dailyCapacity: DAILY_CAPACITY,
+      weeklyCapacity: resource.weeklyCapacity || 0,
+      monthlyCapacity: resource.monthlyCapacity || 0,
+      start: task.startDate,
+      finish: task.endDate
+    }
+  };
+}
 function levelResources(tasks, cpmResult, resources, cal, sprints) {
-  const leaves = tasks.filter((t) => !isGroupId(tasks, t.id));
+  tasks = expandRecurringTasks(tasks);
+  const { summaryIds, childrenById } = indexScheduleTree(tasks);
+  const leaves = tasks.filter((t) => !summaryIds.has(t.id));
   const byId = {};
   tasks.forEach((t) => byId[t.id] = t);
   const leafIdSet = new Set(leaves.map((t) => t.id));
@@ -613,7 +838,7 @@ function levelResources(tasks, cpmResult, resources, cal, sprints) {
   leaves.forEach((t) => {
     const eff = effectivePredecessors(byId, t);
     leafPredsOf[t.id] = eff.filter((d) => leafIdSet.has(d.id)).map((d) => ({ from: d.id, type: d.type, lag: d.lag }));
-    groupPredsOf[t.id] = eff.filter((d) => isGroupId(tasks, d.id)).map((d) => ({ from: d.id, type: d.type, lag: d.lag }));
+    groupPredsOf[t.id] = eff.filter((d) => summaryIds.has(d.id)).map((d) => ({ from: d.id, type: d.type, lag: d.lag }));
   });
   const groupLeavesCache = {};
   function descendantLeavesOf(groupId) {
@@ -622,8 +847,7 @@ function levelResources(tasks, cpmResult, resources, cal, sprints) {
     const stack = [groupId];
     while (stack.length) {
       const id = stack.pop();
-      tasks.forEach((t) => {
-        if (t.parentId !== id) return;
+      (childrenById.get(id) || []).forEach((t) => {
         if (leafIdSet.has(t.id)) out.push(t.id);
         else stack.push(t.id);
       });
@@ -642,6 +866,21 @@ function levelResources(tasks, cpmResult, resources, cal, sprints) {
   const allocations = {};
   const remaining = new Set(leaves.map((t) => t.id));
   const warnings = [];
+  const fixed = leaves.filter((t) => isOccurrenceTask(t));
+  fixed.forEach((task) => {
+    placed[task.id] = { start: task.startDate, finish: task.endDate };
+    const alloc = occurrenceLoads(task);
+    if (task.duration > 0) allocations[task.id] = { alloc, idle: [] };
+    if (task.assigneeId && resById[task.assigneeId]) commitAllocation(ledger, task.assigneeId, task.id, alloc);
+    remaining.delete(task.id);
+  });
+  fixed.forEach((task) => {
+    const resource = resById[task.assigneeId];
+    const allocation = allocations[task.id];
+    if (!resource || !allocation || !allocationExceedsCapacity(ledger, resource, allocation.alloc)) return;
+    allocation.overCapacity = true;
+    warnings.push(fixedCapacityWarning(task, resource));
+  });
   function isReady(id) {
     if (!leafPredsOf[id].every((d) => placed[d.from])) return false;
     return groupPredsOf[id].every((dep) => descendantLeavesOf(dep.from).every((leafId) => placed[leafId]));
@@ -740,14 +979,29 @@ function levelResources(tasks, cpmResult, resources, cal, sprints) {
   return { placed, warnings, allocations };
 }
 function buildDisplaySchedule(tasks, cpmResult, resources, cal, sprints, opts = {}) {
+  tasks = expandRecurringTasks(tasks);
   const schedule = new Map(cpmResult);
   if (!opts.leveling) {
     tasks.forEach((t) => {
       const s = schedule.get(t.id);
       if (!s || s.isSummary || !s.schedStart || !(t.duration > 0)) return;
-      schedule.set(t.id, { ...s, allocation: { alloc: dailyLoads(cal, s.schedStart, t.duration), idle: [] } });
+      schedule.set(t.id, { ...s, allocation: { alloc: isOccurrenceTask(t) ? occurrenceLoads(t) : dailyLoads(cal, s.schedStart, t.duration), idle: [] } });
     });
-    return { schedule, levelWarnings: [] };
+    const ledger = createCapacityLedger();
+    const resourceById = new Map((resources || []).map((r) => [r.id, r]));
+    tasks.forEach((t) => {
+      const alloc = schedule.get(t.id)?.allocation?.alloc;
+      if (alloc && resourceById.has(t.assigneeId)) commitAllocation(ledger, t.assigneeId, t.id, alloc);
+    });
+    const levelWarnings = [];
+    tasks.filter((t) => isOccurrenceTask(t)).forEach((t) => {
+      const resource = resourceById.get(t.assigneeId), s = schedule.get(t.id);
+      if (!resource || !s?.allocation || !allocationExceedsCapacity(ledger, resource, s.allocation.alloc)) return;
+      schedule.set(t.id, { ...s, allocation: { ...s.allocation, overCapacity: true } });
+      levelWarnings.push(fixedCapacityWarning(t, resource));
+    });
+    rollupSummaries(tasks, schedule);
+    return { schedule, levelWarnings };
   }
   const { placed, warnings, allocations } = levelResources(tasks, cpmResult, resources || [], cal, sprints);
   for (const [id, dates] of Object.entries(placed)) {
@@ -765,7 +1019,7 @@ function computeAutoSchedule(tasks, cal, projectStart, sprints, resources, opts 
   const auto = runCPM(tasks, cal, projectStart, sprints, { respectManualPins: false });
   const out = /* @__PURE__ */ new Map();
   tasks.forEach((t) => {
-    if (isGroupId(tasks, t.id)) return;
+    if (isRecurringTask(t) || isOccurrenceTask(t) || isGroupId(tasks, t.id)) return;
     const s = auto.result.get(t.id);
     if (s && s.schedStart && !s.isSummary) out.set(t.id, s.schedStart);
   });
@@ -775,6 +1029,7 @@ function computeAutoSchedule(tasks, cal, projectStart, sprints, resources, opts 
   tasks.forEach((t) => byId[t.id] = t);
   Object.entries(placed).forEach(([id, dates]) => {
     const t = byId[id];
+    if (!t || isRecurringTask(t) || isOccurrenceTask(t)) return;
     if (!opts.leveling && t && t.milestone && t.milestoneMode === "fixed") return;
     if (dates && dates.start) out.set(id, dates.start);
   });
@@ -813,13 +1068,18 @@ function buildVersionSnapshot(data, schedule, name) {
       level: task.level,
       wbsNo: task.wbsNo,
       hasChildren: task.hasChildren,
-      schedStart: result.schedStart,
-      schedFinish: result.schedFinish,
+      schedStart: result.schedStart || void 0,
+      schedFinish: result.schedFinish || void 0,
       critical: !!result.critical,
       milestone: !!task.milestone,
       duration: typeof task.duration === "number" ? task.duration : null,
       assigneeId: task.assigneeId || null,
-      progress: typeof result.progress === "number" ? result.progress : 0
+      progress: typeof result.progress === "number" ? result.progress : 0,
+      ...result.occurrences ? { occurrences: result.occurrences.map((occurrence) => ({
+        occurrenceDate: occurrence.occurrenceDate,
+        schedStart: occurrence.schedStart,
+        schedFinish: occurrence.schedFinish
+      })) } : {}
     };
   });
   return {
@@ -905,7 +1165,10 @@ var DEPENDENCY_ISSUE_CODES = Object.freeze({
   self: "self-dependency",
   missing: "predecessor-missing",
   violation: "dependency-violation",
-  overrun: "fixed-milestone-overrun"
+  overrun: "fixed-milestone-overrun",
+  truncated: "recurrence-truncated",
+  invalidRecurrence: "invalid-recurrence",
+  emptyRecurrence: "recurrence-empty"
 });
 var SCHEDULE_DEPENDENCY_ISSUE_CODES = Object.freeze([
   DEPENDENCY_ISSUE_CODES.violation,
@@ -916,11 +1179,15 @@ var CODE_ORDER = [
   DEPENDENCY_ISSUE_CODES.self,
   DEPENDENCY_ISSUE_CODES.missing,
   DEPENDENCY_ISSUE_CODES.violation,
-  DEPENDENCY_ISSUE_CODES.overrun
+  DEPENDENCY_ISSUE_CODES.overrun,
+  DEPENDENCY_ISSUE_CODES.truncated,
+  DEPENDENCY_ISSUE_CODES.invalidRecurrence,
+  DEPENDENCY_ISSUE_CODES.emptyRecurrence
 ];
 function taskName(task, id) {
   if (!task) return id;
-  return task.name && task.name.trim() ? task.name : null;
+  const name = task.name && task.name.trim() ? task.name : null;
+  return isOccurrenceTask(task) ? `${name || task.seriesId} [${task.occurrenceDate}]` : name;
 }
 function isFixedMilestone(t) {
   return !!(t && t.milestone && t.milestoneMode === "fixed");
@@ -929,6 +1196,7 @@ function collectGroupIds(tasks) {
   const ids = /* @__PURE__ */ new Set();
   tasks.forEach((t) => {
     if (t.parentId != null) ids.add(t.parentId);
+    if (isRecurringSummaryTask(t)) ids.add(t.id);
   });
   return ids;
 }
@@ -941,24 +1209,27 @@ function wbsRankOf(tasks) {
   return rank;
 }
 function findSelfDependencies(tasks) {
+  tasks = expandRecurringTasks(tasks);
   const out = [];
   tasks.forEach((t) => {
-    if ((t.predecessors || []).some((p) => p && p.id === t.id)) out.push({ taskId: t.id });
+    if ((isRecurringSummaryTask(t) ? t.recurrencePredecessors || [] : t.predecessors || []).some((p) => p && p.id === t.id && !p.occurrenceDate) || (t.predecessors || []).some((p) => p && (p.id === t.id || isOccurrenceTask(t) && p.id === t.seriesId && !p.occurrenceDate))) out.push({ taskId: t.id });
   });
   return out;
 }
 function findMissingPredecessors(tasks) {
+  tasks = expandRecurringTasks(tasks);
   const ids = new Set(tasks.map((t) => t.id));
   const out = [];
   tasks.forEach((t) => {
     (t.predecessors || []).forEach((p) => {
       if (!p || p.id === t.id) return;
-      if (!ids.has(p.id)) out.push({ taskId: t.id, predecessorId: p.id });
+      if (!ids.has(p.id)) out.push({ taskId: t.id, predecessorId: p.id, ...p.occurrenceDate ? { predecessorSeriesId: p.occurrenceSeriesId, predecessorOccurrenceDate: p.occurrenceDate } : {} });
     });
   });
   return out;
 }
 function findDependencyCycles(tasks) {
+  tasks = expandRecurringTasks(tasks);
   const byId = {};
   tasks.forEach((t) => {
     if (!(t.id in byId)) byId[t.id] = t;
@@ -1085,6 +1356,7 @@ function violationParams(cal, dep, predName, predDates, required, sched) {
   return { side: "start", predName, label, required, actual: sched.schedStart };
 }
 function detectScheduleDependencyIssues(tasks, schedule, cal, opts = {}) {
+  tasks = expandRecurringTasks(tasks);
   const excludeIds = opts.excludeIds || /* @__PURE__ */ new Set();
   const byId = {};
   tasks.forEach((t) => {
@@ -1132,24 +1404,25 @@ function detectScheduleDependencyIssues(tasks, schedule, cal, opts = {}) {
         return;
       }
     }
-    if ((t.progress || 0) > 0) return;
+    if (!isOccurrenceTask(t) && (t.progress || 0) > 0) return;
     checks.forEach(({ dep, predDates, required }) => {
-      if (s.schedStart >= required) return;
+      const params = violationParams(cal, dep, taskName(byId[dep.id], dep.id), predDates, required, s);
+      if (params.actual >= params.required) return;
       issues.push({
         code: DEPENDENCY_ISSUE_CODES.violation,
         severity: "warning",
         ids: [t.id],
         predecessorId: dep.id,
-        requiredDate: required,
-        actualDate: s.schedStart,
-        params: violationParams(cal, dep, taskName(byId[dep.id], dep.id), predDates, required, s)
+        requiredDate: params.required,
+        actualDate: params.actual,
+        params
       });
     });
   });
-  return issues;
+  return opts.preserveOccurrenceIds ? issues : mapOccurrenceIssues(issues, byId);
 }
 function detectDependencyIssues(tasks, schedule = null, cal = null) {
-  const list = tasks || [];
+  const list = expandRecurringTasks(tasks || []);
   const byId = {};
   list.forEach((t) => {
     if (!(t.id in byId)) byId[t.id] = t;
@@ -1176,26 +1449,73 @@ function detectDependencyIssues(tasks, schedule = null, cal = null) {
       params: {}
     });
   });
-  findMissingPredecessors(list).forEach(({ taskId, predecessorId }) => {
+  findMissingPredecessors(list).forEach(({ taskId, predecessorId, predecessorSeriesId, predecessorOccurrenceDate }) => {
     issues.push({
       code: DEPENDENCY_ISSUE_CODES.missing,
       severity: "error",
+      ...predecessorOccurrenceDate ? { blocking: false } : {},
       ids: [taskId],
       predecessorId,
-      params: { predecessorId }
+      params: {
+        predecessorId: predecessorOccurrenceDate ? `${predecessorSeriesId} [${predecessorOccurrenceDate}]` : predecessorId,
+        ...predecessorOccurrenceDate ? { predecessorSeriesId, predecessorOccurrenceDate } : {}
+      }
     });
   });
   if (schedule && cal) {
-    issues.push(...detectScheduleDependencyIssues(list, schedule, cal, { excludeIds: inCycle }));
+    issues.push(...detectScheduleDependencyIssues(list, schedule, cal, { excludeIds: inCycle, preserveOccurrenceIds: true }));
   }
+  list.filter((t) => isRecurringSummaryTask(t)).forEach((t) => {
+    const metadata = t.recurrenceMetadata;
+    if (metadata && metadata.occurrenceCount === 0 && !metadata.invalidReason) {
+      issues.push({
+        code: DEPENDENCY_ISSUE_CODES.emptyRecurrence,
+        severity: "warning",
+        blocking: false,
+        ids: [t.id],
+        params: { origin: t.startDate, startDate: t.startDate, calculationEndDate: metadata.calculationEndDate }
+      });
+    }
+    if (!metadata?.truncated && !metadata?.invalidReason) return;
+    issues.push({
+      code: metadata.invalidReason ? DEPENDENCY_ISSUE_CODES.invalidRecurrence : DEPENDENCY_ISSUE_CODES.truncated,
+      severity: metadata.invalidReason ? "error" : "warning",
+      ids: [t.id],
+      params: {
+        calculationEndDate: metadata.calculationEndDate,
+        requestedCalculationEndDate: metadata.requestedCalculationEndDate,
+        truncationReasons: metadata.truncationReasons,
+        occurrenceCount: metadata.occurrenceCount,
+        limit: MAX_RECURRENCE_OCCURRENCES,
+        ...metadata.invalidReason ? { reason: metadata.invalidReason } : {}
+      }
+    });
+  });
   const rank = wbsRankOf(list);
-  return issues.map((issue2, i) => ({ issue: issue2, i })).sort((a, b) => {
+  return mapOccurrenceIssues(issues.map((issue2, i) => ({ issue: issue2, i })).sort((a, b) => {
     const ra = rank.get(a.issue.ids[0]) ?? 0, rb = rank.get(b.issue.ids[0]) ?? 0;
     if (ra !== rb) return ra - rb;
     const ca = CODE_ORDER.indexOf(a.issue.code), cb = CODE_ORDER.indexOf(b.issue.code);
     if (ca !== cb) return ca - cb;
     return a.i - b.i;
-  }).map((x) => x.issue);
+  }).map((x) => x.issue), byId);
+}
+function mapOccurrenceIssues(issues, byId) {
+  return issues.map((issue2) => {
+    const occurrences = issue2.ids.map((id) => byId[id]).filter((t) => isOccurrenceTask(t)).map((t) => ({ id: t.id, seriesId: t.seriesId, occurrenceDate: t.occurrenceDate }));
+    const predecessor = byId[issue2.predecessorId];
+    if (!occurrences.length && !isOccurrenceTask(predecessor) && !issue2.params?.predecessorSeriesId) return issue2;
+    return {
+      ...issue2,
+      ids: [...new Set(issue2.ids.map((id) => isOccurrenceTask(byId[id]) ? byId[id].seriesId : id))],
+      ...issue2.predecessorId ? { predecessorId: (isOccurrenceTask(predecessor) ? predecessor.seriesId : null) || issue2.params?.predecessorSeriesId || issue2.predecessorId } : {},
+      params: {
+        ...issue2.params,
+        ...occurrences.length ? { occurrences, occurrenceId: occurrences[0].id, occurrenceDate: occurrences[0].occurrenceDate, seriesId: occurrences[0].seriesId } : {},
+        ...isOccurrenceTask(predecessor) ? { predecessorOccurrenceDate: predecessor.occurrenceDate, predecessorSeriesId: predecessor.seriesId } : {}
+      }
+    };
+  });
 }
 
 // src/lib/projectName.js
@@ -4073,7 +4393,10 @@ var ja_default = {
       "self-dependency": "\u5FAA\u74B0\u53C2\u7167\uFF08\u81EA\u5DF1\u4F9D\u5B58\uFF09",
       "predecessor-missing": "\u5B58\u5728\u3057\u306A\u3044\u5148\u884C\u30BF\u30B9\u30AF",
       "dependency-violation": "\u958B\u59CB\u65E5\u3068\u306E\u77DB\u76FE",
-      "fixed-milestone-overrun": "\u56FA\u5B9A\u671F\u65E5\u306E\u8D85\u904E"
+      "fixed-milestone-overrun": "\u56FA\u5B9A\u671F\u65E5\u306E\u8D85\u904E",
+      "recurrence-truncated": "\u7E70\u308A\u8FD4\u3057\u8A08\u7B97\u306E\u4E0A\u9650",
+      "invalid-recurrence": "\u7E70\u308A\u8FD4\u3057\u8A2D\u5B9A\u306E\u4E0D\u5099",
+      "recurrence-empty": "\u671F\u9593\u5185\u306E\u767A\u751F\u306A\u3057"
     },
     dialogTitle: "\u4F9D\u5B58\u95A2\u4FC2\u306E\u77DB\u76FE\uFF08{count}\u4EF6\uFF09",
     dialogDescription: "\u65E5\u7A0B\u306F\u81EA\u52D5\u3067\u306F\u4FEE\u6B63\u3055\u308C\u307E\u305B\u3093\u3002\u958B\u59CB\u65E5\u3068\u306E\u77DB\u76FE\u306F\u300C\u81EA\u52D5\u30B9\u30B1\u30B8\u30E5\u30FC\u30EA\u30F3\u30B0\u5B9F\u884C\u300D\u3067\u89E3\u6D88\u3067\u304D\u307E\u3059\u3002\u5FAA\u74B0\u53C2\u7167\u30FB\u5B58\u5728\u3057\u306A\u3044\u5148\u884C\u30BF\u30B9\u30AF\u306F\u3001\u5148\u884C\u30BF\u30B9\u30AF\u6B04\u3092\u4FEE\u6B63\u3057\u3066\u304F\u3060\u3055\u3044\u3002\u9805\u76EE\u3092\u30AF\u30EA\u30C3\u30AF\u3059\u308B\u3068\u8A72\u5F53\u30BF\u30B9\u30AF\u3092\u8868\u793A\u3057\u307E\u3059\u3002",
@@ -4091,7 +4414,11 @@ var ja_default = {
       violationStart: "\u5148\u884C\u300C{predName}\u300D\uFF08{label}\uFF09\u306E\u6761\u4EF6\u3067\u306F {required, date, ymd} \u4EE5\u964D\u306B\u958B\u59CB\u3059\u308B\u5FC5\u8981\u304C\u3042\u308A\u307E\u3059\u304C\u3001{actual, date, ymd} \u306B\u958B\u59CB\u3057\u3066\u3044\u307E\u3059",
       violationFinish: "\u5148\u884C\u300C{predName}\u300D\uFF08{label}\uFF09\u306E\u6761\u4EF6\u3067\u306F {required, date, ymd} \u4EE5\u964D\u306B\u7D42\u4E86\u3059\u308B\u5FC5\u8981\u304C\u3042\u308A\u307E\u3059\u304C\u3001{actual, date, ymd} \u306B\u7D42\u4E86\u3057\u3066\u3044\u307E\u3059",
       overrunEarliest: "\u5148\u884C\u300C{predName}\u300D\u304B\u3089\u6C42\u3081\u305F\u6700\u65E9\u65E5\uFF08{earliest, date, ymd}\uFF09\u304C\u56FA\u5B9A\u671F\u65E5\uFF08{fixedDate, date, ymd}\uFF09\u3092\u8D85\u904E\u3057\u3066\u3044\u307E\u3059",
-      overrunDisplay: "\u8868\u793A\u4E2D\u306E\u65E5\u7A0B\uFF08{actual, date, ymd}\uFF09\u304C\u56FA\u5B9A\u671F\u65E5\uFF08{fixedDate, date, ymd}\uFF09\u3092\u8D85\u904E\u3057\u3066\u3044\u307E\u3059"
+      overrunDisplay: "\u8868\u793A\u4E2D\u306E\u65E5\u7A0B\uFF08{actual, date, ymd}\uFF09\u304C\u56FA\u5B9A\u671F\u65E5\uFF08{fixedDate, date, ymd}\uFF09\u3092\u8D85\u904E\u3057\u3066\u3044\u307E\u3059",
+      recurrenceTruncated: "\u7E70\u308A\u8FD4\u3057\u8A08\u7B97\u306F{limit}\u56DE\u307E\u305F\u306F3,660\u65E5\u3067\u6253\u3061\u5207\u3089\u308C\u307E\u3057\u305F\u3002{calculationEndDate, date, ymd}\u307E\u3067\u306B{occurrenceCount}\u56DE\u3092\u751F\u6210\u3057\u307E\u3057\u305F\u3002\u305D\u308C\u4EE5\u964D\u306F\u542B\u307E\u308C\u307E\u305B\u3093\u3002\u8A08\u7B97\u671F\u9593\u3092\u77ED\u304F\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
+      invalidRecurrence: "\u3053\u306E\u7E70\u308A\u8FD4\u3057\u30BF\u30B9\u30AF\u306E\u8A2D\u5B9A\u306B\u4E0D\u5099\u304C\u3042\u308A\u307E\u3059\u3002\u958B\u59CB\u65E5\u30FB\u7E70\u308A\u8FD4\u3057\u30EB\u30FC\u30EB\u30FB\u8A08\u7B97\u671F\u9593\u3092\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
+      occurrenceContext: "\u5143\u306E\u4E88\u5B9A\u65E5 {occurrenceDate, date, short} \u306E\u56DE: {reason}",
+      recurrenceEmpty: "{origin, date, ymd}\u301C{calculationEndDate, date, ymd}\u306E\u671F\u9593\u5185\u306B\u767A\u751F\u3059\u308B\u56DE\u304C\u3042\u308A\u307E\u305B\u3093\u3002\u66DC\u65E5\u30FB\u6708\u5185\u306E\u65E5\u4ED8\u30FB\u8A08\u7B97\u671F\u9593\u3092\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044\u3002"
     },
     tooltipLine: "{label}: {message}"
   },
@@ -4102,7 +4429,8 @@ var ja_default = {
       monthly: "\u6708\u6B21{value}\u4EBA\u65E5"
     },
     limitSeparator: "\u30FB",
-    capacityExceeded: "\u300C{taskName}\u300D\uFF08\u62C5\u5F53\u8005: {resourceName}\u3001\u5DE5\u6570: {duration}\u4EBA\u65E5\uFF09\u306F\u3001{limits}\u306E\u7A3C\u50CD\u4E0A\u9650\u5185\u3067\u5272\u308A\u5F53\u3066\u304D\u308C\u307E\u305B\u3093\u3067\u3057\u305F\uFF08\u63A2\u7D22\u4E0A\u9650: {searchWorkdays, number}\u7A3C\u50CD\u65E5\uFF09\u3002\u958B\u59CB\u65E5\u3092{start, date, ymd}\u3068\u3057\u3001\u9023\u7D9A\u3059\u308B\u7A3C\u50CD\u65E5\u306B\u914D\u7F6E\u3057\u3066\u3044\u307E\u3059\u304C\u3001\u7A3C\u50CD\u4E0A\u9650\u3092\u8D85\u904E\u3057\u3066\u3044\u307E\u3059\u3002\u5DE5\u6570\u307E\u305F\u306F\u7A3C\u50CD\u4E0A\u9650\u306E\u898B\u76F4\u3057\u304C\u5FC5\u8981\u3067\u3059\u3002"
+    capacityExceeded: "\u300C{taskName}\u300D\uFF08\u62C5\u5F53\u8005: {resourceName}\u3001\u5DE5\u6570: {duration}\u4EBA\u65E5\uFF09\u306F\u3001{limits}\u306E\u7A3C\u50CD\u4E0A\u9650\u5185\u3067\u5272\u308A\u5F53\u3066\u304D\u308C\u307E\u305B\u3093\u3067\u3057\u305F\uFF08\u63A2\u7D22\u4E0A\u9650: {searchWorkdays, number}\u7A3C\u50CD\u65E5\uFF09\u3002\u958B\u59CB\u65E5\u3092{start, date, ymd}\u3068\u3057\u3001\u9023\u7D9A\u3059\u308B\u7A3C\u50CD\u65E5\u306B\u914D\u7F6E\u3057\u3066\u3044\u307E\u3059\u304C\u3001\u7A3C\u50CD\u4E0A\u9650\u3092\u8D85\u904E\u3057\u3066\u3044\u307E\u3059\u3002\u5DE5\u6570\u307E\u305F\u306F\u7A3C\u50CD\u4E0A\u9650\u306E\u898B\u76F4\u3057\u304C\u5FC5\u8981\u3067\u3059\u3002",
+    fixedOccurrenceCapacityExceeded: "\u300C{taskName}\u300D\uFF08\u62C5\u5F53\u8005: {resourceName}\u3001\u5143\u306E\u767A\u751F\u65E5: {occurrenceDate, date, ymd}\uFF09\u304C\u7A3C\u50CD\u4E0A\u9650\uFF08\u65E5\u6B21{dailyCapacity}\u30FB\u9031\u6B21{weeklyCapacity}\u30FB\u6708\u6B21{monthlyCapacity}\u4EBA\u65E5\u30010\u306F\u4E0A\u9650\u306A\u3057\uFF09\u3092\u8D85\u3048\u3066\u3044\u307E\u3059\u3002\u56FA\u5B9A\u65E5\u7A0B\u306E{start, date, ymd}\u301C{finish, date, ymd}\u306F\u7DAD\u6301\u3055\u308C\u307E\u3057\u305F\u3002\u3053\u306E\u56DE\u306E\u65E5\u7A0B\u307E\u305F\u306F\u7A3C\u50CD\u4E0A\u9650\u3092\u8ABF\u6574\u3057\u3066\u304F\u3060\u3055\u3044\u3002"
   },
   taskDetail: {
     groupBadge: "\uFF08\u30B0\u30EB\u30FC\u30D7\uFF09",
@@ -4361,7 +4689,9 @@ var ja_default = {
     milestone: "\u30DE\u30A4\u30EB\u30B9\u30C8\u30FC\u30F3",
     float: "\u30D5\u30ED\u30FC\u30C8 {days}\u65E5",
     lagTitle: "\u30E9\u30B0\uFF08workday\uFF09",
-    removeEdge: "\u4F9D\u5B58\u95A2\u4FC2\u3092\u524A\u9664"
+    removeEdge: "\u4F9D\u5B58\u95A2\u4FC2\u3092\u524A\u9664",
+    editDependency: "{from}\u304B\u3089{to}\u3078\u306E\u4F9D\u5B58\u95A2\u4FC2\u3092\u7DE8\u96C6\uFF1A{label}",
+    dependencyType: "\u4F9D\u5B58\u95A2\u4FC2\u306E\u7A2E\u985E"
   },
   save: {
     pending: "\u672A\u4FDD\u5B58 \xB7 \u4FDD\u5B58\u5F85\u3061",
@@ -4412,7 +4742,10 @@ var ja_default = {
     schemaVersion: "schemaVersion \u306F {version} \u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044",
     dateTime: "{field} \u306F\u6709\u52B9\u306A ISO 8601 \u65E5\u6642\u3067\u6307\u5B9A\u3057\u3066\u304F\u3060\u3055\u3044",
     requiredArray: "\u5FC5\u9808\u306E\u914D\u5217\u304C\u3042\u308A\u307E\u305B\u3093",
-    dependencySubject: "\u300C{name}\u300D: {reason}"
+    dependencySubject: "\u300C{name}\u300D: {reason}",
+    recurrence: "\u7E70\u308A\u8FD4\u3057\u6761\u4EF6\u304C\u6B63\u3057\u304F\u3042\u308A\u307E\u305B\u3093: {field}\u3002",
+    recurrenceLeaf: "\u7E70\u308A\u8FD4\u3057\u306F\u901A\u5E38\u306E\u672B\u7AEF\u30BF\u30B9\u30AF\u3060\u3051\u306B\u8A2D\u5B9A\u3067\u304D\u307E\u3059\u3002",
+    recurrenceOverride: "\u500B\u5225\u306E\u65E5\u7A0B\u4FEE\u6B63\u304C\u6B63\u3057\u304F\u3042\u308A\u307E\u305B\u3093: {field}\u3002"
   },
   projectName: {
     label: "\u30D7\u30ED\u30B8\u30A7\u30AF\u30C8\u540D",
@@ -4440,6 +4773,72 @@ var ja_default = {
     details: "\u5BFE\u8C61\u30BF\u30B9\u30AF\u3068\u7406\u7531\u3092\u78BA\u8A8D",
     dismiss: "\u518D\u8A08\u7B97\u7D50\u679C\u3092\u9589\u3058\u308B",
     title: "\u518D\u8A08\u7B97\u7D50\u679C"
+  },
+  recurrence: {
+    title: "\u7E70\u308A\u8FD4\u3057",
+    editRule: "\u7E70\u308A\u8FD4\u3057\u3092\u7DE8\u96C6",
+    addRule: "\u7E70\u308A\u8FD4\u3057\u3092\u8FFD\u52A0",
+    notRepeating: "\u3053\u306E\u30BF\u30B9\u30AF\u306F\u7E70\u308A\u8FD4\u3057\u307E\u305B\u3093\u3002",
+    enabled: "\u3053\u306E\u30BF\u30B9\u30AF\u3092\u7E70\u308A\u8FD4\u3059",
+    origin: "\u30B7\u30EA\u30FC\u30BA\u958B\u59CB\u65E5\uFF08\u5FC5\u9808\uFF09",
+    frequency: "\u7E70\u308A\u8FD4\u3057\u5358\u4F4D",
+    daily: "\u6BCE\u65E5",
+    weekly: "\u6BCE\u9031",
+    monthly: "\u6BCE\u6708",
+    interval: "\u7E70\u308A\u8FD4\u3057\u9593\u9694",
+    end: "\u7D42\u4E86\u65E5\uFF08\u4EFB\u610F\u30FB\u5F53\u65E5\u3092\u542B\u3080\uFF09",
+    weekdays: "\u66DC\u65E5",
+    weekAnchor: "\u9031\u306F\u6708\u66DC\u65E5\u304B\u3089\u59CB\u307E\u308A\u307E\u3059\u3002\u30B7\u30EA\u30FC\u30BA\u958B\u59CB\u65E5\u4EE5\u964D\u306E\u65E5\u4ED8\u3060\u3051\u3092\u542B\u307F\u307E\u3059\u3002",
+    monthMode: "\u6708\u5185\u306E\u65E5\u4ED8",
+    monthDay: "\u958B\u59CB\u65E5\u3068\u540C\u3058\u65E5\uFF08\u5B58\u5728\u3057\u306A\u3044\u5834\u5408\u306F\u6708\u672B\uFF09",
+    monthStart: "\u6708\u521D\uFF081\u65E5\uFF09",
+    monthEnd: "\u6708\u672B",
+    horizon: "\u8A08\u7B97\u671F\u9593\u306E\u7D42\u4E86\u65E5\uFF08\u5F53\u65E5\u3092\u542B\u3080\uFF09",
+    horizonNote: "\u7D42\u4E86\u65E5\u3092\u6307\u5B9A\u3057\u306A\u3044\u5834\u5408\u3001\u3053\u306E\u4FDD\u5B58\u6E08\u307F\u306E\u6709\u9650\u671F\u9593\u3067\u8A08\u7B97\u3057\u307E\u3059\u3002\u65E2\u5B9A\u306F\u958B\u59CB\u65E5\u304B\u30891\u5E74\u9593\u3067\u3059\u3002\u30B9\u30AF\u30ED\u30FC\u30EB\u3084\u30BA\u30FC\u30E0\u3067\u306F\u5909\u308F\u308A\u307E\u305B\u3093\u3002",
+    boundsNote: "\u958B\u59CB\u65E5\u306F\u5FC5\u9808\u3067\u3059\u3002\u4EFB\u610F\u306E\u7D42\u4E86\u65E5\u306F\u305D\u306E\u65E5\u306E\u767A\u751F\u3092\u542B\u307F\u307E\u3059\u3002\u5404\u56DE\u306E\u5DE5\u6570\u3068\u62C5\u5F53\u8005\u306F\u30B7\u30EA\u30FC\u30BA\u306E\u8A2D\u5B9A\u3092\u4F7F\u3044\u307E\u3059\u3002",
+    preserveOverrides: "\u500B\u5225\u5909\u66F4\u306F\u5143\u306E\u767A\u751F\u65E5\u306B\u7D10\u3065\u304D\u307E\u3059\u3002\u30EB\u30FC\u30EB\u306E\u5909\u66F4\u30FB\u89E3\u9664\u5F8C\u3082\u4FDD\u6301\u3055\u308C\u3001\u65B0\u30EB\u30FC\u30EB\u306B\u542B\u307E\u308C\u306A\u3044\u65E5\u4ED8\u306E\u5909\u66F4\u306F\u4F11\u6B62\u72B6\u614B\u306B\u306A\u308A\u307E\u3059\u3002",
+    saveRule: "\u7E70\u308A\u8FD4\u3057\u3092\u4FDD\u5B58",
+    summary: "{frequency}\u30FB{interval}\u5358\u4F4D\u3054\u3068\uFF1A{count}\u56DE",
+    calculatedThrough: "\u8A08\u7B97\u671F\u9593\u306E\u7D42\u4E86\uFF1A{date}",
+    fixedDatesNote: "\u5404\u56DE\u306E\u65E5\u4ED8\u306F\u571F\u65E5\u30FB\u795D\u65E5\u3082\u542B\u3080\u30AB\u30EC\u30F3\u30C0\u30FC\u65E5\u4ED8\u306B\u56FA\u5B9A\u3055\u308C\u307E\u3059\u3002\u4F9D\u5B58\u95A2\u4FC2\u3084\u7A3C\u50CD\u4E0A\u9650\u306E\u8B66\u544A\u304C\u51FA\u3066\u3082\u3001\u65E5\u4ED8\u306F\u79FB\u52D5\u3057\u307E\u305B\u3093\u3002",
+    truncated: "\u8A08\u7B97\u306F2,000\u56DE\u307E\u305F\u306F3,660\u65E5\u3067\u6253\u3061\u5207\u3089\u308C\u307E\u3057\u305F\u3002\u305D\u308C\u4EE5\u964D\u306F\u542B\u307E\u308C\u307E\u305B\u3093\u3002\u5168\u4F53\u3092\u8A08\u7B97\u3059\u308B\u306B\u306F\u4FDD\u5B58\u6E08\u307F\u671F\u9593\u3092\u77ED\u304F\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
+    dormantOverrides: "\u73FE\u5728\u306E\u30EB\u30FC\u30EB\u306B\u542B\u307E\u308C\u306A\u3044\u500B\u5225\u5909\u66F4\u304C{count}\u4EF6\u3042\u308A\u307E\u3059\u3002\u5143\u306E\u767A\u751F\u65E5\u306B\u7D10\u3065\u3051\u3066\u4FDD\u6301\u3057\u3066\u3044\u307E\u3059\u3002",
+    occurrences: "\u5404\u56DE\uFF08\u5143\u306E\u767A\u751F\u65E5\uFF09",
+    overridden: "\u500B\u5225\u5909\u66F4\u3042\u308A",
+    editOccurrence: "\u3053\u306E\u56DE\u3092\u7DE8\u96C6",
+    noOccurrences: "\u8A08\u7B97\u671F\u9593\u5185\u306B\u767A\u751F\u3059\u308B\u56DE\u306F\u3042\u308A\u307E\u305B\u3093\u3002",
+    occurrenceIdentity: "\u5143\u306E\u767A\u751F\u65E5\uFF1A{date}",
+    occurrenceNote: "\u3053\u306E\u56DE\u3060\u3051\u3092\u5909\u66F4\u3057\u307E\u3059\u3002\u5143\u306E\u767A\u751F\u65E5\u306F\u8B58\u5225\u7528\u306B\u4FDD\u6301\u3057\u3001\u5DE5\u6570\u3068\u62C5\u5F53\u8005\u306F\u30B7\u30EA\u30FC\u30BA\u304B\u3089\u5F15\u304D\u7D99\u304E\u307E\u3059\u3002\u7D42\u4E86\u65E5\u306F\u5F53\u65E5\u3092\u542B\u307F\u307E\u3059\u3002\u79FB\u52D5\u306F\u5143\u306E\u767A\u751F\u65E5\u304B\u30893,660\u65E5\u4EE5\u5185\u306B\u9650\u308A\u307E\u3059\u3002",
+    occurrenceStart: "\u3053\u306E\u56DE\u306E\u958B\u59CB\u65E5",
+    occurrenceEnd: "\u3053\u306E\u56DE\u306E\u7D42\u4E86\u65E5",
+    occurrenceDeps: "\u3053\u306E\u56DE\u306E\u5148\u884C\u30BF\u30B9\u30AF",
+    dependencyHelp: "\u7279\u5B9A\u306E\u56DE\u306F\u300CWBS@YYYY-MM-DDFS+\u30E9\u30B0\u300D\u3067\u6307\u5B9A\u3057\u307E\u3059\uFF08\u4F8B\uFF1A2@2026-10-12FS+1\uFF09\u3002\u65E5\u4ED8\u306A\u3057\u306EWBS\u756A\u53F7\u306F\u6709\u9650\u671F\u9593\u306E\u30B7\u30EA\u30FC\u30BA\u5168\u4F53\u3092\u53C2\u7167\u3057\u307E\u3059\u3002",
+    resetOccurrence: "\u3053\u306E\u56DE\u3092\u5143\u306B\u623B\u3059",
+    saveOccurrence: "\u3053\u306E\u56DE\u3092\u4FDD\u5B58",
+    editOrigin: "\u30B7\u30EA\u30FC\u30BA\u958B\u59CB\u65E5\u306F\u7E70\u308A\u8FD4\u3057\u8A2D\u5B9A\u3067\u7DE8\u96C6\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
+    cannotConvert: "\u30DE\u30A4\u30EB\u30B9\u30C8\u30FC\u30F3\u3084\u30B0\u30EB\u30FC\u30D7\u306B\u5909\u63DB\u3059\u308B\u524D\u306B\u7E70\u308A\u8FD4\u3057\u3092\u89E3\u9664\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
+    cannotPaste: "\u7E70\u308A\u8FD4\u3057\u30BF\u30B9\u30AF\u306E\u65E5\u4ED8\u30FB\u7A2E\u5225\u306F\u7E70\u308A\u8FD4\u3057\u8A2D\u5B9A\u3067\u7DE8\u96C6\u3057\u3066\u304F\u3060\u3055\u3044\u3002\u8CBC\u308A\u4ED8\u3051\u306F\u9069\u7528\u3057\u307E\u305B\u3093\u3067\u3057\u305F\u3002",
+    barLabel: "{name}\uFF1A\u5143\u306E\u767A\u751F\u65E5 {date}\u3001{start}\u304B\u3089{finish}\u3002{status}\u3002\u958B\u304F\u3068\u3053\u306E\u56DE\u3092\u7DE8\u96C6\u3067\u304D\u307E\u3059\u3002",
+    scheduled: "\u4E88\u5B9A\u3069\u304A\u308A\u306E\u56DE",
+    networkCount: "\u7E70\u308A\u8FD4\u3057\uFF1A{count}\u56DE",
+    resourceNote: "\u7E70\u308A\u8FD4\u3057\u30BF\u30B9\u30AF\u306F\u3001\u4FDD\u5B58\u6E08\u307F\u8A08\u7B97\u671F\u9593\u5185\u306E\u5404\u56DE\u306E\u8CA0\u8377\u3092\u571F\u65E5\u30FB\u795D\u65E5\u3082\u542B\u3081\u3066\u96C6\u8A08\u3057\u307E\u3059\u3002",
+    errors: {
+      startRequired: "\u5B8C\u5168\u3067\u6709\u52B9\u306A\u30B7\u30EA\u30FC\u30BA\u958B\u59CB\u65E5\u3092\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
+      intervalInvalid: "\u7E70\u308A\u8FD4\u3057\u9593\u9694\u306B\u306F1\u301C365\u306E\u6574\u6570\u3092\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
+      weekdaysRequired: "\u66DC\u65E5\u30921\u3064\u4EE5\u4E0A\u9078\u3093\u3067\u304F\u3060\u3055\u3044\u3002",
+      endInvalid: "\u7D42\u4E86\u65E5\u306B\u306F\u30B7\u30EA\u30FC\u30BA\u958B\u59CB\u65E5\u4EE5\u964D\u306E\u6709\u52B9\u306A\u65E5\u4ED8\u3092\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
+      horizonInvalid: "\u8A08\u7B97\u671F\u9593\u306E\u7D42\u4E86\u65E5\u306B\u306F\u30B7\u30EA\u30FC\u30BA\u958B\u59CB\u65E5\u4EE5\u964D\u306E\u6709\u52B9\u306A\u65E5\u4ED8\u3092\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
+      occurrenceDatesInvalid: "\u5B8C\u5168\u306A\u958B\u59CB\u65E5\u30FB\u7D42\u4E86\u65E5\u3092\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044\u3002\u7D42\u4E86\u65E5\u306F\u958B\u59CB\u65E5\u4EE5\u964D\u306B\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
+      dependenciesInvalid: "\u5148\u884C\u30BF\u30B9\u30AF\u306E\u65E5\u4ED8\u30FB\u66F8\u5F0F\u30FBWBS\u756A\u53F7\u306B\u8AA4\u308A\u304C\u3042\u308A\u307E\u3059\u3002\u5909\u66F4\u306F\u4FDD\u5B58\u3055\u308C\u3066\u3044\u307E\u305B\u3093\u3002",
+      spanInvalid: "\u5404\u56DE\u306E\u671F\u9593\u306F3,660\u65E5\u4EE5\u5185\u306B\u3057\u3066\u304F\u3060\u3055\u3044\u3002\u5DE5\u6570\u307E\u305F\u306F\u65E5\u4ED8\u306E\u7BC4\u56F2\u3092\u77ED\u304F\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
+      moveTooFar: "\u5404\u56DE\u306E\u958B\u59CB\u65E5\u306F\u5143\u306E\u767A\u751F\u65E5\u304B\u30893,660\u65E5\u4EE5\u5185\u306B\u3057\u3066\u304F\u3060\u3055\u3044\u3002"
+    },
+    safetyBounds: "\u5B89\u5168\u4E0A\u9650\uFF1A\u9593\u96941\u301C365\u3001\u5404\u56DE\u3068\u8A08\u7B97\u671F\u9593\u306F3,660\u65E5\u4EE5\u5185\u30011\u30B7\u30EA\u30FC\u30BA2,000\u56DE\u307E\u3067\u3002",
+    inheritedDeps: "\u30B7\u30EA\u30FC\u30BA\u306E\u5148\u884C\u30BF\u30B9\u30AF\u3092\u5F15\u304D\u7D99\u3050",
+    customDeps: "\u3053\u306E\u56DE\u3060\u3051\u306E\u5148\u884C\u30BF\u30B9\u30AF",
+    useSeriesDeps: "\u30B7\u30EA\u30FC\u30BA\u306E\u5148\u884C\u30BF\u30B9\u30AF\u306B\u623B\u3059",
+    baselineOccurrence: "\u6BD4\u8F03\u5143\u306E\u56DE\uFF08\u5143\u306E\u767A\u751F\u65E5\uFF1A{date}\uFF09",
+    reservationName: "{name}\uFF08\u5143\u306E\u767A\u751F\u65E5\uFF1A{date}\uFF09"
   }
 };
 
@@ -4568,7 +4967,10 @@ var en_default = {
       "self-dependency": "Circular dependency (self)",
       "predecessor-missing": "Missing predecessor",
       "dependency-violation": "Start date conflict",
-      "fixed-milestone-overrun": "Fixed date overrun"
+      "fixed-milestone-overrun": "Fixed date overrun",
+      "recurrence-truncated": "Recurrence calculation limit",
+      "invalid-recurrence": "Invalid recurrence",
+      "recurrence-empty": "No occurrences in period"
     },
     dialogTitle: "Dependency issues ({count})",
     dialogDescription: 'Dates are not corrected automatically. Start date conflicts can be resolved with "Run auto-scheduling". For circular dependencies and missing predecessors, fix the predecessors field. Click an item to show the task.',
@@ -4586,7 +4988,11 @@ var en_default = {
       violationStart: 'Predecessor "{predName}" ({label}) requires a start on or after {required, date, ymd}, but the task starts on {actual, date, ymd}',
       violationFinish: 'Predecessor "{predName}" ({label}) requires a finish on or after {required, date, ymd}, but the task finishes on {actual, date, ymd}',
       overrunEarliest: 'The earliest date from predecessor "{predName}" ({earliest, date, ymd}) is after the fixed date ({fixedDate, date, ymd})',
-      overrunDisplay: "The displayed date ({actual, date, ymd}) is after the fixed date ({fixedDate, date, ymd})"
+      overrunDisplay: "The displayed date ({actual, date, ymd}) is after the fixed date ({fixedDate, date, ymd})",
+      recurrenceTruncated: "Recurrence calculation was capped at {limit} occurrences or 3,660 calendar days. {occurrenceCount} occurrences were generated through {calculationEndDate, date, ymd}. Later occurrences are excluded; shorten the calculation period.",
+      invalidRecurrence: "This recurring task has invalid settings. Review the start date, repeat rule and calculation period.",
+      occurrenceContext: "Occurrence originally on {occurrenceDate, date, short}: {reason}",
+      recurrenceEmpty: "The recurrence rule produces no occurrences from {origin, date, ymd} through {calculationEndDate, date, ymd}. Review the weekdays, month mode or calculation period."
     },
     tooltipLine: "{label}: {message}"
   },
@@ -4597,7 +5003,8 @@ var en_default = {
       monthly: "{value, plural, one {# person-day} other {# person-days}} monthly"
     },
     limitSeparator: ", ",
-    capacityExceeded: '"{taskName}" (assignee: {resourceName}, effort: {duration} person-days) could not be allocated within the capacity limits ({limits}; search limit: {searchWorkdays, number} workdays). It is placed on consecutive workdays starting {start, date, ymd} and exceeds the capacity limits. Review the effort or the capacity limits.'
+    capacityExceeded: '"{taskName}" (assignee: {resourceName}, effort: {duration} person-days) could not be allocated within the capacity limits ({limits}; search limit: {searchWorkdays, number} workdays). It is placed on consecutive workdays starting {start, date, ymd} and exceeds the capacity limits. Review the effort or the capacity limits.',
+    fixedOccurrenceCapacityExceeded: '"{taskName}" (assignee: {resourceName}, original occurrence: {occurrenceDate, date, ymd}) exceeds resource capacity (daily: {dailyCapacity}, weekly: {weeklyCapacity}, monthly: {monthlyCapacity} person-days; 0 means unlimited). Its fixed dates, {start, date, ymd} through {finish, date, ymd}, were retained. Adjust this occurrence or resource capacity.'
   },
   taskDetail: {
     groupBadge: "(group)",
@@ -4856,7 +5263,9 @@ var en_default = {
     milestone: "Milestone",
     float: "Float {days}d",
     lagTitle: "Lag (workdays)",
-    removeEdge: "Remove dependency"
+    removeEdge: "Remove dependency",
+    editDependency: "Edit dependency from {from} to {to}: {label}",
+    dependencyType: "Dependency type"
   },
   save: {
     pending: "Unsaved changes \xB7 waiting to save",
@@ -4907,7 +5316,10 @@ var en_default = {
     schemaVersion: "schemaVersion must be {version}.",
     dateTime: "{field} must be a valid ISO 8601 date-time.",
     requiredArray: "Required array is missing.",
-    dependencySubject: '"{name}": {reason}'
+    dependencySubject: '"{name}": {reason}',
+    recurrence: "Invalid recurrence settings: {field}.",
+    recurrenceLeaf: "Only regular leaf tasks can repeat.",
+    recurrenceOverride: "Invalid occurrence override: {field}."
   },
   projectName: {
     label: "Project name",
@@ -4935,6 +5347,72 @@ var en_default = {
     details: "View affected tasks and reasons",
     dismiss: "Dismiss recalculation result",
     title: "Recalculation result"
+  },
+  recurrence: {
+    title: "Recurrence",
+    editRule: "Edit recurrence",
+    addRule: "Add recurrence",
+    notRepeating: "This task does not repeat.",
+    enabled: "Repeat this task",
+    origin: "Series start (required)",
+    frequency: "Frequency",
+    daily: "Daily",
+    weekly: "Weekly",
+    monthly: "Monthly",
+    interval: "Repeat every",
+    end: "End date (optional, inclusive)",
+    weekdays: "Weekdays",
+    weekAnchor: "Weeks begin on Monday. Only dates on or after the series start are included.",
+    monthMode: "Day of month",
+    monthDay: "Start date\u2019s day (clamp to month end)",
+    monthStart: "First day of the month",
+    monthEnd: "Last day of the month",
+    horizon: "Calculation through (inclusive)",
+    horizonNote: "Without an end date, calculations use this saved finite period. The default is one year from the series start. Scrolling and zooming do not change it.",
+    boundsNote: "The start is required. The optional end includes occurrences on that date. Each occurrence uses the series effort and assignee.",
+    preserveOverrides: "Single-occurrence changes stay attached to their original dates. Changing or removing the rule preserves them; changes outside the new rule remain dormant.",
+    saveRule: "Save recurrence",
+    summary: "{frequency}, every {interval}: {count} occurrences",
+    calculatedThrough: "Calculation period ends {date}",
+    fixedDatesNote: "Occurrences stay on their calendar dates, including weekends and holidays. Dependencies and resource limits can produce warnings; they do not move these dates.",
+    truncated: "Calculation was capped at 2,000 occurrences or 3,660 calendar days. Later occurrences are excluded; shorten the saved period to calculate the full series.",
+    dormantOverrides: "{count} saved occurrence changes are outside the current rule. They remain attached to their original dates.",
+    occurrences: "Occurrences (original dates)",
+    overridden: "Changed occurrence",
+    editOccurrence: "Edit this occurrence",
+    noOccurrences: "No occurrences in the calculation period.",
+    occurrenceIdentity: "Occurrence originally on {date}",
+    occurrenceNote: "Only this occurrence will change. Its original date remains its identity; effort and assignee come from the series. End dates are inclusive. Moves are limited to 3,660 days from the original date.",
+    occurrenceStart: "Occurrence start",
+    occurrenceEnd: "Occurrence end",
+    occurrenceDeps: "This occurrence\u2019s predecessors",
+    dependencyHelp: "Use WBS@YYYY-MM-DDFS+lag to link a specific original occurrence, for example 2@2026-10-12FS+1. A WBS number without a date refers to the entire finite series.",
+    resetOccurrence: "Reset this occurrence",
+    saveOccurrence: "Save occurrence",
+    editOrigin: "Edit the series start in recurrence settings.",
+    cannotConvert: "Remove recurrence before converting this task to a milestone or group.",
+    cannotPaste: "Edit recurring dates and type in recurrence settings. This paste was not applied.",
+    barLabel: "{name}: original occurrence {date}, {start} to {finish}. {status}. Open to edit this occurrence.",
+    scheduled: "Scheduled occurrence",
+    networkCount: "Recurring: {count} occurrences",
+    resourceNote: "Recurring tasks include the load of every occurrence in their saved calculation period, including calendar holidays.",
+    errors: {
+      startRequired: "Enter a complete, valid series start date.",
+      intervalInvalid: "The interval must be a whole number from 1 to 365.",
+      weekdaysRequired: "Select at least one weekday.",
+      endInvalid: "The end must be a valid date on or after the series start.",
+      horizonInvalid: "Enter a valid calculation end on or after the series start.",
+      occurrenceDatesInvalid: "Enter complete start and end dates. The end must be on or after the start.",
+      dependenciesInvalid: "Predecessors contain an invalid date, format or WBS number. No changes were saved.",
+      spanInvalid: "Each occurrence must span no more than 3,660 calendar days. Reduce its effort or date range.",
+      moveTooFar: "Move an occurrence no more than 3,660 days from its original date."
+    },
+    safetyBounds: "Safety limits: intervals 1\u2013365; each occurrence and calculation period at most 3,660 calendar days; at most 2,000 occurrences per series.",
+    inheritedDeps: "Inherits series predecessors",
+    customDeps: "Predecessors for this occurrence only",
+    useSeriesDeps: "Use series predecessors",
+    baselineOccurrence: "Baseline occurrence originally on {date}",
+    reservationName: "{name} (original occurrence {date})"
   }
 };
 
@@ -5024,6 +5502,10 @@ function taskNameText(t, name) {
   return name == null || name === "" ? t("common.untitledTask") : name;
 }
 function formatDependencyIssueMessage(t, issue2) {
+  const reason = dependencyIssueReason(t, issue2);
+  return issue2.params?.occurrenceDate ? t("dependencyIssues.message.occurrenceContext", { occurrenceDate: dateArg(issue2.params.occurrenceDate), reason }) : reason;
+}
+function dependencyIssueReason(t, issue2) {
   const p = issue2.params || {};
   const name = (n) => taskNameText(t, n);
   switch (issue2.code) {
@@ -5032,6 +5514,12 @@ function formatDependencyIssueMessage(t, issue2) {
       const notes = (p.memberEdges || []).map((e) => t("dependencyIssues.cycleMemberNote", { child: name(e.childName), parent: name(e.parentName) }));
       return notes.length ? t("dependencyIssues.message.cycleWithNotes", { route, notes: notes.join(t("common.listSeparator")) }) : t("dependencyIssues.message.cycle", { route });
     }
+    case "recurrence-truncated":
+      return t("dependencyIssues.message.recurrenceTruncated", { calculationEndDate: dateArg(p.calculationEndDate), occurrenceCount: p.occurrenceCount, limit: p.limit });
+    case "recurrence-empty":
+      return t("dependencyIssues.message.recurrenceEmpty", { origin: dateArg(p.origin), calculationEndDate: dateArg(p.calculationEndDate) });
+    case "invalid-recurrence":
+      return t("dependencyIssues.message.invalidRecurrence");
     case "self-dependency":
       return t("dependencyIssues.message.self");
     case "predecessor-missing":
@@ -5079,6 +5567,16 @@ function formatSprintConflictSprintNames(t, conflict) {
 }
 function formatLevelWarning(t, warning) {
   const p = warning.params || {};
+  if (warning.code === "fixed-occurrence-capacity-exceeded") return t("levelWarnings.fixedOccurrenceCapacityExceeded", {
+    taskName: p.taskName ?? "",
+    resourceName: p.resourceName ?? "",
+    occurrenceDate: dateArg(p.occurrenceDate),
+    start: dateArg(p.start),
+    finish: dateArg(p.finish),
+    dailyCapacity: p.dailyCapacity,
+    weeklyCapacity: p.weeklyCapacity,
+    monthlyCapacity: p.monthlyCapacity
+  });
   if (warning.code !== "capacity-exceeded") return warning.code;
   const limits = [t("levelWarnings.limit.daily", { value: p.dailyCapacity })];
   if (p.weeklyCapacity) limits.push(t("levelWarnings.limit.weekly", { value: p.weeklyCapacity }));
@@ -5100,7 +5598,7 @@ var isNumber = (value) => typeof value === "number" && Number.isFinite(value);
 var isString = (value) => typeof value === "string";
 var isId = (value) => isString(value) && !!value.trim() && value !== "__root__" && !Object.hasOwn(Object.prototype, value);
 var has = (object, key) => Object.hasOwn(object, key) && object[key] !== void 0;
-function isISODate(value) {
+function isISODate2(value) {
   if (!isString(value) || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const date = /* @__PURE__ */ new Date(`${value}T00:00:00Z`);
   return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
@@ -5108,7 +5606,7 @@ function isISODate(value) {
 function isISODateTime(value) {
   if (!isString(value)) return false;
   const match = /^(\d{4}-\d{2}-\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:[Zz]|[+-](\d{2}):(\d{2}))$/.exec(value);
-  return !!match && isISODate(match[1]) && +match[2] < 24 && +match[3] < 60 && +match[4] < 60 && (!match[5] || +match[5] < 24 && +match[6] < 60) && Number.isFinite(Date.parse(value));
+  return !!match && isISODate2(match[1]) && +match[2] < 24 && +match[3] < 60 && +match[4] < 60 && (!match[5] || +match[5] < 24 && +match[6] < 60) && Number.isFinite(Date.parse(value));
 }
 function issue(severity, code, path, messageKey, params = {}, extra = {}) {
   return { severity, code, path, messageKey: `projectValidation.${messageKey}`, params, ...extra };
@@ -5145,7 +5643,7 @@ var numberField = (key, required = false, check = isNumber) => field(
 );
 var stringField = (key, required = false) => field(key, isString, required, "string");
 var booleanField = (key) => field(key, (value) => typeof value === "boolean", false, "boolean");
-var dateField = (key, required = false, allowEmpty = false) => field(key, (value) => allowEmpty && value === "" || isISODate(value), required, "date");
+var dateField = (key, required = false, allowEmpty = false) => field(key, (value) => allowEmpty && value === "" || isISODate2(value), required, "date");
 var progressField = field("progress", (value) => isNumber(value) && value >= 0 && value <= 100, false, "progress");
 var taskFields = [
   idField,
@@ -5177,18 +5675,65 @@ function arrayField(object, key, path, required, issues, visit, code = `${key}-i
   }
   for (let i = 0; i < object[key].length; i++) visit(object[key][i], `${path}[${i}]`, i);
 }
+function checkDependencies(value, path, issues) {
+  arrayField(value, "predecessors", `${path}.predecessors`, false, issues, (dep, itemPath) => {
+    fields(dep, itemPath, "dependency", [
+      idField,
+      field("type", (type) => ["FS", "SS", "FF", "SF"].includes(type), true, "dependencyType"),
+      numberField("lag", true),
+      dateField("occurrenceDate")
+    ], issues);
+  }, "task-predecessors-invalid");
+}
+function checkRecurrence(task, path, issues) {
+  const invalid = (suffix, key = "recurrence") => issues.push(issue("error", `task-${key}-invalid`, `${path}.${suffix}`, key, { field: suffix }, { ids: [task.id] }));
+  if (has(task, "recurrence")) {
+    const rule = task.recurrence;
+    if (!isObject(rule)) {
+      invalid("recurrence");
+      return;
+    }
+    if (!isISODate2(task.startDate)) invalid("startDate");
+    if (typeof task.duration === "number" && Math.ceil(task.duration) > 3660) invalid("duration");
+    if (task.milestone) issues.push(issue("error", "recurrence-leaf-required", `${path}.recurrence`, "recurrenceLeaf", {}, { ids: [task.id] }));
+    if (!["daily", "weekly", "monthly"].includes(rule.frequency)) invalid("recurrence.frequency");
+    if (!Number.isInteger(rule.interval) || rule.interval < 1 || rule.interval > 365) invalid("recurrence.interval");
+    if (has(rule, "weekdays") && (!Array.isArray(rule.weekdays) || rule.weekdays.length === 0 || rule.weekdays.some((day) => !Number.isInteger(day) || day < 0 || day > 6) || new Set(rule.weekdays).size !== rule.weekdays.length)) invalid("recurrence.weekdays");
+    if (has(rule, "monthDay") && !["day", "start", "end"].includes(rule.monthDay)) invalid("recurrence.monthDay");
+    for (const key of ["endDate", "calculationEndDate"]) {
+      if (has(rule, key) && (!isISODate2(rule[key]) || isISODate2(task.startDate) && rule[key] < task.startDate)) invalid(`recurrence.${key}`);
+    }
+  }
+  if (has(task, "occurrenceOverrides")) {
+    if (!isObject(task.occurrenceOverrides)) {
+      invalid("occurrenceOverrides", "recurrenceOverride");
+      return;
+    }
+    for (const [originalDate, override] of Object.entries(task.occurrenceOverrides)) {
+      const overridePath = `occurrenceOverrides.${originalDate}`;
+      if (!isISODate2(originalDate) || !isObject(override)) {
+        invalid(overridePath, "recurrenceOverride");
+        continue;
+      }
+      for (const key of ["startDate", "endDate"]) {
+        if (has(override, key) && !isISODate2(override[key])) invalid(`${overridePath}.${key}`, "recurrenceOverride");
+      }
+      const start = override.startDate || originalDate;
+      if (isISODate2(start) && isISODate2(originalDate) && Math.abs(Date.parse(start) - Date.parse(originalDate)) / 864e5 > 3660) invalid(`${overridePath}.startDate`, "recurrenceOverride");
+      if (isISODate2(start) && isISODate2(override.endDate) && override.endDate < start) invalid(`${overridePath}.endDate`, "recurrenceOverride");
+      if (isISODate2(start) && isISODate2(override.endDate) && (Date.parse(override.endDate) - Date.parse(start)) / 864e5 + 1 > 3660) invalid(`${overridePath}.endDate`, "recurrenceOverride");
+      checkDependencies(override, `${path}.${overridePath}`, issues);
+    }
+  }
+}
 function checkTask(value, path, issues) {
   if (!fields(value, path, "task", taskFields, issues)) return;
   arrayField(value, "sprintIds", `${path}.sprintIds`, false, issues, (id, itemPath) => {
     if (!isId(id)) issues.push(issue("error", "task-sprintId-invalid", itemPath, "id", {}, { ids: [value.id] }));
   }, "task-sprintIds-invalid");
-  arrayField(value, "predecessors", `${path}.predecessors`, false, issues, (dep, itemPath) => {
-    fields(dep, itemPath, "dependency", [
-      idField,
-      field("type", (type) => ["FS", "SS", "FF", "SF"].includes(type), true, "dependencyType"),
-      numberField("lag", true)
-    ], issues);
-  }, "task-predecessors-invalid");
+  if (typeof value.id === "string" && value.id.startsWith("@recurrence:")) issues.push(issue("error", "task-id-invalid", `${path}.id`, "id", {}, { ids: [value.id] }));
+  checkDependencies(value, path, issues);
+  checkRecurrence(value, path, issues);
 }
 function checkCollections(data, paths, issues, { allowEditingValues = false } = {}) {
   const resourceDefinitions = allowEditingValues ? [idField, nameField, numberField("weeklyCapacity", true), numberField("monthlyCapacity", true)] : resourceFields;
@@ -5197,7 +5742,7 @@ function checkCollections(data, paths, issues, { allowEditingValues = false } = 
   arrayField(data, "tasks", paths.tasks, false, issues, (value, path) => checkTask(value, path, issues));
   arrayField(data, "resources", paths.resources, false, issues, (value, path) => fields(value, path, "resource", resourceDefinitions, issues));
   arrayField(data, "sprints", paths.sprints, false, issues, (value, path) => {
-    if (fields(value, path, "sprint", sprintDefinitions, issues) && !allowEditingValues && isISODate(value.startDate) && isISODate(value.endDate) && value.startDate > value.endDate) {
+    if (fields(value, path, "sprint", sprintDefinitions, issues) && !allowEditingValues && isISODate2(value.startDate) && isISODate2(value.endDate) && value.startDate > value.endDate) {
       issues.push(issue("error", "sprint-date-range-invalid", `${path}.endDate`, "dateRange", {}, { ids: [value.id] }));
     }
   });
@@ -5242,8 +5787,15 @@ function checkVersion(value, path, issues, options) {
         if (["level", "wbsNo", "hasChildren", "critical", "milestone", "assigneeId", "progress"].includes(definition[0])) definition[2] = true;
       }
     }
-    if (fields(task, taskPath, "version-task", definitions, issues) && isISODate(task.schedStart) && isISODate(task.schedFinish) && task.schedFinish < task.schedStart) {
-      issues.push(issue("error", "version-task-date-range-invalid", `${taskPath}.schedFinish`, "dateRange", {}, { ids: [task.id] }));
+    if (fields(task, taskPath, "version-task", definitions, issues)) {
+      if (isISODate2(task.schedStart) && isISODate2(task.schedFinish) && task.schedFinish < task.schedStart) {
+        issues.push(issue("error", "version-task-date-range-invalid", `${taskPath}.schedFinish`, "dateRange", {}, { ids: [task.id] }));
+      }
+      arrayField(task, "occurrences", `${taskPath}.occurrences`, false, issues, (occurrence, occurrencePath) => {
+        if (fields(occurrence, occurrencePath, "version-occurrence", [dateField("occurrenceDate", true), dateField("schedStart", true), dateField("schedFinish", true)], issues) && isISODate2(occurrence.schedStart) && isISODate2(occurrence.schedFinish) && occurrence.schedFinish < occurrence.schedStart) {
+          issues.push(issue("error", "version-occurrence-date-range-invalid", `${occurrencePath}.schedFinish`, "dateRange"));
+        }
+      });
     }
   }, "version-tasks-invalid");
   const snapshot = rawSnapshot(value, path);
@@ -5294,8 +5846,13 @@ function projectDependencyIssue(value, tasks, path = "tasks") {
   const { params, path: dependencyPath, ...detail } = value;
   const index = tasks.findIndex((task2) => task2.id === value.ids[0]);
   const task = tasks[index];
-  const depIndex = task?.predecessors?.findIndex((dep) => dep.id === value.predecessorId) ?? -1;
-  const location = index < 0 ? path : `${path}[${index}].predecessors${depIndex < 0 ? "" : `[${depIndex}].id`}`;
+  const occurrenceDate = params?.occurrenceDate;
+  const override = occurrenceDate && task?.occurrenceOverrides?.[occurrenceDate];
+  const hasOverrideDeps = override && Object.hasOwn(override, "predecessors");
+  const predecessors = hasOverrideDeps ? override.predecessors : task?.predecessors;
+  const depIndex = predecessors?.findIndex((dep) => dep.id === value.predecessorId && (!params?.predecessorOccurrenceDate || dep.occurrenceDate === params.predecessorOccurrenceDate)) ?? -1;
+  const fieldPath = hasOverrideDeps ? `occurrenceOverrides.${occurrenceDate}.predecessors` : "predecessors";
+  const location = index < 0 ? path : ["recurrence-truncated", "recurrence-empty", "invalid-recurrence"].includes(value.code) ? `${path}[${index}].recurrence` : `${path}[${index}].${fieldPath}${depIndex < 0 ? "" : `[${depIndex}].id`}`;
   return {
     ...detail,
     path: location,
@@ -5323,6 +5880,7 @@ function collectionIntegrity(data, paths, issues) {
     (task.sprintIds || (task.sprintId ? [task.sprintId] : [])).forEach((id, j) => {
       if (!sprintIds.has(id)) issues.push(issue("warning", "sprint-missing", task.sprintIds ? `${path}.sprintIds[${j}]` : `${path}.sprintId`, "sprintMissing", { id }, { ids: [task.id] }));
     });
+    if (task.recurrence && groups.has(task.id)) issues.push(issue("error", "recurrence-leaf-required", `${path}.recurrence`, "recurrenceLeaf", {}, { ids: [task.id] }));
     if (task.predecessors?.length && groups.has(task.id)) issues.push(issue("warning", "group-has-predecessors", `${path}.predecessors`, "groupPredecessors", { name: task.name }, { ids: [task.id] }));
   });
   if (!cycles.length && taskIds.size === tasks.length) {
@@ -5407,23 +5965,51 @@ var PROJECT_JSON_SCHEMA = Object.freeze({
       additionalProperties: false,
       required: ["id", "type", "lag"],
       properties: {
-        id: { type: "string", description: "\u5148\u884C\u30BF\u30B9\u30AFID" },
+        id: { type: "string", description: "\u5148\u884C\u30BF\u30B9\u30AFID\u3002\u7E70\u308A\u8FD4\u3057\u30B7\u30EA\u30FC\u30BA\u306E\u5834\u5408\u3001occurrenceDate\u672A\u6307\u5B9A\u306F\u6709\u9650\u306E\u8A08\u7B97\u5BFE\u8C61\u671F\u9593\u5168\u4F53\u3078\u306E\u4F9D\u5B58\u3067\u3059\u3002" },
+        occurrenceDate: { type: "string", format: "date", description: "\u7279\u5B9A\u56DE\u306E\u5143\u306E\u65E5\u4ED8\uFF08YYYY-MM-DD\uFF09\u3002\u65E5\u7A0B\u4FEE\u6B63\u5F8C\u3082\u3053\u306E\u8B58\u5225\u5B50\u3092\u5909\u66F4\u3057\u307E\u305B\u3093\u3002" },
         type: { type: "string", enum: ["FS", "SS", "FF", "SF"], description: "\u4F9D\u5B58\u95A2\u4FC2\u306E\u7A2E\u985E" },
         lag: { type: "number", description: "\u30EA\u30FC\u30C9/\u30E9\u30B0\u65E5\u6570" }
+      }
+    },
+    recurrence: {
+      type: "object",
+      additionalProperties: false,
+      required: ["frequency", "interval"],
+      description: "\u901A\u5E38\u306E\u672B\u7AEF\u30BF\u30B9\u30AF\u306B\u8A2D\u5B9A\u3059\u308B\u7E70\u308A\u8FD4\u3057\u898F\u5247\u3002task.startDate\u304C\u5FC5\u9808\u306E\u8D77\u70B9\u3002\u5404\u56DE\u306F\u66A6\u65E5\u3067\u56FA\u5B9A\u3057\u3001\u81EA\u52D5\u30B9\u30B1\u30B8\u30E5\u30FC\u30EA\u30F3\u30B0\u30FB\u4F11\u65E5\u88DC\u6B63\u306E\u5BFE\u8C61\u5916\u3067\u3059\u3002",
+      properties: {
+        frequency: { type: "string", enum: ["daily", "weekly", "monthly"], description: "\u65E5\u30FB\u9031\u30FB\u6708\u5358\u4F4D" },
+        interval: { type: "integer", minimum: 1, maximum: 365, description: "\u9593\u9694\u30021=\u6BCE\u56DE\u30012=\u9694\u65E5\u30FB\u9694\u9031\u30FB\u9694\u6708" },
+        weekdays: { type: "array", uniqueItems: true, minItems: 1, items: { type: "integer", minimum: 0, maximum: 6 }, description: "\u9031\u5358\u4F4D\u306E\u5BFE\u8C61\u66DC\u65E5\uFF080=\u65E5\u30011=\u6708\u20266=\u571F\uFF09\u3002\u7701\u7565\u6642\u306F\u958B\u59CB\u65E5\u306E\u66DC\u65E5\u3002\u9031\u306E\u8D77\u70B9\u306F\u958B\u59CB\u65E5\u3092\u542B\u3080\u6708\u66DC\u65E5\u3067\u3059\u3002" },
+        monthDay: { type: "string", enum: ["day", "start", "end"], description: "\u6708\u5358\u4F4D\u306E\u65E5\u4ED8\u3002day=\u958B\u59CB\u65E5\u3068\u540C\u3058\u65E5\uFF08\u5B58\u5728\u3057\u306A\u3044\u6708\u306F\u6708\u672B\uFF09\u3001start=\u66A6\u6708\u521D\u3001end=\u66A6\u6708\u672B\u3002\u958B\u59CB\u65E5\u3088\u308A\u524D\u306F\u751F\u6210\u3057\u307E\u305B\u3093\u3002" },
+        endDate: { type: "string", format: "date", description: "\u7E70\u308A\u8FD4\u3057\u7D42\u4E86\u65E5\uFF08\u305D\u306E\u65E5\u3092\u542B\u3080\uFF09\u3002\u958B\u59CB\u65E5\u4EE5\u4E0A\u3067\u4EFB\u610F\u3002\u5143\u306E\u4E88\u5B9A\u65E5\u3092\u57FA\u6E96\u306B\u5224\u5B9A\u3057\u307E\u3059\u3002" },
+        calculationEndDate: { type: "string", format: "date", description: "\u7D42\u4E86\u65E5\u306A\u3057\u306E\u6709\u9650\u8A08\u7B97\u671F\u9593\u3002\u7701\u7565\u6642\u306F\u958B\u59CB\u65E5\u306E1\u5468\u5E74\u306E\u524D\u65E5\u3002\u73FE\u5728\u65E5\u4ED8\u30FB\u8868\u793A\u7BC4\u56F2\u306B\u306F\u4F9D\u5B58\u3057\u307E\u305B\u3093\u3002\u958B\u59CB\u65E5\u304B\u3089\u6700\u59273,660\u66A6\u65E5\u30FB1\u30B7\u30EA\u30FC\u30BA\u6700\u59272,000\u56DE\u3067\u6253\u3061\u5207\u308A\u3092\u8B66\u544A\u3057\u307E\u3059\u3002" }
+      }
+    },
+    occurrenceOverride: {
+      type: "object",
+      additionalProperties: false,
+      description: "\u5143\u306E\u4E88\u5B9A\u65E5\u3092\u30AD\u30FC\u3068\u3059\u308B\u500B\u5225\u4FEE\u6B63\u3002\u898F\u5247\u5909\u66F4\u3067\u5BFE\u8C61\u5916\u306B\u306A\u3063\u305F\u4FEE\u6B63\u306F\u4FDD\u6301\u3057\u3001\u5225\u306E\u56DE\u3078\u4ED8\u3051\u66FF\u3048\u307E\u305B\u3093\u3002",
+      properties: {
+        startDate: { type: "string", format: "date", description: "\u3053\u306E\u56DE\u306E\u307F\u306E\u56FA\u5B9A\u958B\u59CB\u65E5" },
+        endDate: { type: "string", format: "date", description: "\u3053\u306E\u56DE\u306E\u307F\u306E\u56FA\u5B9A\u7D42\u4E86\u65E5\uFF08\u958B\u59CB\u65E5\u4EE5\u4E0A\u3001\u4E21\u7AEF\u3092\u542B\u3080\u3001\u6700\u59273,660\u66A6\u65E5\uFF09" },
+        predecessors: { type: "array", items: { $ref: "#/$defs/dependency" }, description: "\u3053\u306E\u56DE\u306E\u5148\u884C\u30BF\u30B9\u30AF\u3002\u7701\u7565\u6642\u306F\u30B7\u30EA\u30FC\u30BA\u5171\u901A\u3001\u6307\u5B9A\u6642\u306F\u5171\u901A\u8A2D\u5B9A\u3092\u7F6E\u304D\u63DB\u3048\u307E\u3059\u3002\u7A7A\u914D\u5217\u306F\u4F9D\u5B58\u306A\u3057\u3002" }
       }
     },
     task: {
       type: "object",
       description: "WBS\u4E0A\u306E\u30BF\u30B9\u30AF\u3067\u3059\u3002\u968E\u5C64\u306F parentId \u3067\u8868\u73FE\u3057\u307E\u3059\u3002",
+      allOf: [{ if: { required: ["recurrence"] }, then: { required: ["startDate"], properties: { milestone: { const: false }, duration: { maximum: 3660 } } } }],
       additionalProperties: true,
       required: ["id", "name", "parentId", "order"],
       properties: {
-        id: { type: "string", description: "\u30BF\u30B9\u30AFID" },
+        id: { type: "string", not: { pattern: "^@recurrence:" }, description: "\u30BF\u30B9\u30AFID\u3002\u5185\u90E8\u751F\u6210\u7528\u306E@recurrence:\u63A5\u982D\u8F9E\u306F\u4F7F\u7528\u3067\u304D\u307E\u305B\u3093\u3002" },
         name: { type: "string", description: "\u30BF\u30B9\u30AF\u540D" },
         parentId: { type: ["string", "null"], description: "\u89AA\u30BF\u30B9\u30AFID\u3002\u30EB\u30FC\u30C8\u76F4\u4E0B\u306F null" },
         order: { type: "number", description: "\u540C\u3058\u89AA\u914D\u4E0B\u3067\u306E\u8868\u793A\u9806" },
         startDate: { type: "string", format: "date", description: "\u958B\u59CB\u65E5\uFF08YYYY-MM-DD\uFF09" },
-        duration: { type: "number", description: "\u5DE5\u6570\u3002\u30DE\u30A4\u30EB\u30B9\u30C8\u30FC\u30F3\u306F\u901A\u5E38 0" },
+        duration: { type: "number", description: "\u5DE5\u6570\u3002\u30DE\u30A4\u30EB\u30B9\u30C8\u30FC\u30F3\u306F\u901A\u5E380\u3002\u7E70\u308A\u8FD4\u3057\u3067\u306F\u5404\u56DE\u306E\u5DE5\u6570\u3067\u3001\u65E2\u5B9A\u671F\u9593\u306F\u5207\u308A\u4E0A\u3052\u65E5\u6570\u306E\u66A6\u65E5\uFF08\u6700\u59273,660\u65E5\uFF09\u3067\u3059\u3002" },
+        recurrence: { $ref: "#/$defs/recurrence", description: "\u7E70\u308A\u8FD4\u3057\u898F\u5247\uFF08\u4EFB\u610F\uFF09\u3002\u901A\u5E38\u306E\u672B\u7AEF\u30BF\u30B9\u30AF\u306E\u307F\u3002" },
+        occurrenceOverrides: { type: "object", propertyNames: { format: "date" }, additionalProperties: { $ref: "#/$defs/occurrenceOverride" }, description: "\u5404\u56DE\u306E\u5143\u306E\u4E88\u5B9A\u65E5\u3092\u30AD\u30FC\u3068\u3059\u308B\u4FEE\u6B63\u60C5\u5831\u3002\u65E5\u7A0B\u3092\u5909\u3048\u3066\u3082\u30AD\u30FC\u306F\u4E0D\u5909\u3067\u3059\u3002" },
         assigneeId: { type: ["string", "null"], description: "\u62C5\u5F53\u8005ID" },
         sprintIds: { type: "array", description: "\u7D10\u4ED8\u3051\u308B\u30B9\u30D7\u30EA\u30F3\u30C8ID\u4E00\u89A7", items: { type: "string" } },
         predecessors: { type: "array", description: "\u5148\u884C\u30BF\u30B9\u30AF\u4E00\u89A7", items: { $ref: "#/$defs/dependency" } },
@@ -5463,6 +6049,15 @@ var PROJECT_JSON_SCHEMA = Object.freeze({
         order: { type: "number", description: "\u8868\u793A\u9806" }
       }
     },
+    occurrenceSnapshot: {
+      type: "object",
+      required: ["occurrenceDate", "schedStart", "schedFinish"],
+      properties: {
+        occurrenceDate: { type: "string", format: "date", description: "\u8B58\u5225\u7528\u306E\u5143\u306E\u4E88\u5B9A\u65E5" },
+        schedStart: { type: "string", format: "date", description: "\u4FDD\u5B58\u6642\u70B9\u306E\u958B\u59CB\u65E5" },
+        schedFinish: { type: "string", format: "date", description: "\u4FDD\u5B58\u6642\u70B9\u306E\u7D42\u4E86\u65E5" }
+      }
+    },
     versionTask: {
       type: "object",
       description: "\u30D0\u30FC\u30B8\u30E7\u30F3\u6BD4\u8F03\u8868\u793A\u7528\u306E\u30BF\u30B9\u30AF\u30B9\u30CA\u30C3\u30D7\u30B7\u30E7\u30C3\u30C8\u3067\u3059\u3002",
@@ -5474,6 +6069,7 @@ var PROJECT_JSON_SCHEMA = Object.freeze({
         level: { type: "number", description: "WBS\u968E\u5C64\u30EC\u30D9\u30EB" },
         wbsNo: { type: "string", description: "WBS\u756A\u53F7" },
         hasChildren: { type: "boolean", description: "\u5B50\u30BF\u30B9\u30AF\u306E\u6709\u7121" },
+        occurrences: { type: "array", items: { $ref: "#/$defs/occurrenceSnapshot" }, description: "\u7E70\u308A\u8FD4\u3057\u5404\u56DE\u306E\u6BD4\u8F03\u8868\u793A\u7528\u65E5\u7A0B\uFF08\u4EFB\u610F\uFF09" },
         schedStart: { type: "string", format: "date", description: "\u8A08\u7B97\u5F8C\u958B\u59CB\u65E5\uFF08YYYY-MM-DD\uFF09" },
         schedFinish: { type: "string", format: "date", description: "\u8A08\u7B97\u5F8C\u7D42\u4E86\u65E5\uFF08YYYY-MM-DD\uFF09" },
         critical: { type: "boolean", description: "\u30AF\u30EA\u30C6\u30A3\u30AB\u30EB\u304B\u3069\u3046\u304B" },
@@ -5645,7 +6241,16 @@ function scheduleRows(data, schedule) {
       schedFinish: s.schedFinish ?? null,
       critical: !!s.critical,
       float: typeof s.float === "number" ? s.float : null,
-      governed: !!s.governed
+      governed: !!s.governed,
+      ...s.occurrences ? {
+        occurrences: s.occurrences.map((occurrence) => ({
+          id: occurrence.id,
+          occurrenceDate: occurrence.occurrenceDate,
+          schedStart: occurrence.schedStart,
+          schedFinish: occurrence.schedFinish
+        })),
+        recurrenceMetadata: s.recurrenceMetadata
+      } : {}
     };
   });
 }
@@ -5673,7 +6278,7 @@ function applyAutoSchedule(data, projectStart, cal, opts = {}) {
   );
   const changed = [];
   const tasks = data.tasks.map((t) => {
-    if (isGroupId(data.tasks, t.id) || !startDates.has(t.id)) return t;
+    if (t.recurrence || isGroupId(data.tasks, t.id) || !startDates.has(t.id)) return t;
     const to = startDates.get(t.id);
     if (t.startDate !== to) changed.push({ id: t.id, from: t.startDate ?? null, to });
     return { ...t, startDate: to };
@@ -5839,7 +6444,8 @@ function cmdPlan(positional, opts) {
     const startChanged = b.schedStart !== a.schedStart;
     const finishChanged = b.schedFinish !== a.schedFinish;
     const critChanged = b.critical !== a.critical;
-    if (!startChanged && !finishChanged && !critChanged) continue;
+    const occurrencesChanged = JSON.stringify(b.occurrences) !== JSON.stringify(a.occurrences);
+    if (!startChanged && !finishChanged && !critChanged && !occurrencesChanged) continue;
     let shiftWorkdays;
     if (startChanged && b.schedStart && a.schedStart) {
       shiftWorkdays = after.cal.workdaysBetween(b.schedStart, a.schedStart);
@@ -5852,6 +6458,7 @@ function cmdPlan(positional, opts) {
       ...startChanged ? { schedStart: { from: b.schedStart, to: a.schedStart } } : {},
       ...finishChanged ? { schedFinish: { from: b.schedFinish, to: a.schedFinish } } : {},
       ...critChanged ? { critical: { from: b.critical, to: a.critical } } : {},
+      ...occurrencesChanged ? { occurrences: { from: b.occurrences || [], to: a.occurrences || [] } } : {},
       ...shiftWorkdays !== void 0 ? { shiftWorkdays } : {}
     });
   }
@@ -5894,32 +6501,47 @@ function cmdPlan(positional, opts) {
 function cmdExplain(positional, opts) {
   const [path] = positional;
   const taskId = opts.task;
-  if (!path || !taskId) fail("\u4F7F\u3044\u65B9: explain <file> --task <taskId> [--leveling on|off|auto]");
+  if (!path || !taskId) fail("\u4F7F\u3044\u65B9: explain <file> --task <taskId> [--occurrence YYYY-MM-DD] [--leveling on|off|auto]");
   const data = normalizeOrFail(readProjectFile(path), path);
-  const task = data.tasks.find((t) => t.id === taskId);
-  if (!task) fail(`\u30BF\u30B9\u30AF\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093: ${taskId}`);
+  const storedTask = data.tasks.find((t) => t.id === taskId);
+  if (!storedTask) fail(`\u30BF\u30B9\u30AF\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093: ${taskId}`);
+  const expandedTasks = expandRecurringTasks(data.tasks);
+  const selectedId = opts.occurrence ? occurrenceId(taskId, opts.occurrence) : taskId;
+  const task = expandedTasks.find((t) => t.id === selectedId);
+  if (!task) fail(`\u5BFE\u8C61\u671F\u9593\u5185\u306E\u56DE\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093: ${taskId} @ ${opts.occurrence}`);
   const leveling = resolveLeveling(opts.leveling, data);
   const computed = tryComputeSchedule(data, { respectManualPins: true, leveling });
   if (!computed.ok) {
     return emit({ command: "explain", file: path, computeFailed: true, error: computed.error, integrityIssues: analyzeIntegrity(data).map(formatIssue) });
   }
   const r = computed.result;
-  const s = r.schedule.get(taskId) || {};
+  const s = r.schedule.get(selectedId) || {};
   const byId = {};
-  data.tasks.forEach((t) => byId[t.id] = t);
+  expandedTasks.forEach((t) => byId[t.id] = t);
+  const nameOf = (id) => {
+    const value = byId[id];
+    const name = value?.name || id;
+    return isOccurrenceTask(value) ? `${name} [${value.occurrenceDate}]` : name;
+  };
   const sprintById = {};
   (data.sprints || []).forEach((sp) => sprintById[sp.id] = sp);
   let predecessors = [];
-  if (!isGroupId(data.tasks, taskId)) {
+  if (!isGroupId(expandedTasks, selectedId)) {
     predecessors = effectivePredecessors(byId, task).map((dep) => {
       const ps = r.schedule.get(dep.id) || {};
-      let candidate = null;
+      let candidate = null, requiredDate = null;
+      const side = dep.type === "FF" || dep.type === "SF" ? "finish" : "start";
       if (ps.schedStart && ps.schedFinish) {
-        candidate = candidateFromDep(r.cal, dep, { start: ps.schedStart, finish: ps.schedFinish }, task.duration || 0).start;
+        const dates = { start: ps.schedStart, finish: ps.schedFinish };
+        requiredDate = side === "finish" ? r.cal.shift(dep.type === "FF" ? dates.finish : dates.start, dep.lag) : candidateFromDep(r.cal, dep, dates, 0).start;
+        candidate = isOccurrenceTask(task) && side === "finish" ? null : candidateFromDep(r.cal, dep, dates, task.duration || 0).start;
       }
       return {
-        id: dep.id,
-        name: nameOf(data.tasks, dep.id),
+        id: dep.occurrenceSeriesId || dep.id,
+        ...dep.occurrenceDate ? { occurrenceDate: dep.occurrenceDate } : {},
+        name: nameOf(dep.id),
+        requiredSide: side,
+        requiredDate,
         type: dep.type,
         lag: dep.lag,
         predFinish: ps.schedFinish ?? null,
@@ -5939,7 +6561,9 @@ function cmdExplain(positional, opts) {
     command: "explain",
     file: path,
     task: {
-      id: task.id,
+      id: taskId,
+      ...isOccurrenceTask(task) ? { occurrenceDate: task.occurrenceDate } : {},
+      ...storedTask.recurrence ? { recurrence: storedTask.recurrence } : {},
       name: task.name,
       duration: task.duration ?? null,
       startDate: task.startDate ?? null,
@@ -5959,12 +6583,13 @@ function cmdExplain(positional, opts) {
       schedFinish: s.schedFinish ?? null,
       float: typeof s.float === "number" ? s.float : null,
       critical: !!s.critical,
-      governed: !!s.governed
+      governed: !!s.governed,
+      ...s.occurrences ? { occurrences: s.occurrences.map((o) => ({ occurrenceDate: o.occurrenceDate, schedStart: o.schedStart, schedFinish: o.schedFinish })), recurrenceMetadata: s.recurrenceMetadata } : {}
     },
     drivers: {
       pinned: isPinned,
-      pinnedReason: (task.progress || 0) > 0 ? "\u9032\u6357\u7387\u304C\u5165\u529B\u6E08\u307F\uFF08\u7740\u624B\u6E08\u307F\uFF09\u306E\u305F\u3081\u958B\u59CB\u65E5\u306B\u56FA\u5B9A" : task.startDate ? "\u958B\u59CB\u65E5\u304C\u624B\u5165\u529B\u3055\u308C\u3066\u3044\u308B\u305F\u3081\u901A\u5E38\u8868\u793A\u3067\u306F\u56FA\u5B9A\uFF08\u81EA\u52D5\u30B9\u30B1\u30B8\u30E5\u30FC\u30EA\u30F3\u30B0\u5B9F\u884C\u3067\u306F\u7121\u8996\uFF09" : null,
-      bindingPredecessor: bindingPred ? { id: bindingPred.id, name: bindingPred.name, impliedStart: bindingPred.impliedStart } : null,
+      pinnedReason: storedTask.recurrence ? "\u7E70\u308A\u8FD4\u3057\u306E\u5404\u56DE\u306F\u56FA\u5B9A\u66A6\u65E5\uFF08\u81EA\u52D5\u30B9\u30B1\u30B8\u30E5\u30FC\u30EA\u30F3\u30B0\u3067\u3082\u79FB\u52D5\u3057\u306A\u3044\uFF09" : (task.progress || 0) > 0 ? "\u9032\u6357\u7387\u304C\u5165\u529B\u6E08\u307F\uFF08\u7740\u624B\u6E08\u307F\uFF09\u306E\u305F\u3081\u958B\u59CB\u65E5\u306B\u56FA\u5B9A" : task.startDate ? "\u958B\u59CB\u65E5\u304C\u624B\u5165\u529B\u3055\u308C\u3066\u3044\u308B\u305F\u3081\u901A\u5E38\u8868\u793A\u3067\u306F\u56FA\u5B9A\uFF08\u81EA\u52D5\u30B9\u30B1\u30B8\u30E5\u30FC\u30EA\u30F3\u30B0\u5B9F\u884C\u3067\u306F\u7121\u8996\uFF09" : null,
+      bindingPredecessor: bindingPred ? { id: bindingPred.id, ...bindingPred.occurrenceDate ? { occurrenceDate: bindingPred.occurrenceDate } : {}, name: bindingPred.name, impliedStart: bindingPred.impliedStart } : null,
       sprintFloor,
       sprintFloorApplied,
       fixedMilestoneBackward: !!(task.milestone && task.milestoneMode === "fixed")
@@ -5977,7 +6602,7 @@ function cmdExplain(positional, opts) {
       days: s.allocation.alloc,
       idleSegments: idleSegments(s.allocation.idle, s.allocation.alloc).map((seg) => ({
         ...seg,
-        taskNames: seg.taskIds.map((id) => nameOf(data.tasks, id))
+        taskNames: seg.taskIds.map((id) => nameOf(id))
       })),
       overCapacity: !!s.allocation.overCapacity
     } : null,
@@ -6005,7 +6630,7 @@ function main() {
         "  validate <file> [--leveling on|off|auto]",
         "  recalc   <file> [--leveling on|off|auto]",
         "  plan     <original.json> <edited.json> [--reschedule] [--leveling on|off|auto]",
-        "  explain  <file> --task <taskId> [--leveling on|off|auto]",
+        "  explain  <file> --task <taskId> [--occurrence YYYY-MM-DD] [--leveling on|off|auto]",
         "",
         "\u51FA\u529B\u306F\u69CB\u9020\u5316JSON\u3002\u3053\u306ECLI\u306FJSON\u30D5\u30A1\u30A4\u30EB\u3092\u66F8\u304D\u63DB\u3048\u307E\u305B\u3093\u3002",
         ""

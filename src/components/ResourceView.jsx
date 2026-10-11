@@ -31,11 +31,12 @@ export function ResourceView({ resources, setResources, tasks, schedule, request
       const s = schedule.get(task.id);
       // ガント・日程計算と同じ日別割当（平準化ONなら稼働上限に合わせて延長した割当）だけを集計する。
       // 開始日＋工数から連続配置を計算し直すと、延長したタスクで負荷がガントとずれるため行わない。
-      if (!s || !s.allocation) return;
-      s.allocation.alloc.forEach(({ date, load }) => {
+      if (!s) return;
+      const allocations = s.occurrences ? s.occurrences.map(o => o.allocation).filter(Boolean) : (s.allocation ? [s.allocation] : []);
+      allocations.forEach(allocation => allocation.alloc.forEach(({ date, load }) => {
         const wk = weekKey(date);
         usage[wk] = (usage[wk] || 0) + load;
-      });
+      }));
     });
     const weeks = Object.keys(usage).sort();
     // 上限値0・未設定は「上限なし」（平準化と同じ扱い）なので、超過判定をしない
@@ -98,6 +99,7 @@ export function ResourceView({ resources, setResources, tasks, schedule, request
           </ResponsiveContainer>
         </div>
         <p className="text-[11px] text-slate-400 mt-1">{t("resources.note")}</p>
+        {tasks.some(task => task.recurrence) && <p className="text-[11px] text-slate-400 mt-1">{t("recurrence.resourceNote")}</p>}
       </div>
     </div>
   );

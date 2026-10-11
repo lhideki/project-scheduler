@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { LayoutGrid, Trash2, X } from "lucide-react";
 import { buildFlatList } from "../lib/taskTree.js";
-import { formatDepLabel } from "../lib/deps.js";
+import { formatDepLabel, dependencyKey } from "../lib/deps.js";
+import { generateOccurrences } from "../lib/recurrence.js";
 import { startPointerDrag, svgPointFromRef } from "../dom/pointerDrag.js";
 import { DEP_TYPES } from "../constants.js";
 import { IconBtn } from "./IconBtn.jsx";
@@ -58,6 +59,13 @@ export function NetworkView({ tasks, setTasks, schedule, selectedId, setSelected
   // オーバーレイの矢印として描画する（依存関係の矢印は階層をまたいで自由に結ばれる）。
   const flatOutline = useMemo(() => buildFlatList(tasks, new Set()), [tasks]);
   const allNodes = flatOutline;
+  const edges = useMemo(() => tasks.flatMap(task => {
+    const shared = (task.predecessors || []).map(dep => ({ task, dep, targetDate: null }));
+    if (!task.recurrence) return shared;
+    const active = new Set(generateOccurrences(task).occurrences.map(o => o.occurrenceDate));
+    return [...shared, ...Object.entries(task.occurrenceOverrides || {}).flatMap(([date, override]) => active.has(date) && Array.isArray(override.predecessors)
+      ? override.predecessors.map(dep => ({ task, dep, targetDate: date })) : [])];
+  }), [tasks]);
 
   const positions = useMemo(() => {
     const pos = {};
@@ -67,8 +75,52 @@ export function NetworkView({ tasks, setTasks, schedule, selectedId, setSelected
     return pos;
   }, [flatOutline]);
 
-  const width = Math.max(700, (Math.max(0, ...flatOutline.map(t => t.level)) + 1) * indentW + 60);
-  const height = Math.max(400, flatOutline.length * (nodeH + rowGap) + 60);
+  // Parallel references share raw series nodes, but each original-date edge must
+  // remain independently visible and selectable. Reserve a label lane beyond all
+  // nodes, and stack bundles deterministically instead of overlaying their labels.
+  const edgeLayout = useMemo(() => {
+    const bundles = new Map();
+    edges.forEach(edge => {
+      if (!positions[edge.dep.id] || !positions[edge.task.id]) return;
+      const pair = JSON.stringify([edge.dep.id, edge.task.id]);
+      if (!bundles.has(pair)) bundles.set(pair, []);
+      const label = `${edge.dep.occurrenceDate ? `@${edge.dep.occurrenceDate} ` : ""}${formatDepLabel(edge.dep)}${edge.targetDate ? ` → @${edge.targetDate}` : ""}`;
+      bundles.get(pair).push({ ...edge, label, labelWidth: Math.max(36, label.length * 6), key: JSON.stringify([edge.task.id, edge.targetDate, dependencyKey(edge.dep)]) });
+    });
+    const groups = [...bundles.entries()].map(([key, bundle]) => {
+      bundle.sort((a, b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
+      const first = bundle[0];
+      const midpoint = (positions[first.dep.id].y + positions[first.task.id].y + nodeH) / 2;
+      return { key, bundle, midpoint };
+    }).sort((a, b) => a.midpoint - b.midpoint || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+    const rightEdge = Math.max(0, ...Object.values(positions).map(p => p.x + nodeW));
+    const needsLane = bundle => bundle.length > 1 || bundle[0].dep.id === bundle[0].task.id;
+    const laneWidth = Math.max(36, ...groups.filter(g => needsLane(g.bundle)).flatMap(g => g.bundle.map(e => e.labelWidth)));
+    const laneX = rightEdge + 30 + laneWidth / 2;
+    let laneBottom = -8;
+    return groups.flatMap(({ bundle, midpoint }) => {
+      // A dependency between distinct occurrences can share one series node. It
+      // also needs an external label and loop, even when there is only one edge.
+      const parallel = needsLane(bundle);
+      const selfOffset = bundle[0].dep.id === bundle[0].task.id ? 24 : 0;
+      const top = parallel ? Math.max(18, midpoint - selfOffset - (bundle.length - 1) * 12, laneBottom + 26) : midpoint;
+      if (parallel) laneBottom = top + (bundle.length - 1) * 24;
+      return bundle.map((edge, index) => {
+        const p = positions[edge.dep.id], s = positions[edge.task.id];
+        const x1 = p.x + nodeW, y1 = p.y + nodeH / 2, y2 = s.y + nodeH / 2;
+        const x2 = parallel ? s.x + nodeW : s.x;
+        const lx = parallel ? laneX : (x1 + x2) / 2;
+        const ly = parallel ? top + index * 24 : (y1 + y2) / 2;
+        const d = parallel
+          ? `M${x1},${y1} C${lx},${y1} ${lx},${ly} ${lx},${ly} C${lx},${ly} ${lx},${y2} ${x2},${y2}`
+          : x2 > x1 ? `M${x1},${y1} C${lx},${y1} ${lx},${y2} ${x2},${y2}` : `M${x1},${y1} C${x1 + 60},${y1} ${x2 - 60},${y2} ${x2},${y2}`;
+        return { ...edge, lx, ly, d, parallel };
+      });
+    });
+  }, [edges, positions]);
+  const width = Math.max(700, (Math.max(0, ...flatOutline.map(t => t.level)) + 1) * indentW + 60,
+    ...edgeLayout.map(edge => edge.lx + edge.labelWidth / 2 + 30));
+  const height = Math.max(400, flatOutline.length * (nodeH + rowGap) + 60, ...edgeLayout.map(edge => edge.ly + 30));
 
   // 描画領域（画面）いっぱいを使う：コンテナの実サイズをResizeObserverで追跡し、
   // ノード配置から求めた必要サイズより広ければキャンバスをその分まで広げる。
@@ -119,7 +171,7 @@ export function NetworkView({ tasks, setTasks, schedule, selectedId, setSelected
         if (targetTask && targetTask.id !== fromId) {
           setTasks(prev => prev.map(t => {
             if (t.id !== targetTask.id) return t;
-            const already = (t.predecessors || []).some(d => d.id === fromId);
+            const already = (t.predecessors || []).some(d => d.id === fromId && !d.occurrenceDate);
             if (already) return t; // 既存の依存関係と重複させない
             return { ...t, predecessors: [...(t.predecessors || []), { id: fromId, type: "FS", lag: 0 }] };
           }));
@@ -149,12 +201,23 @@ export function NetworkView({ tasks, setTasks, schedule, selectedId, setSelected
     });
   }
 
-  function removeEdge(fromId, toId) {
-    setTasks(prev => prev.map(t => t.id === toId ? { ...t, predecessors: (t.predecessors || []).filter(d => d.id !== fromId) } : t));
+  function mutateEdge(edge, change) {
+    setTasks(prev => prev.map(task => {
+      if (task.id !== edge.to) return task;
+      if (edge.targetDate) {
+        const override = task.occurrenceOverrides?.[edge.targetDate];
+        if (!override) return task;
+        return { ...task, occurrenceOverrides: { ...task.occurrenceOverrides, [edge.targetDate]: { ...override, predecessors: change(override.predecessors || []) } } };
+      }
+      return { ...task, predecessors: change(task.predecessors || []) };
+    }));
+  }
+  function removeEdge(edge) {
+    mutateEdge(edge, deps => deps.filter(dep => dependencyKey(dep) !== edge.key));
     setEdgeEdit(null);
   }
-  function updateEdge(fromId, toId, patch) {
-    setTasks(prev => prev.map(t => t.id === toId ? { ...t, predecessors: (t.predecessors || []).map(d => d.id === fromId ? { ...d, ...patch } : d) } : t));
+  function updateEdge(edge, patch) {
+    mutateEdge(edge, deps => deps.map(dep => dependencyKey(dep) === edge.key ? { ...dep, ...patch } : dep));
   }
   // 整頓表示：ドラッグで動かした位置（diagX/diagY）をすべて解除し、WBS番号順（アウトライン）に
   // 基づく自動配置に戻す。
@@ -210,25 +273,25 @@ export function NetworkView({ tasks, setTasks, schedule, selectedId, setSelected
           if (!p) return null;
           return <rect x={p.x} y={p.y} width={nodeW} height={nodeH} rx={8} fill="#EEF2FF" stroke="#4F46E5" strokeWidth={1.5} strokeDasharray="3,2" />;
         })()}
-        {allNodes.map(t => (t.predecessors || []).map((dep, depIdx) => {
-          const p = positions[dep.id], s = positions[t.id];
-          if (!p || !s) return null;
+        {edgeLayout.map(({ task: t, dep, targetDate, key, label, labelWidth, lx, ly, d, parallel }) => {
           const critical = schedule.get(dep.id)?.critical && schedule.get(t.id)?.critical;
-          const x1 = p.x + nodeW, y1 = p.y + nodeH / 2, x2 = s.x, y2 = s.y + nodeH / 2;
-          const midX = (x1 + x2) / 2;
-          const d = x2 > x1 ? `M${x1},${y1} C${midX},${y1} ${midX},${y2} ${x2},${y2}` : `M${x1},${y1} C${x1 + 60},${y1} ${x2 - 60},${y2} ${x2},${y2}`;
-          const label = formatDepLabel(dep);
-          const lx = (x1 + x2) / 2, ly = (y1 + y2) / 2;
+          const editLabel = tr("network.editDependency", { from: byId[dep.id]?.name || dep.id, to: t.name, label });
+          const openEditor = () => setEdgeEdit({ from: dep.id, to: t.id, key: dependencyKey(dep), targetDate, type: dep.type, lag: dep.lag, x: lx, y: ly });
           return (
-            <g key={dep.id + "_" + t.id + "_" + depIdx}>
-              <path d={d} stroke={critical ? "#EF4444" : "#94A3B8"} strokeWidth={critical ? 1.8 : 1.3} fill="none" markerEnd={critical ? "url(#arrow2c)" : "url(#arrow2)"} />
-              <g style={{ cursor: "pointer" }} onClick={(e) => { e.stopPropagation(); setEdgeEdit({ from: dep.id, to: t.id, type: dep.type, lag: dep.lag, x: lx, y: ly }); }}>
-                <rect x={lx - 18} y={ly - 9} width={36} height={16} rx={3} fill="white" stroke="#E2E8F0" />
+            <g key={key}>
+              <path d={d} data-network-edge-path={key} stroke={critical ? "#EF4444" : "#94A3B8"} strokeWidth={critical ? 1.8 : 1.3} fill="none" markerEnd={critical ? "url(#arrow2c)" : "url(#arrow2)"} />
+              <g data-network-edge={key} data-network-from={dep.id} data-network-to={t.id}
+                data-source-occurrence={dep.occurrenceDate} data-target-occurrence={targetDate || undefined} data-parallel-edge={parallel || undefined}
+                role="button" tabIndex={0} aria-label={editLabel} className="focus-visible:outline-2 focus-visible:outline-indigo-600" style={{ cursor: "pointer" }}
+                onClick={e => { e.stopPropagation(); openEditor(); }}
+                onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); openEditor(); } }}>
+                <title>{editLabel}</title>
+                <rect x={lx - labelWidth / 2} y={ly - 9} width={labelWidth} height={parallel ? 18 : 16} rx={3} fill="white" stroke="#E2E8F0" />
                 <text x={lx} y={ly + 3} fontSize={9.5} textAnchor="middle" fill={critical ? "#DC2626" : "#64748B"}>{label}</text>
               </g>
             </g>
           );
-        }))}
+        })}
         {allNodes.map(t => {
           const p = positions[t.id]; if (!p) return null;
           const s = schedule.get(t.id);
@@ -248,7 +311,7 @@ export function NetworkView({ tasks, setTasks, schedule, selectedId, setSelected
                   ? tr("network.group", { count: countDescendantLeaves(t.id) })
                   : t.milestone
                     ? (t.milestoneMode === "fixed" ? tr("network.fixedMilestone") : tr("network.milestone"))
-                    : tr("network.float", { days: String(s?.float ?? "-") })}
+                    : t.recurrence ? tr("recurrence.networkCount", { count: s?.occurrences?.length || 0 }) : tr("network.float", { days: String(s?.float ?? "-") })}
               </text>
               <circle cx={nodeW} cy={nodeH / 2} r={5} fill="white" stroke="#4F46E5" strokeWidth={1.5}
                 style={{ cursor: "crosshair" }}
@@ -262,12 +325,12 @@ export function NetworkView({ tasks, setTasks, schedule, selectedId, setSelected
         )}
       </svg>
       {edgeEdit && (
-        <div style={{ position: "absolute", left: edgeEdit.x + 8, top: edgeEdit.y + 8 }} className="bg-white border border-slate-200 rounded-md shadow-lg p-2 flex items-center gap-1 z-20" onClick={e => e.stopPropagation()}>
-          <select value={edgeEdit.type} onChange={e => { updateEdge(edgeEdit.from, edgeEdit.to, { type: e.target.value }); setEdgeEdit({ ...edgeEdit, type: e.target.value }); }} className="text-xs border border-slate-200 rounded-sm px-1 py-0.5">
+        <div data-network-edge-editor="true" style={{ position: "absolute", left: edgeEdit.x + 8, top: edgeEdit.y + 8 }} className="bg-white border border-slate-200 rounded-md shadow-lg p-2 flex items-center gap-1 z-20" onClick={e => e.stopPropagation()}>
+          <select aria-label={tr("network.dependencyType")} value={edgeEdit.type} onChange={e => { updateEdge(edgeEdit, { type: e.target.value }); setEdgeEdit({ ...edgeEdit, type: e.target.value }); }} className="text-xs border border-slate-200 rounded-sm px-1 py-0.5">
             {DEP_TYPES.map(dt => <option key={dt} value={dt}>{dt}</option>)}
           </select>
-          <input type="number" value={edgeEdit.lag} onChange={e => { const v = parseInt(e.target.value || "0", 10); updateEdge(edgeEdit.from, edgeEdit.to, { lag: v }); setEdgeEdit({ ...edgeEdit, lag: v }); }} className="w-14 text-xs border border-slate-200 rounded-sm px-1 py-0.5 font-mono" title={tr("network.lagTitle")} aria-label={tr("network.lagTitle")} />
-          <button onClick={() => removeEdge(edgeEdit.from, edgeEdit.to)} title={tr("network.removeEdge")} aria-label={tr("network.removeEdge")} className="text-red-500 hover:text-red-700"><Trash2 size={13} /></button>
+          <input type="number" value={edgeEdit.lag} onChange={e => { const v = parseInt(e.target.value || "0", 10); updateEdge(edgeEdit, { lag: v }); setEdgeEdit({ ...edgeEdit, lag: v }); }} className="w-14 text-xs border border-slate-200 rounded-sm px-1 py-0.5 font-mono" title={tr("network.lagTitle")} aria-label={tr("network.lagTitle")} />
+          <button onClick={() => removeEdge(edgeEdit)} title={tr("network.removeEdge")} aria-label={tr("network.removeEdge")} className="text-red-500 hover:text-red-700"><Trash2 size={13} /></button>
           <button onClick={() => setEdgeEdit(null)} title={tr("common.close")} aria-label={tr("common.close")} className="text-slate-400 hover:text-slate-700"><X size={13} /></button>
         </div>
       )}

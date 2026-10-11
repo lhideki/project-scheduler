@@ -122,7 +122,10 @@
       "self-dependency": "Circular dependency (self)",
       "predecessor-missing": "Missing predecessor",
       "dependency-violation": "Start date conflict",
-      "fixed-milestone-overrun": "Fixed date overrun"
+      "fixed-milestone-overrun": "Fixed date overrun",
+      "recurrence-truncated": "Recurrence calculation limit",
+      "invalid-recurrence": "Invalid recurrence",
+      "recurrence-empty": "No occurrences in period"
     },
     "dialogTitle": "Dependency issues ({count})",
     "dialogDescription": "Dates are not corrected automatically. Start date conflicts can be resolved with \"Run auto-scheduling\". For circular dependencies and missing predecessors, fix the predecessors field. Click an item to show the task.",
@@ -140,7 +143,11 @@
       "violationStart": "Predecessor \"{predName}\" ({label}) requires a start on or after {required, date, ymd}, but the task starts on {actual, date, ymd}",
       "violationFinish": "Predecessor \"{predName}\" ({label}) requires a finish on or after {required, date, ymd}, but the task finishes on {actual, date, ymd}",
       "overrunEarliest": "The earliest date from predecessor \"{predName}\" ({earliest, date, ymd}) is after the fixed date ({fixedDate, date, ymd})",
-      "overrunDisplay": "The displayed date ({actual, date, ymd}) is after the fixed date ({fixedDate, date, ymd})"
+      "overrunDisplay": "The displayed date ({actual, date, ymd}) is after the fixed date ({fixedDate, date, ymd})",
+      "recurrenceTruncated": "Recurrence calculation was capped at {limit} occurrences or 3,660 calendar days. {occurrenceCount} occurrences were generated through {calculationEndDate, date, ymd}. Later occurrences are excluded; shorten the calculation period.",
+      "invalidRecurrence": "This recurring task has invalid settings. Review the start date, repeat rule and calculation period.",
+      "occurrenceContext": "Occurrence originally on {occurrenceDate, date, short}: {reason}",
+      "recurrenceEmpty": "The recurrence rule produces no occurrences from {origin, date, ymd} through {calculationEndDate, date, ymd}. Review the weekdays, month mode or calculation period."
     },
     "tooltipLine": "{label}: {message}"
   },
@@ -151,7 +158,8 @@
       "monthly": "{value, plural, one {# person-day} other {# person-days}} monthly"
     },
     "limitSeparator": ", ",
-    "capacityExceeded": "\"{taskName}\" (assignee: {resourceName}, effort: {duration} person-days) could not be allocated within the capacity limits ({limits}; search limit: {searchWorkdays, number} workdays). It is placed on consecutive workdays starting {start, date, ymd} and exceeds the capacity limits. Review the effort or the capacity limits."
+    "capacityExceeded": "\"{taskName}\" (assignee: {resourceName}, effort: {duration} person-days) could not be allocated within the capacity limits ({limits}; search limit: {searchWorkdays, number} workdays). It is placed on consecutive workdays starting {start, date, ymd} and exceeds the capacity limits. Review the effort or the capacity limits.",
+    "fixedOccurrenceCapacityExceeded": "\"{taskName}\" (assignee: {resourceName}, original occurrence: {occurrenceDate, date, ymd}) exceeds resource capacity (daily: {dailyCapacity}, weekly: {weeklyCapacity}, monthly: {monthlyCapacity} person-days; 0 means unlimited). Its fixed dates, {start, date, ymd} through {finish, date, ymd}, were retained. Adjust this occurrence or resource capacity."
   },
   "taskDetail": {
     "groupBadge": "(group)",
@@ -410,7 +418,9 @@
     "milestone": "Milestone",
     "float": "Float {days}d",
     "lagTitle": "Lag (workdays)",
-    "removeEdge": "Remove dependency"
+    "removeEdge": "Remove dependency",
+    "editDependency": "Edit dependency from {from} to {to}: {label}",
+    "dependencyType": "Dependency type"
   },
   "save": {
     "pending": "Unsaved changes · waiting to save",
@@ -461,7 +471,10 @@
     "schemaVersion": "schemaVersion must be {version}.",
     "dateTime": "{field} must be a valid ISO 8601 date-time.",
     "requiredArray": "Required array is missing.",
-    "dependencySubject": "\"{name}\": {reason}"
+    "dependencySubject": "\"{name}\": {reason}",
+    "recurrence": "Invalid recurrence settings: {field}.",
+    "recurrenceLeaf": "Only regular leaf tasks can repeat.",
+    "recurrenceOverride": "Invalid occurrence override: {field}."
   },
   "projectName": {
     "label": "Project name",
@@ -489,5 +502,71 @@
     "details": "View affected tasks and reasons",
     "dismiss": "Dismiss recalculation result",
     "title": "Recalculation result"
+  },
+  "recurrence": {
+    "title": "Recurrence",
+    "editRule": "Edit recurrence",
+    "addRule": "Add recurrence",
+    "notRepeating": "This task does not repeat.",
+    "enabled": "Repeat this task",
+    "origin": "Series start (required)",
+    "frequency": "Frequency",
+    "daily": "Daily",
+    "weekly": "Weekly",
+    "monthly": "Monthly",
+    "interval": "Repeat every",
+    "end": "End date (optional, inclusive)",
+    "weekdays": "Weekdays",
+    "weekAnchor": "Weeks begin on Monday. Only dates on or after the series start are included.",
+    "monthMode": "Day of month",
+    "monthDay": "Start date’s day (clamp to month end)",
+    "monthStart": "First day of the month",
+    "monthEnd": "Last day of the month",
+    "horizon": "Calculation through (inclusive)",
+    "horizonNote": "Without an end date, calculations use this saved finite period. The default is one year from the series start. Scrolling and zooming do not change it.",
+    "boundsNote": "The start is required. The optional end includes occurrences on that date. Each occurrence uses the series effort and assignee.",
+    "preserveOverrides": "Single-occurrence changes stay attached to their original dates. Changing or removing the rule preserves them; changes outside the new rule remain dormant.",
+    "saveRule": "Save recurrence",
+    "summary": "{frequency}, every {interval}: {count} occurrences",
+    "calculatedThrough": "Calculation period ends {date}",
+    "fixedDatesNote": "Occurrences stay on their calendar dates, including weekends and holidays. Dependencies and resource limits can produce warnings; they do not move these dates.",
+    "truncated": "Calculation was capped at 2,000 occurrences or 3,660 calendar days. Later occurrences are excluded; shorten the saved period to calculate the full series.",
+    "dormantOverrides": "{count} saved occurrence changes are outside the current rule. They remain attached to their original dates.",
+    "occurrences": "Occurrences (original dates)",
+    "overridden": "Changed occurrence",
+    "editOccurrence": "Edit this occurrence",
+    "noOccurrences": "No occurrences in the calculation period.",
+    "occurrenceIdentity": "Occurrence originally on {date}",
+    "occurrenceNote": "Only this occurrence will change. Its original date remains its identity; effort and assignee come from the series. End dates are inclusive. Moves are limited to 3,660 days from the original date.",
+    "occurrenceStart": "Occurrence start",
+    "occurrenceEnd": "Occurrence end",
+    "occurrenceDeps": "This occurrence’s predecessors",
+    "dependencyHelp": "Use WBS@YYYY-MM-DDFS+lag to link a specific original occurrence, for example 2@2026-10-12FS+1. A WBS number without a date refers to the entire finite series.",
+    "resetOccurrence": "Reset this occurrence",
+    "saveOccurrence": "Save occurrence",
+    "editOrigin": "Edit the series start in recurrence settings.",
+    "cannotConvert": "Remove recurrence before converting this task to a milestone or group.",
+    "cannotPaste": "Edit recurring dates and type in recurrence settings. This paste was not applied.",
+    "barLabel": "{name}: original occurrence {date}, {start} to {finish}. {status}. Open to edit this occurrence.",
+    "scheduled": "Scheduled occurrence",
+    "networkCount": "Recurring: {count} occurrences",
+    "resourceNote": "Recurring tasks include the load of every occurrence in their saved calculation period, including calendar holidays.",
+    "errors": {
+      "startRequired": "Enter a complete, valid series start date.",
+      "intervalInvalid": "The interval must be a whole number from 1 to 365.",
+      "weekdaysRequired": "Select at least one weekday.",
+      "endInvalid": "The end must be a valid date on or after the series start.",
+      "horizonInvalid": "Enter a valid calculation end on or after the series start.",
+      "occurrenceDatesInvalid": "Enter complete start and end dates. The end must be on or after the start.",
+      "dependenciesInvalid": "Predecessors contain an invalid date, format or WBS number. No changes were saved.",
+      "spanInvalid": "Each occurrence must span no more than 3,660 calendar days. Reduce its effort or date range.",
+      "moveTooFar": "Move an occurrence no more than 3,660 days from its original date."
+    },
+    "safetyBounds": "Safety limits: intervals 1–365; each occurrence and calculation period at most 3,660 calendar days; at most 2,000 occurrences per series.",
+    "inheritedDeps": "Inherits series predecessors",
+    "customDeps": "Predecessors for this occurrence only",
+    "useSeriesDeps": "Use series predecessors",
+    "baselineOccurrence": "Baseline occurrence originally on {date}",
+    "reservationName": "{name} (original occurrence {date})"
   }
 }

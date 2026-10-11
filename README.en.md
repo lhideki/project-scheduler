@@ -252,3 +252,7 @@ Please report bugs and feature requests in [GitHub Issues](https://github.com/lh
 ## License
 
 [MIT License](LICENSE)
+
+## Recurring tasks
+
+Create daily, weekly (multiple weekdays), or monthly series, including alternate months and calendar month start/end. Each series uses one Gantt row with individually editable fixed-date bars. Automatic scheduling preserves occurrence dates and reports dependency/capacity conflicts. Rules and original-date overrides survive JSON, local saving, Undo/Redo, and version restoration. Endless rules use an explicit finite calculation period, independent of the viewport. See [rules, limits, dependencies, and JSON examples](docs/recurring-tasks.md).

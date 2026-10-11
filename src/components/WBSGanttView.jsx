@@ -2,10 +2,11 @@ import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useImpera
 import {
   Plus, Trash2, ChevronRight, ChevronDown, Save, ZoomIn, ZoomOut,
   AlertTriangle, ArrowLeftRight, Info, Diamond, GripVertical, Zap, Flame,
-  Undo2, Redo2, Copy, ClipboardPaste,
+  Undo2, Redo2, Copy, ClipboardPaste, Repeat2,
 } from "lucide-react";
 import { toISO, parseISO, cal_addDaysISO, isWeekend, nonWorkdaySegments } from "../lib/calendar.js";
 import { idleSegments, consecutiveDateRuns, allocationProgressPoint, DAILY_CAPACITY } from "../lib/workAllocation.js";
+import { isRecurringTask, isISODate, MAX_RECURRENCE_SPAN_DAYS } from "../lib/recurrence.js";
 import { uid, buildFlatList, allDescendantIds } from "../lib/taskTree.js";
 import { sprintColorForId } from "../lib/sprints.js";
 import { formatDependencyIssueMessage, dependencyIssueLabel } from "../lib/i18n.js";
@@ -120,12 +121,24 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
     });
   }
   function resetPaneWidth() { setPaneLeftWidth(null); }
-  const idToNo = useMemo(() => Object.fromEntries(flat.map(t => [t.id, t.wbsNo])), [flat]);
-  const noToId = useMemo(() => Object.fromEntries(flat.map(t => [t.wbsNo, t.id])), [flat]);
+  const allFlat = useMemo(() => buildFlatList(tasks, new Set()), [tasks]);
+  const idToNo = useMemo(() => Object.fromEntries(allFlat.map(t => [t.id, t.wbsNo])), [allFlat]);
+  const noToId = useMemo(() => Object.fromEntries(allFlat.map(t => [t.wbsNo, t.id])), [allFlat]);
   // 行ごとの担当者名表示（バー・基準行）で resources.find() を毎回線形探索しないよう、事前にMap化しておく。
   const resourceNameById = useMemo(() => new Map(resources.map(r => [r.id, r.name])), [resources]);
   const resourceById = useMemo(() => new Map(resources.map(r => [r.id, r])), [resources]);
-  const taskNameById = useMemo(() => new Map(tasks.map(t => [t.id, t.name])), [tasks]);
+  const taskNameById = useMemo(() => {
+    const names = new Map(tasks.map(task => [task.id, task.name]));
+    function addOccurrence(occurrence, id) {
+      if (!occurrence.seriesId || !occurrence.occurrenceDate) return;
+      names.set(id, tr("recurrence.reservationName", { name: names.get(occurrence.seriesId) || tr("common.untitledTask"), date: occurrence.occurrenceDate }));
+    }
+    schedule.forEach((entry, id) => {
+      addOccurrence(entry, id);
+      (entry.occurrences || []).forEach(occurrence => addOccurrence(occurrence, occurrence.id));
+    });
+    return names;
+  }, [tasks, schedule, tr]);
   const sprintNameById = useMemo(() => new Map(sprints.map(sp => [sp.id, sp.name])), [sprints]);
   // 依存関係の矛盾（App.jsx で detectDependencyIssues した結果をタスクIDで引けるようにしたもの）。
   const issuesByTask = dependencyIssuesByTask || EMPTY_ISSUES_BY_TASK;
@@ -146,6 +159,8 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
   // 比較モード時は各タスクが rowStride（現在行+基準行）の高さを占有する。
   const bodyHeight = flat.length * rowStride + ROW_H;
   const [detailId, setDetailId] = useState(null);
+  const [detailOccurrenceDate, setDetailOccurrenceDate] = useState(null);
+  function openOccurrence(taskId, date) { hideBarTooltip(); setDetailOccurrenceDate(date); setDetailId(taskId); }
   const [linkDrag, setLinkDrag] = useState(null); // ガントチャート上でのドラッグによる依存関係作成
   // 通常タスクバー・マイルストーンのホバー時ツールチップ（サマリー・比較用基準バーは対象外）。
   // WBS表の「依存関係の矛盾」アイコンのホバー（kind: "issues"、矛盾の内容だけを表示）にも同じ仕組みを使う。
@@ -155,13 +170,13 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
   // ディレイ待ち中も含め、直近のポインタ位置を常に保持する（表示前に位置更新が捨てられないように）。
   const barTooltipPosRef = useRef({ x: 0, y: 0 });
   const barTooltipRef = useRef(null);
-  function showBarTooltipAfterDelay(taskId, clientX, clientY, kind = "bar") {
+  function showBarTooltipAfterDelay(taskId, clientX, clientY, kind = "bar", occurrenceDate = null) {
     if (linkDrag || rowDrag) return; // リンク作成・行の並べ替えドラッグ中はポインタがバー上を横切りうるため出さない
     barTooltipPosRef.current = { x: clientX, y: clientY };
     if (barTooltipTimerRef.current) clearTimeout(barTooltipTimerRef.current);
     barTooltipTimerRef.current = setTimeout(() => {
       barTooltipTimerRef.current = null;
-      setBarTooltip({ taskId, kind, x: barTooltipPosRef.current.x, y: barTooltipPosRef.current.y });
+      setBarTooltip({ taskId, kind, occurrenceDate, x: barTooltipPosRef.current.x, y: barTooltipPosRef.current.y });
     }, 100);
   }
   function moveBarTooltip(taskId, clientX, clientY) {
@@ -176,7 +191,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
   // キーボード操作（Tab）でタスクバーにフォーカスしたときも、ホバーと同じツールチップを表示する。
   // フォーカス時のスクロール（画面外のバーを表示範囲に入れる）でスクロールハンドラに閉じられないよう、
   // スクロール後のフレームでバーの位置を測って表示する。マウスのクリックによるフォーカスでは出さない。
-  function showBarTooltipOnFocus(e, taskId) {
+  function showBarTooltipOnFocus(e, taskId, occurrenceDate = null) {
     const el = e.currentTarget;
     let keyboardFocus = true;
     try { keyboardFocus = el.matches(":focus-visible"); } catch (err) { /* :focus-visible 非対応環境では常に表示 */ }
@@ -184,7 +199,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
     requestAnimationFrame(() => requestAnimationFrame(() => {
       if (document.activeElement !== el) return;
       const r = el.getBoundingClientRect();
-      setBarTooltip({ taskId, kind: "bar", x: r.left + Math.min(r.width, 24), y: r.top + ROW_H / 2 });
+      setBarTooltip({ taskId, kind: "bar", occurrenceDate, x: r.left + Math.min(r.width, 24), y: r.top + ROW_H / 2 });
     }));
   }
   useEffect(() => () => { if (barTooltipTimerRef.current) clearTimeout(barTooltipTimerRef.current); }, []);
@@ -245,6 +260,11 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
   // バー本体のホバー情報（開始日・期日・担当者・進捗率等）を、TaskDetailModalの要約としてテキスト化する。
   function buildBarTooltipLines(t, s) {
     const lines = [`${t.wbsNo ? `${t.wbsNo} ` : ""}${t.name}`];
+    if (s.occurrenceDate) {
+      lines.push(tr("recurrence.occurrenceIdentity", { date: s.occurrenceDate }));
+      lines.push(tr(t.occurrenceOverrides?.[s.occurrenceDate] ? "recurrence.overridden" : "recurrence.scheduled"));
+      lines.push(tr("recurrence.fixedDatesNote"));
+    }
     lines.push(tr("gantt.tooltip.period", { start: fmtDate(s.schedStart), finish: fmtDate(s.schedFinish) }));
     if (t.milestone) {
       lines.push(t.milestoneMode === "fixed" ? tr("gantt.tooltip.fixedMilestone", { date: fmtDate(t.fixedDate) }) : tr("gantt.tooltip.flexibleMilestone"));
@@ -443,7 +463,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
         if (targetTask && !targetTask.hasChildren && targetTask.id !== fromId) {
           setTasks(prev => prev.map(t => {
             if (t.id !== targetTask.id) return t;
-            const already = (t.predecessors || []).some(d => d.id === fromId);
+            const already = (t.predecessors || []).some(d => d.id === fromId && !d.occurrenceDate);
             if (already) return t; // 既存の依存関係と重複させない
             return { ...t, predecessors: [...(t.predecessors || []), { id: fromId, type: "FS", lag: 0 }] };
           }));
@@ -475,8 +495,24 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
     }
   }
 
-  function updateTask(id, patch) { setTasks(prev => prev.map(t => (t.id === id ? { ...t, ...patch } : t))); }
+  function safeTaskPatch(id, patch) {
+    const task = tasks.find(t => t.id === id);
+    const next = { ...task, ...patch };
+    if (patch.parentId && isRecurringTask(tasks.find(t => t.id === patch.parentId))) {
+      onNotify?.(tr("recurrence.cannotConvert")); return false;
+    }
+    if (isRecurringTask(next) && next.duration > MAX_RECURRENCE_SPAN_DAYS) { onNotify?.(tr("recurrence.errors.spanInvalid")); return false; }
+    if (isRecurringTask(next) && (next.milestone || !isISODate(next.startDate) || tasks.some(t => t.parentId === id))) {
+      onNotify?.(tr("recurrence.cannotConvert")); return false;
+    }
+    return true;
+  }
+  function updateTask(id, patch) {
+    if (!safeTaskPatch(id, patch)) return;
+    setTasks(prev => prev.map(t => (t.id === id ? { ...t, ...patch } : t)));
+  }
   function editTask(id, column, patch) {
+    if (!safeTaskPatch(id, patch)) return;
     editTasks(cellKey(id, column), prev => prev.map(t => (t.id === id ? { ...t, ...patch } : t)));
   }
 
@@ -563,6 +599,10 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
       onNotify?.(tr("wbs.toast.nothingToPaste"));
       return false;
     }
+    if (isRecurringTask(target) && ((Object.hasOwn(patch, "startDate") && patch.startDate !== target.startDate) || patch.milestone)) {
+      onNotify?.(tr("recurrence.cannotPaste")); return false;
+    }
+    if (!safeTaskPatch(target.id, patch)) return false;
     updateTask(target.id, patch);
     if (errors.length) onNotify?.(tr("wbs.toast.pastedPartially"));
     else onNotify?.(payload.kind === "row" || selection.kind === "row" ? tr("wbs.toast.rowPasted") : tr("wbs.toast.cellPasted"));
@@ -618,6 +658,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
     else if (before.level < after.level) targetParentId = before.id; // 直前行の最初の子として入る
     else targetParentId = after.parentId; // ネストから抜けて浅い階層へ戻る
 
+    if (isRecurringTask(tasks.find(t => t.id === targetParentId))) return null;
     if (dragBlockIds.has(targetParentId)) return null; // 自分自身の配下には移動できない（安全側の保険）
 
     let siblingInsertPos = 0;
@@ -671,6 +712,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
   }
 
   function toggleMilestone(id) {
+    if (isRecurringTask(tasks.find(t => t.id === id))) { onNotify?.(tr("recurrence.cannotConvert")); return; }
     setTasks(prev => prev.map(t => {
       if (t.id !== id) return t;
       if (t.milestone) {
@@ -744,7 +786,12 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
       setTasks(prev =>
         prev
           .filter(x => !toRemove.has(x.id))
-          .map(x => ({ ...x, predecessors: (x.predecessors || []).filter(d => !toRemove.has(d.id)) }))
+          .map(x => ({
+            ...x, predecessors: (x.predecessors || []).filter(d => !toRemove.has(d.id)),
+            ...(x.occurrenceOverrides ? { occurrenceOverrides: Object.fromEntries(Object.entries(x.occurrenceOverrides).map(([date, override]) => [date,
+              Array.isArray(override.predecessors) ? { ...override, predecessors: override.predecessors.filter(dep => !toRemove.has(dep.id)) } : override,
+            ])) } : {}),
+          }))
       );
       if (selectedId === id || toRemove.has(selectedId)) setSelectedId(null);
     }, tr("common.deleteConfirm"));
@@ -758,6 +805,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
     const cur = flat[idx];
     const prevSibling = [...flat.slice(0, idx)].reverse().find(t => t.level === cur.level);
     if (!prevSibling) return;
+    if (isRecurringTask(prevSibling)) { onNotify?.(tr("recurrence.cannotConvert")); return; }
     const newSiblings = tasks.filter(t => t.parentId === prevSibling.id);
     const order = newSiblings.length ? Math.max(...newSiblings.map(s => s.order)) + 1 : 0;
     updateTask(id, { parentId: prevSibling.id, order });
@@ -1035,7 +1083,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
           {flat.map(t => {
             const sched = schedule.get(t.id);
             const isSelected = selectedId === t.id;
-            const isSummary = sched?.isSummary;
+            const isSummary = sched?.isSummary && !isRecurringTask(t);
             const isDragging = rowDrag && rowDrag.dragId === t.id;
             // バージョン比較：WBS番号で基準バージョンの該当タスクを引く（無ければ「新規」扱い）。
             const baselineRow = compareOn ? baselineByWbsNo.get(t.wbsNo) : null;
@@ -1087,10 +1135,11 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                         {collapsed.has(t.id) ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
                       </button>
                     ) : <span style={{ width: 12 }} />}
+                    {isRecurringTask(t) && <Repeat2 size={11} className="shrink-0 text-indigo-500" aria-label={tr("recurrence.title")} />}
                     {!t.hasChildren && (
                       <button
                         onClick={(e) => { e.stopPropagation(); toggleMilestone(t.id); }}
-                        title={t.milestone ? tr("wbs.row.toTask") : tr("wbs.row.toMilestone")}
+                        disabled={isRecurringTask(t)} title={isRecurringTask(t) ? tr("recurrence.cannotConvert") : t.milestone ? tr("wbs.row.toTask") : tr("wbs.row.toMilestone")}
                         className="shrink-0"
                       >
                         <Diamond size={10} className={t.milestone ? "text-amber-500" : "text-slate-300 hover:text-slate-400"} fill={t.milestone ? "#F59E0B" : "none"} />
@@ -1165,7 +1214,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                         onKeyDown={e => handleGridCellKeyDown(e, t.id, "startDate")}
                         className={"bg-transparent outline-hidden w-full rounded-sm font-mono text-[11px] focus:bg-indigo-100 focus:ring-1 focus:ring-indigo-300 " + (autoScheduleHighlightIds.has(t.id) ? "font-bold" : "")} />
                     ) : (
-                      <input type="date" value={t.startDate || ""} onChange={e => editTask(t.id, "startDate", { startDate: e.target.value })}
+                      <input type="date" value={t.startDate || ""} readOnly={isRecurringTask(t)} title={isRecurringTask(t) ? tr("recurrence.editOrigin") : undefined} onClick={() => { if (isRecurringTask(t)) setDetailId(t.id); }} onChange={e => editTask(t.id, "startDate", { startDate: e.target.value })}
                         ref={cellRefCallback(t.id, "startDate")} {...cellInputProps(t.id, "startDate")}
                         onKeyDown={e => handleGridCellKeyDown(e, t.id, "startDate")}
                         className={"bg-transparent outline-hidden w-full rounded-sm font-mono text-[11px] focus:bg-indigo-100 focus:ring-1 focus:ring-indigo-300 " + (autoScheduleHighlightIds.has(t.id) ? "font-bold" : "")} />
@@ -1175,7 +1224,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                 </div>
                 <div style={{ width: colWidths.duration }} className="px-1">
                   {!isSummary && !t.hasChildren && !t.milestone && (
-                    <input type="number" min={0} step={0.5} value={t.duration} title={tr("wbs.row.durationTitle")}
+                    <input type="number" min={0} max={isRecurringTask(t) ? MAX_RECURRENCE_SPAN_DAYS : undefined} step={0.5} value={t.duration} title={tr("wbs.row.durationTitle")}
                       onChange={e => editTask(t.id, "duration", { duration: Math.max(0, Math.round(parseFloat(e.target.value || "0") * 100) / 100) })}
                       ref={cellRefCallback(t.id, "duration")} {...cellInputProps(t.id, "duration")}
                       onKeyDown={e => handleGridCellKeyDown(e, t.id, "duration")}
@@ -1416,6 +1465,14 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                   const baselineRow = compareOn ? baselineByWbsNo.get(t.wbsNo) : null;
                   const baseY = y + ROW_H;
                   const baselineEl = (compareOn && baselineRow && baselineRow.schedStart) ? (() => {
+                    if (Array.isArray(baselineRow.occurrences)) return <g>{baselineRow.occurrences.map(occurrence => {
+                      if (!occurrence.schedStart || !occurrence.schedFinish) return null;
+                      const startX = xOf(occurrence.schedStart);
+                      const width = Math.max(2, xOf(occurrence.schedFinish) + dayWidth - startX);
+                      return <rect key={occurrence.occurrenceDate} data-baseline-occurrence={occurrence.occurrenceDate} x={startX} y={baseY + 4} width={width} height={Math.max(4, ROW_H_BASE - 8)} rx={3} fill="#94A3B8" opacity={0.85}>
+                        <title>{tr("recurrence.baselineOccurrence", { date: occurrence.occurrenceDate })}</title>
+                      </rect>;
+                    })}</g>;
                     const bx1 = xOf(baselineRow.schedStart);
                     const bx2 = xOf(baselineRow.schedFinish) + dayWidth;
                     if (baselineRow.milestone) {
@@ -1443,6 +1500,32 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                       style={{ cursor: "crosshair" }}
                       onPointerDown={e => startLinkDrag(e, t.id, hx, hy)} />
                   );
+                  if (isRecurringTask(t)) {
+                    return <React.Fragment key={t.id}>
+                      {(s.occurrences || []).map(o => {
+                        if (!o.schedStart || !o.schedFinish) return null;
+                        const ox = xOf(o.schedStart), ow = Math.max(3, xOf(o.schedFinish) + dayWidth - ox);
+                        const overridden = !!t.occurrenceOverrides?.[o.occurrenceDate];
+                        const occurrenceColor = showCritical && o.critical ? "#DC2626" : overridden ? "#14B8A6" : "#6366F1";
+                        const label = tr("recurrence.barLabel", { name: t.name, date: o.occurrenceDate, start: fmtDate(o.schedStart), finish: fmtDate(o.schedFinish), status: tr(overridden ? "recurrence.overridden" : "recurrence.scheduled") });
+                        const progress = Math.max(0, Math.min(100, t.progress || 0));
+                        return <g key={o.id} data-occurrence-date={o.occurrenceDate} data-series-id={t.id} data-overridden={overridden || undefined}
+                          tabIndex={0} role="button" aria-haspopup="dialog" aria-label={label} className="focus-visible:outline-2 focus-visible:outline-indigo-600" style={{ cursor: "pointer" }}
+                          onClick={() => openOccurrence(t.id, o.occurrenceDate)}
+                          onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openOccurrence(t.id, o.occurrenceDate); } }}
+                          onPointerEnter={e => showBarTooltipAfterDelay(t.id, e.clientX, e.clientY, "bar", o.occurrenceDate)}
+                          onPointerMove={e => moveBarTooltip(t.id, e.clientX, e.clientY)} onPointerLeave={hideBarTooltip}
+                          onFocus={e => showBarTooltipOnFocus(e, t.id, o.occurrenceDate)} onBlur={hideBarTooltip}>
+                          <title>{label}</title>
+                          <rect x={ox} y={y + 6} width={ow} height={ROW_H - 12} rx={4} fill={occurrenceColor} opacity={0.45} />
+                          {progress > 0 && <rect x={ox} y={y + 6} width={ow * progress / 100} height={ROW_H - 12} rx={4} fill={occurrenceColor} opacity={0.95} />}
+                          {overridden && <rect x={ox} y={y + 6} width={ow} height={ROW_H - 12} rx={4} fill="none" stroke={occurrenceColor} strokeWidth={2} strokeDasharray="3,2" />}
+                          {issueOutline && <rect x={ox - 2} y={y + 3} width={ow + 4} height={ROW_H - 6} rx={5} {...issueOutline} />}
+                        </g>;
+                      })}
+                      {baselineEl}
+                    </React.Fragment>;
+                  }
                   if (t.milestone) {
                     const cx = x1 + dayWidth / 2, cy = y + ROW_H / 2;
                     return (
@@ -1498,6 +1581,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                         // キーボード・スクリーンリーダーからも、ツールチップと同じ内容（非割当日の理由を含む）を確認できるようにする
                         tabIndex={0}
                         role="group"
+                        data-task-bar={t.id}
                         aria-label={buildBarTooltipLines(t, s).join(tr("gantt.tooltip.ariaSeparator"))}
                         onFocus={e => showBarTooltipOnFocus(e, t.id)}
                         onBlur={hideBarTooltip}
@@ -1556,7 +1640,8 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
       </div>
       {barTooltip && (() => {
         const tt = flat.find(f => f.id === barTooltip.taskId);
-        const ts = tt && schedule.get(tt.id);
+        const seriesSchedule = tt && schedule.get(tt.id);
+        const ts = barTooltip.occurrenceDate ? seriesSchedule?.occurrences?.find(o => o.occurrenceDate === barTooltip.occurrenceDate) : seriesSchedule;
         const issuesOnly = barTooltip.kind === "issues";
         if (!tt || (!ts && !issuesOnly)) return null;
         const lines = issuesOnly ? [`${tt.wbsNo ? `${tt.wbsNo} ` : ""}${tt.name}`] : buildBarTooltipLines(tt, ts);
@@ -1597,7 +1682,8 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
       })()}
       {detailId && (
         <TaskDetailModal
-          task={flat.find(f => f.id === detailId)}
+          task={allFlat.find(f => f.id === detailId)}
+          initialOccurrenceDate={detailOccurrenceDate}
           schedule={schedule}
           tasks={tasks}
           resources={resources}
@@ -1608,7 +1694,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
           onEdit={(column, patch) => editTask(detailId, column, patch)}
           onCommitEdit={onCommitTaskEdit}
           onToggleMilestone={() => toggleMilestone(detailId)}
-          onClose={() => { onCommitTaskEdit(); composingRef.current = false; setDetailId(null); }}
+          onClose={() => { onCommitTaskEdit(); composingRef.current = false; setDetailId(null); setDetailOccurrenceDate(null); }}
           autoScheduleHighlightIds={autoScheduleHighlightIds}
           taskContextRevision={taskContextRevision}
         />

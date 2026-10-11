@@ -96,3 +96,23 @@ describe("parseDepInput", () => {
     expect(parseDepInput(text, noToId).errors).toHaveLength(1);
   });
 });
+
+
+describe("occurrence dependency syntax", () => {
+  it("round trips stable original dates, dependency types, and lags", () => {
+    const deps = parseDepInput("1@2024-02-29FS+2, 1@2024-03-01SS-1, 1FF", noToId);
+    expect(deps.errors).toEqual([]);
+    expect(deps.deps).toHaveLength(3);
+    expect(deps.deps[0]).toEqual({ id: "id-1", occurrenceDate: "2024-02-29", type: "FS", lag: 2 });
+    expect(formatDeps(deps.deps, { "id-1": "1" })).toBe("1@2024-02-29FS+2, 1@2024-03-01SS-1, 1FF");
+  });
+  it.each(["1@2023-02-29FS", "1@2024-13-01FS", "1@2024-02-30", "1@2024-2-3FS"])("rejects invalid occurrence dates: %s", value => {
+    expect(parseDepInput(value, noToId).errors).toHaveLength(1);
+  });
+  it("deduplicates each occurrence independently from its series", () => {
+    expect(parseDepInput("1@2024-02-29FS,1@2024-02-29SS,1FS", noToId).deps).toEqual([
+      { id: "id-1", occurrenceDate: "2024-02-29", type: "SS", lag: 0 },
+      { id: "id-1", type: "FS", lag: 0 },
+    ]);
+  });
+});

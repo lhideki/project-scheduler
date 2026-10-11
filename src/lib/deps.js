@@ -10,11 +10,12 @@
 /**
  * @typedef {Object} Dependency
  * @property {string} id - 先行タスク（またはグループ）のID
+ * @property {string} [occurrenceDate] - 繰り返しの元の日付（個別修正後も不変）
  * @property {DepType} type - 依存関係の種別
  * @property {number} lag - リード/ラグ（稼働日数、負値も可）
  */
 
-const DEP_RE = /^\s*(\d+(?:\.\d+)*)\s*(FS|SS|FF|SF)?\s*([+-]\s*\d+)?\s*$/i;
+const DEP_RE = /^\s*(\d+(?:\.\d+)*)\s*(?:@(\d{4}-\d{2}-\d{2}))?\s*(FS|SS|FF|SF)?\s*([+-]\s*\d+)?\s*$/i;
 
 /** Parse every token before committing an edit. Callers must reject the whole edit when errors exist. */
 export function parseDepInput(str, noToId) {
@@ -27,10 +28,17 @@ export function parseDepInput(str, noToId) {
     const no = m[1];
     const id = Object.hasOwn(noToId, no) ? noToId[no] : null;
     if (!id) { errors.push({ code: "unknown-wbs", token, no, index }); return; }
-    const type = (m[2] || "FS").toUpperCase();
-    const lag = m[3] ? Number(m[3].replace(/\s/g, "")) : 0;
+    const occurrenceDate = m[2];
+    if (occurrenceDate) {
+      const date = new Date(`${occurrenceDate}T00:00:00Z`);
+      if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== occurrenceDate) {
+        errors.push({ code: "invalid-format", token, index }); return;
+      }
+    }
+    const type = (m[3] || "FS").toUpperCase();
+    const lag = m[4] ? Number(m[4].replace(/\s/g, "")) : 0;
     if (!Number.isSafeInteger(lag)) { errors.push({ code: "invalid-format", token, index }); return; }
-    out.push({ id, type, lag });
+    out.push({ id, type, lag, ...(occurrenceDate ? { occurrenceDate } : {}) });
   });
   return { deps: dedupeDeps(out), errors };
 }
@@ -39,12 +47,14 @@ export function parseDepInput(str, noToId) {
 export function parseDepString(str, noToId) {
   return parseDepInput(str, noToId).deps;
 }
-/** 同じ先行タスクに対する依存関係は1本に限定する（後勝ち）。
+/** 同じ先行タスク・同じ特定回に対する依存関係は1本に限定する（後勝ち）。
  *  2タスク間に複数本の関係が存在すると、ガント/ネットワーク図の矢印キーが衝突し、
  *  React の再描画時に内部参照が壊れる不具合につながるため、常に一意性を保証する。 */
+export function dependencyKey(dep) { return JSON.stringify([dep.id, dep.occurrenceDate || null]); }
+
 export function dedupeDeps(deps) {
   const map = new Map();
-  deps.forEach(d => map.set(d.id, d));
+  deps.forEach(d => map.set(dependencyKey(d), d));
   return Array.from(map.values());
 }
 /** 依存関係の「型＋ラグ」部分だけの短いラベルを作る（例: "FS+1", "SS-2", "FF"）。
@@ -56,6 +66,6 @@ export function formatDeps(deps, idToNo) {
   if (!deps || !deps.length) return "";
   return deps
     .filter(d => idToNo[d.id] != null)
-    .map(d => `${idToNo[d.id]}${formatDepLabel(d)}`)
+    .map(d => `${idToNo[d.id]}${d.occurrenceDate ? "@" + d.occurrenceDate : ""}${formatDepLabel(d)}`)
     .join(", ");
 }

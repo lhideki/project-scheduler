@@ -143,3 +143,10 @@ plan/history key. Language preference remains a separate UI preference.
 - Pull-request CI uploads screenshots, traces on failures, and the Playwright report
   as `browser-evidence-<commit>` artifacts. Screenshots are real browser captures of
   that checked-out build, not generated mockups.
+
+
+## 繰り返しの任意項目
+
+`tasks[].recurrence`、`tasks[].occurrenceOverrides`、`predecessors[].occurrenceDate` を保存形式v1の任意項目として扱います。通常タスクの旧JSONは変更不要です。繰り返しの開始日、規則の列挙値・整数間隔、曜日、実在する暦日、個別修正の範囲を共通検証します。繰り返しグループ/マイルストーンと内部用ID接頭辞`@recurrence:`は拒否します。バージョン内のrawTasksも同じ検証を通します。
+
+元の予定日が現行規則の対象外になった個別修正は休止状態として保持します。特定回への依存が規則変更で見つからなくなった場合は診断を返しますが、再読み込みを妨げず修正可能にします。通常タスクの欠落参照については既存の検証方針を維持します。詳細は[繰り返し仕様](recurring-tasks.md)。

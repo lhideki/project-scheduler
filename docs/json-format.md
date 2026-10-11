@@ -44,12 +44,14 @@ WBS上のタスクです。階層は parentId で表現します。
 
 | フィールド | 型 | 必須 | 説明 |
 | --- | --- | --- | --- |
-| `id` | `string` | 必須 | タスクID |
+| `id` | `string` | 必須 | タスクID。内部生成用の@recurrence:接頭辞は使用できません。 |
 | `name` | `string` | 必須 | タスク名 |
 | `parentId` | `string` \| `null` | 必須 | 親タスクID。ルート直下は null |
 | `order` | `number` | 必須 | 同じ親配下での表示順 |
 | `startDate` | `string` | 任意 | 開始日（YYYY-MM-DD） |
-| `duration` | `number` | 任意 | 工数。マイルストーンは通常 0 |
+| `duration` | `number` | 任意 | 工数。マイルストーンは通常0。繰り返しでは各回の工数で、既定期間は切り上げ日数の暦日（最大3,660日）です。 |
+| `recurrence` | `recurrence` | 任意 | 繰り返し規則（任意）。通常の末端タスクのみ。 |
+| `occurrenceOverrides` | `object` | 任意 | 各回の元の予定日をキーとする修正情報。日程を変えてもキーは不変です。 |
 | `assigneeId` | `string` \| `null` | 任意 | 担当者ID |
 | `sprintIds` | `string[]` | 任意 | 紐付けるスプリントID一覧 |
 | `predecessors` | `dependency[]` | 任意 | 先行タスク一覧 |
@@ -62,13 +64,37 @@ WBS上のタスクです。階層は parentId で表現します。
 | `diagX` | `number` | 任意 | ネットワーク図の手動X座標 |
 | `diagY` | `number` | 任意 | ネットワーク図の手動Y座標 |
 
+## recurrence（繰り返し規則）
+
+通常の末端タスクに設定する繰り返し規則。task.startDateが必須の起点。各回は暦日で固定し、自動スケジューリング・休日補正の対象外です。
+
+| フィールド | 型 | 必須 | 説明 |
+| --- | --- | --- | --- |
+| `frequency` | `daily` \| `weekly` \| `monthly` | 必須 | 日・週・月単位 |
+| `interval` | `integer` | 必須 | 間隔。1=毎回、2=隔日・隔週・隔月 |
+| `weekdays` | `integer[]` | 任意 | 週単位の対象曜日（0=日、1=月…6=土）。省略時は開始日の曜日。週の起点は開始日を含む月曜日です。 |
+| `monthDay` | `day` \| `start` \| `end` | 任意 | 月単位の日付。day=開始日と同じ日（存在しない月は月末）、start=暦月初、end=暦月末。開始日より前は生成しません。 |
+| `endDate` | `string` | 任意 | 繰り返し終了日（その日を含む）。開始日以上で任意。元の予定日を基準に判定します。 |
+| `calculationEndDate` | `string` | 任意 | 終了日なしの有限計算期間。省略時は開始日の1周年の前日。現在日付・表示範囲には依存しません。開始日から最大3,660暦日・1シリーズ最大2,000回で打ち切りを警告します。 |
+
+## occurrenceOverrides の値（個別修正）
+
+元の予定日をキーとする個別修正。規則変更で対象外になった修正は保持し、別の回へ付け替えません。
+
+| フィールド | 型 | 必須 | 説明 |
+| --- | --- | --- | --- |
+| `startDate` | `string` | 任意 | この回のみの固定開始日 |
+| `endDate` | `string` | 任意 | この回のみの固定終了日（開始日以上、両端を含む、最大3,660暦日） |
+| `predecessors` | `dependency[]` | 任意 | この回の先行タスク。省略時はシリーズ共通、指定時は共通設定を置き換えます。空配列は依存なし。 |
+
 ## predecessors の要素
 
 先行タスクを表すオブジェクトです。
 
 | フィールド | 型 | 必須 | 説明 |
 | --- | --- | --- | --- |
-| `id` | `string` | 必須 | 先行タスクID |
+| `id` | `string` | 必須 | 先行タスクID。繰り返しシリーズの場合、occurrenceDate未指定は有限の計算対象期間全体への依存です。 |
+| `occurrenceDate` | `string` | 任意 | 特定回の元の日付（YYYY-MM-DD）。日程修正後もこの識別子を変更しません。 |
 | `type` | `FS` \| `SS` \| `FF` \| `SF` | 必須 | 依存関係の種類 |
 | `lag` | `number` | 必須 | リード/ラグ日数 |
 
@@ -125,6 +151,7 @@ WBS上のタスクです。階層は parentId で表現します。
 | `level` | `number` | 必須 | WBS階層レベル |
 | `wbsNo` | `string` | 必須 | WBS番号 |
 | `hasChildren` | `boolean` | 必須 | 子タスクの有無 |
+| `occurrences` | `occurrenceSnapshot[]` | 任意 | 繰り返し各回の比較表示用日程（任意） |
 | `schedStart` | `string` | 任意 | 計算後開始日（YYYY-MM-DD） |
 | `schedFinish` | `string` | 任意 | 計算後終了日（YYYY-MM-DD） |
 | `critical` | `boolean` | 必須 | クリティカルかどうか |
@@ -132,6 +159,14 @@ WBS上のタスクです。階層は parentId で表現します。
 | `duration` | `number` \| `null` | 任意 | 保存時点の工数 |
 | `assigneeId` | `string` \| `null` | 必須 | 担当者ID |
 | `progress` | `number` | 必須 | 進捗率 |
+
+## versions.tasks.occurrences の要素
+
+| フィールド | 型 | 必須 | 説明 |
+| --- | --- | --- | --- |
+| `occurrenceDate` | `string` | 必須 | 識別用の元の予定日 |
+| `schedStart` | `string` | 必須 | 保存時点の開始日 |
+| `schedFinish` | `string` | 必須 | 保存時点の終了日 |
 
 ## calendarExceptions の要素
 

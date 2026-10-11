@@ -109,8 +109,14 @@ export default function App() {
   const editTasks = useCallback((key, value) => dispatchTasks({ type: "edit", key, value }), []);
   const commitTaskEdit = useCallback(() => dispatchTasks({ type: "commit" }), []);
   const resetTasks = useCallback(value => dispatchTasks({ type: "reset", value }), []);
-  const undoTasks = useCallback(() => dispatchTasks({ type: "undo" }), []);
-  const redoTasks = useCallback(() => dispatchTasks({ type: "redo" }), []);
+  const undoTasks = useCallback(() => {
+    dispatchTasks({ type: "undo" });
+    setTaskContextRevision(revision => revision + 1);
+  }, []);
+  const redoTasks = useCallback(() => {
+    dispatchTasks({ type: "redo" });
+    setTaskContextRevision(revision => revision + 1);
+  }, []);
   // Undo/RedoのキーボードショートカットはWBS/ガント画面内の要素にフォーカスがある場合しか
   // 効かないとヘッダーの「自動スケジューリング実行」ボタン操作直後などに機能しないため、
   // window全体で受け付ける（IME変換中は無視する）。入力欄ではタスク編集用も含めて

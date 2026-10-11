@@ -567,3 +567,101 @@ describe("shared UI/CLI project validation", () => {
     expect(signature(report.issues)).toEqual(signature(validateProjectData(data)));
   });
 });
+
+describe("recurring task CLI parity", () => {
+  const data = () => buildProjectExport([
+    { id: "series", name: "Monthly review", parentId: null, order: 0, startDate: "2024-01-31", duration: 1,
+      recurrence: { frequency: "monthly", interval: 1, monthDay: "end", endDate: "2024-03-31" },
+      occurrenceOverrides: { "2024-02-29": { startDate: "2024-03-02", endDate: "2024-03-03" } }, predecessors: [] },
+    { id: "next", name: "Follow up", parentId: null, order: 1, startDate: "2024-01-01", duration: 1,
+      predecessors: [{ id: "series", occurrenceDate: "2024-02-29", type: "FS", lag: 0 }] },
+  ], [], [], [], false);
+  it.each([false, true])("shows each fixed occurrence and never rewrites rules with leveling=%s", leveling => {
+    const original = data();
+    const before = JSON.stringify(original);
+    const computed = computeSchedule(original, { leveling });
+    const rows = scheduleRows(original, computed.schedule);
+    expect(rows).toHaveLength(2);
+    expect(rows[0].occurrences).toHaveLength(3);
+    expect(rows[0].occurrences[1]).toMatchObject({ occurrenceDate: "2024-02-29", schedStart: "2024-03-02", schedFinish: "2024-03-03" });
+    const applied = applyAutoSchedule(original, computed.projectStart, computed.cal, { leveling });
+    expect(applied.tasks[0]).toEqual(original.tasks[0]);
+    expect(applied.changed.some(change => change.id === "series")).toBe(false);
+    const next = { ...original, tasks: applied.tasks };
+    const recalc = computeSchedule(next, { leveling });
+    expect(scheduleRows(next, recalc.schedule)[0].occurrences).toEqual(rows[0].occurrences);
+    expect(JSON.stringify(original)).toBe(before);
+  });
+  it("preserves individual overrides through shared version snapshots and restoration", () => {
+    const original = data();
+    const computed = computeSchedule(original);
+    const saved = sharedBuildVersionSnapshot(original, computed.schedule, "Before edit");
+    const restored = restoreVersionSnapshot(saved, true);
+    expect(restored.tasks).toEqual(original.tasks);
+    expect(saved.tasks[0].occurrences).toHaveLength(3);
+  });
+});
+
+it("can export and restore snapshots of a valid empty recurrence", () => {
+  const tasks = [{ id: "empty", name: "Empty period", parentId: null, order: 0, startDate: "2024-01-31", duration: 1,
+    recurrence: { frequency: "monthly", interval: 1, monthDay: "start", endDate: "2024-01-31" } }];
+  const data = buildProjectExport(tasks, [], [], [], false);
+  const computed = computeSchedule(data);
+  const snapshot = sharedBuildVersionSnapshot(data, computed.schedule, "Empty series");
+  const exported = buildProjectExport(tasks, [], [], [snapshot]);
+  expect(() => normalizeImportedProject(exported)).not.toThrow();
+  expect(exported.versions[0].tasks[0].occurrences).toEqual([]);
+  expect(computed.dependencyIssues.some(i => i.code === "recurrence-empty")).toBe(true);
+});
+
+describe("recurrence-aware explain command", () => {
+  const directories = [];
+  afterEach(() => directories.splice(0).forEach(path => rmSync(path, { recursive: true, force: true })));
+  const run = (taskId, occurrence, inputTasks) => {
+    const tasks = inputTasks || [
+      { id: "s", name: "Series", parentId: null, order: 0, startDate: "2026-10-13", duration: 1,
+        recurrence: { frequency: "weekly", interval: 1, endDate: "2026-10-27" },
+        occurrenceOverrides: { "2026-10-20": { startDate: "2026-10-21", endDate: "2026-10-21", predecessors: [{ id: "lead", type: "SS", lag: 1 }] } } },
+      { id: "after", name: "After", parentId: null, order: 1, duration: 1, predecessors: [{ id: "s", occurrenceDate: "2026-10-20", type: "FS", lag: 0 }] },
+      { id: "lead", name: "Lead", parentId: null, order: 2, startDate: "2026-10-13", duration: 1 },
+    ];
+    const directory = mkdtempSync(join(tmpdir(), "scheduler-explain-recurrence-")); directories.push(directory);
+    const path = join(directory, "project.json");
+    writeFileSync(path, JSON.stringify(buildProjectExport(tasks, [], [], [])));
+    const result = spawnSync(process.execPath, [fileURLToPath(new URL("./cli.js", import.meta.url)), "explain", path, "--task", taskId, ...(occurrence ? ["--occurrence", occurrence] : [])], { encoding: "utf8" });
+    expect(result.stderr).toBe("");
+    return { status: result.status, report: JSON.parse(result.stdout) };
+  };
+  it("explains selected predecessor dates rather than the series aggregate", () => {
+    const { status, report } = run("after");
+    expect(status).toBe(0);
+    expect(report.predecessors[0]).toMatchObject({ id: "s", occurrenceDate: "2026-10-20", predFinish: "2026-10-21", impliedStart: "2026-10-22" });
+  });
+  it("explains one fixed occurrence using its original identity and override dependencies", () => {
+    const { status, report } = run("s", "2026-10-20");
+    expect(status).toBe(0);
+    expect(report.task).toMatchObject({ id: "s", occurrenceDate: "2026-10-20" });
+    expect(report.schedule.schedStart).toBe("2026-10-21");
+    expect(report.predecessors[0].id).toBe("lead");
+    expect(report.drivers.pinnedReason).toContain("移動しない");
+  });
+  it("returns all occurrence dates for a series and reports absent original dates", () => {
+    expect(run("s").report.schedule.occurrences).toHaveLength(3);
+    const missing = run("s", "2026-10-21");
+    expect(missing.status).toBe(1);
+    expect(missing.report.error).toContain("対象期間内の回が見つかりません");
+  });
+  it.each(["FF", "SF"])("keeps a fixed Sunday %s requirement on Sunday", type => {
+    const tasks = [
+      { id: "s", name: "Sunday", parentId: null, order: 0, startDate: "2026-10-18", duration: 1,
+        recurrence: { frequency: "weekly", interval: 1, endDate: "2026-10-18" } },
+      { id: "next", name: "Next", parentId: null, order: 1, startDate: "2026-10-18", duration: 1,
+        recurrence: { frequency: "weekly", interval: 1, endDate: "2026-10-18" },
+        predecessors: [{ id: "s", occurrenceDate: "2026-10-18", type, lag: 0 }] },
+    ];
+    const { status, report } = run("next", "2026-10-18", tasks);
+    expect(status).toBe(0);
+    expect(report.predecessors[0]).toMatchObject({ requiredSide: "finish", requiredDate: "2026-10-18", impliedStart: null });
+    expect(report.dependencyIssues).toEqual([]);
+  });
+});

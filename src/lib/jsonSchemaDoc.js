@@ -9,7 +9,7 @@ function formatType(schema) {
   if (schema.type === "array" && schema.items?.type) return `\`${schema.items.type}[]\``;
   if (schema.type === "array" && schema.items?.$ref) return `\`${schema.items.$ref.slice("#/$defs/".length)}[]\``;
   if (schema.type) return `\`${schema.type}\``;
-  if (schema.$ref) return `array`;
+  if (schema.$ref) return `\`${schema.$ref.slice("#/$defs/".length)}\``;
   return "—";
 }
 
@@ -96,6 +96,10 @@ export function renderJsonSchemaMarkdown(rootSchema) {
     "",
     renderSection(rootSchema, "tasks", taskSchema),
     "",
+    renderSection(rootSchema, "recurrence（繰り返し規則）", rootSchema.$defs.recurrence),
+    "",
+    renderSection(rootSchema, "occurrenceOverrides の値（個別修正）", rootSchema.$defs.occurrenceOverride),
+    "",
     renderSection(rootSchema, "predecessors の要素", dependencySchema),
     "",
     renderSection(rootSchema, "resources", resourceSchema),
@@ -105,6 +109,8 @@ export function renderJsonSchemaMarkdown(rootSchema) {
     renderSection(rootSchema, "versions", versionSchema),
     "",
     renderSection(rootSchema, "versions.tasks の要素", versionTaskSchema),
+    "",
+    renderSection(rootSchema, "versions.tasks.occurrences の要素", rootSchema.$defs.occurrenceSnapshot),
     "",
     renderSection(rootSchema, "calendarExceptions の要素", calendarExceptionSchema),
     "",
