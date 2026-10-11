@@ -33,11 +33,11 @@ export function wrapPngTaskName(text, maxWidth, measure) {
     else high = mid - 1;
   }
   if (!low) return [ellipsizePngText(text, maxWidth, measure)];
-  // Prefer a nearby word boundary for Latin names; CJK and unbroken tokens
-  // wrap at a grapheme boundary. Both lines stay within the existing 30px row.
+  // Prefer a nearby word boundary only when the remainder fits. Otherwise a
+  // grapheme boundary preserves more of the name (and may avoid an ellipsis).
   let split = low;
   for (let i = low; i >= Math.ceil(low * 0.7); i--) {
-    if (/\s/u.test(chars[i] || "")) { split = i; break; }
+    if (/\s/u.test(chars[i] || "") && measure(chars.slice(i).join("").trimStart()) <= maxWidth) { split = i; break; }
   }
   return [chars.slice(0, split).join("").trimEnd(), ellipsizePngText(chars.slice(split).join("").trimStart(), maxWidth, measure)];
 }

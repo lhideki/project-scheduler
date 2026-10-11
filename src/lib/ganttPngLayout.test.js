@@ -100,6 +100,7 @@ describe("PNG name ellipsis", () => {
     const width = text => Array.from(graphemes.segment(text)).length * 10;
     expect(wrapPngTaskName("Planning the delivery", 120, width)).toEqual(["Planning the", "delivery"]);
     expect(wrapPngTaskName("👩‍💻é日本語", 30, width)).toEqual(["👩‍💻é日", "本語"]);
+    expect(wrapPngTaskName("1234567 12345678901", 100, width)).toEqual(["1234567 12", "345678901"]);
   });
 
   it("preserves grapheme clusters and never exceeds the available width", () => {
