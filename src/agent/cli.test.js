@@ -677,3 +677,82 @@ describe("recurrence-aware explain command", () => {
     expect(report.dependencyIssues).toEqual([]);
   });
 });
+
+describe("recurring occurrence status reports", () => {
+  const directories = [];
+  afterEach(() => directories.splice(0).forEach(path => rmSync(path, { recursive: true, force: true })));
+  const project = () => buildProjectExport([
+    { id: "series", name: "Review", parentId: null, order: 0, startDate: "2026-10-13", duration: 1, progress: 50,
+      recurrence: { frequency: "weekly", interval: 1, endDate: "2026-10-27" },
+      occurrenceOverrides: {
+        "2026-10-13": { progress: 100 },
+        "2026-10-20": { progress: 50, skipped: false, extension: { keep: true } },
+        "2026-10-27": { progress: 0 },
+        "2020-10-13": { progress: 75, skipped: true },
+      }, extension: "keep",
+    },
+  ], [], [], []);
+  function run(command, projects, opts = []) {
+    const directory = mkdtempSync(join(tmpdir(), "scheduler-occurrence-status-"));
+    directories.push(directory);
+    const paths = projects.map((data, i) => {
+      const path = join(directory, `project-${i}.json`);
+      writeFileSync(path, JSON.stringify(data));
+      return path;
+    });
+    const result = spawnSync(process.execPath, [fileURLToPath(new URL("./cli.js", import.meta.url)), command, ...paths, ...opts], { encoding: "utf8" });
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe("");
+    paths.forEach((path, i) => expect(readFileSync(path, "utf8")).toBe(JSON.stringify(projects[i])));
+    return JSON.parse(result.stdout);
+  }
+
+  it.each(["off", "on"])("recalc and explain show effective status and finite counts with leveling %s", leveling => {
+    const data = project();
+    data.tasks[0].occurrenceOverrides["2026-10-20"].skipped = true;
+    const report = run("recalc", [data], ["--leveling", leveling]);
+    expect(report.tasks[0]).toMatchObject({ progress: 50, recurrenceMetadata: { activeOccurrenceCount: 2, skippedOccurrenceCount: 1 } });
+    expect(report.tasks[0].occurrences.map(({ progress, skipped }) => ({ progress, skipped }))).toEqual([
+      { progress: 100, skipped: false }, { progress: 50, skipped: true }, { progress: 0, skipped: false },
+    ]);
+    const selected = run("explain", [data], ["--task", "series", "--occurrence", "2026-10-20", "--leveling", leveling]);
+    expect(selected.task).toMatchObject({ occurrenceDate: "2026-10-20", progress: 50, skipped: true });
+    expect(selected.schedule).toMatchObject({ schedStart: "2026-10-20", schedFinish: "2026-10-20", progress: 50, skipped: true });
+    const series = run("explain", [data], ["--task", "series", "--leveling", leveling]);
+    expect(series.task.progress).toBe(50); // Stored baseline remains separate from calculated status.
+    expect(series.schedule).toMatchObject({ progress: 50, recurrenceMetadata: { activeOccurrenceCount: 2, skippedOccurrenceCount: 1 } });
+    expect(series.schedule.occurrences[1]).toMatchObject({ progress: 50, skipped: true });
+  });
+
+  it.each([{ progress: 20 }, { skipped: true }])("plan reports a status-only occurrence edit %j without changing dates or raw extensions", patch => {
+    const original = project();
+    const edited = structuredClone(original);
+    Object.assign(edited.tasks[0].occurrenceOverrides["2026-10-20"], patch);
+    const report = run("plan", [original, edited], ["--reschedule"]);
+    expect(report.blocked).toBe(false);
+    expect(report.proposed.tasks).toEqual(edited.tasks);
+    expect(report.proposed.tasks[0].progress).toBe(50);
+    expect(report.proposed.versions[0].rawTasks).toEqual(original.tasks);
+    expect(report.startDateChanges).toEqual([]);
+    const change = report.scheduleChanges.find(change => change.id === "series");
+    expect(change).toMatchObject({ kind: "changed" });
+    expect(change).not.toHaveProperty("schedStart");
+    expect(change).not.toHaveProperty("schedFinish");
+    if (patch.progress !== undefined) expect(change.progress).toEqual({ from: 50, to: 40 });
+    expect(change.occurrences.to[1]).toMatchObject(patch);
+    expect(change.occurrences.from[1]).toMatchObject({ progress: 50, skipped: false });
+    const savedOccurrence = report.proposed.versions[0].tasks[0].occurrences[1];
+    expect(savedOccurrence).toMatchObject({ occurrenceDate: "2026-10-20", progress: 50, skipped: false });
+  });
+
+  it("reports zero aggregate progress and no active occurrences when every occurrence is skipped", () => {
+    const data = project();
+    for (const date of ["2026-10-13", "2026-10-20", "2026-10-27"]) data.tasks[0].occurrenceOverrides[date].skipped = true;
+    const report = run("recalc", [data]);
+    expect(report.tasks[0]).toMatchObject({ progress: 0, recurrenceMetadata: { activeOccurrenceCount: 0, skippedOccurrenceCount: 3 } });
+    expect(report.tasks[0].occurrences.map(occurrence => occurrence.progress)).toEqual([100, 50, 0]);
+    const explained = run("explain", [data], ["--task", "series"]);
+    expect(explained.task.progress).toBe(50);
+    expect(explained.schedule.progress).toBe(0);
+  });
+});

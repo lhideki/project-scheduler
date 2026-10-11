@@ -22,7 +22,7 @@ To return to a regular task, clear **Repeat this task** and save. This removes t
 
 ### Individual dates and stable identity
 
-Select an occurrence bar or a row in the detail panel's occurrence list. Edit its start/end dates, then **Save occurrence**. Cancel, closing the panel, and incomplete input do not save that draft. **Reset occurrence** removes just that occurrence's override.
+Select an occurrence bar or a row in the detail panel's occurrence list. Edit its start/end dates or predecessors, then **Save occurrence**. Cancel, closing the panel, and incomplete input do not save that draft. Resetting occurrence dates/dependencies removes only `startDate`, `endDate`, and `predecessors` from that occurrence's override. It preserves progress, skip state, and any extension fields.
 
 The original generated date is the occurrence's permanent identity, even if it moves into another month or outside the calculation period. Rules and `occurrenceOverrides` are stored separately. Changing a rule retains overrides keyed by their original date; an override whose original date no longer matches stays dormant, is counted in the detail panel, and is never attached to a different occurrence. Restoring the matching rule reactivates it. Disabling recurrence also retains overrides.
 
@@ -32,21 +32,30 @@ The original generated date is the occurrence's permanent identity, even if it m
 - To reference one occurrence, enter `WBS@YYYY-MM-DDFS`, for example `2@2026-12-31FS+1`. The date is its **original** date, not its overridden date. FS/SS/FF/SF and working-day lead/lag remain available.
 - Series predecessors apply to every occurrence. An occurrence can replace its predecessors independently; an explicit empty array means no predecessors for that occurrence.
 - Recurring dates never move or stretch during automatic scheduling, resource leveling, holiday correction, sprint constraints, or dependency resolution. Dependency violations and cycles are reported. If a specific referenced occurrence falls outside a changed rule/calculation period, the reference is retained and flagged so it can be repaired; saved data can still be reopened.
+- A dependency directly targeting a skipped occurrence, or a whole series containing skipped occurrences, is retained and reported with the warning `predecessor-occurrence-skipped`. Skipping does not mark the prerequisite complete, erase a dependency, or remove a date boundary. Review whether the dependent work should proceed.
 - Weekends/holidays remain calendar dates. No automatic postponement is applied.
+
+### Individual progress and skip
+
+Each occurrence can have its own progress from 0 to 100 and an independent skip state. Enter a percentage in the occurrence list and commit it with Enter or by leaving the field; Escape cancels an uncommitted numeric draft. Completion, skip, and restore buttons each update only that occurrence. Skip means that occurrence is not being performed, not that it is completed. It is displayed with a visible skipped label and does not contribute effort or resource load.
+
+The series progress is the arithmetic mean of the non-skipped occurrences in the **finite calculated period**. Completed occurrences remain in that mean. Dormant overrides and dates outside the calculated period are excluded; changing the calculation horizon can therefore change the series aggregate. When all calculated occurrences are skipped, the UI shows no applicable progress and the internal aggregate is `0`. `recurrenceMetadata.activeOccurrenceCount` counts non-skipped calculated occurrences and `skippedOccurrenceCount` counts skipped calculated occurrences.
+
+A missing individual `progress` inherits the stored series `task.progress`, including legacy 100% values and newly generated occurrences. An explicit `progress: 0` overrides that baseline. The calculated average never overwrites raw `task.progress`, so extending the rule cannot give new occurrences a previously calculated average. A missing `skipped` means false. Skipping retains the occurrence's progress, dates, and dependencies; unskipping restores the retained progress (or its inherited baseline). Other occurrences are unaffected. Resetting dates/dependencies also preserves progress and skip state.
 
 ### Effort and resources
 
-Each occurrence inherits the series' effort, assignee, progress, and sprint settings. The default inclusive span is `max(1, ceil(duration))` calendar days. A start-only override preserves that default span; an explicit end date controls the span independently of effort.
+Each occurrence inherits the series' effort, assignee, and sprint settings. The default inclusive span is `max(1, ceil(duration))` calendar days. A start-only override preserves that default span; an explicit end date controls the span independently of effort.
 
-Effort is distributed uniformly across the fixed span, including weekends/holidays. Fixed occurrences reserve resource capacity before movable tasks. They stay in place even when capacity is exceeded; load conflicts are shown as warnings. A longer date span does not create extra effort. The progress line omits recurring rows because their envelope includes gaps; individual bars still show shared progress. Per-occurrence effort/assignee/progress editing and automatic holiday shifting are outside this initial version.
+Effort is distributed uniformly across the fixed span, including weekends/holidays. Fixed occurrences reserve resource capacity before movable tasks. They stay in place even when capacity is exceeded; load conflicts are shown as warnings. A longer date span does not create extra effort. The progress line omits recurring rows because their envelope includes gaps; individual non-skipped bars show their effective individual progress. Per-occurrence effort/assignee editing and automatic holiday shifting remain outside this version. Skipped occurrences keep their fixed dates and identity while contributing no effort or resource load.
 
 ### CLI inspection
 
-`node .claude/skills/schedule-adjust/cli.mjs explain project.json --task review --occurrence 2026-12-31` explains one original occurrence, including its moved dates and effective predecessors. Omit `--occurrence` to inspect the finite series envelope and its occurrence list. `recalc` lists each occurrence and `plan` reports changes to an inner occurrence even when the series envelope is unchanged.
+`node .claude/skills/schedule-adjust/cli.mjs explain project.json --task review --occurrence 2026-12-31` explains one original occurrence, including its moved dates, effective predecessors, progress, and skip state. Omit `--occurrence` to inspect the finite series envelope, calculated progress, occurrence counts, and occurrence list; `task.progress` remains the stored inheritance baseline and `schedule.progress` is the calculated aggregate. `recalc` lists each occurrence's status and `plan` reports progress-only or skip-only changes even when every date and the series envelope are unchanged. Proposed JSON and its pre-edit version preserve raw baselines and overrides.
 
 ### Persistence
 
-The optional `recurrence`, `occurrenceOverrides`, and dependency `occurrenceDate` fields keep `schemaVersion: 1`. Existing ordinary-task files remain supported. JSON, local restoration, shared HTML, Undo/Redo, version snapshots, and CLI plans preserve the raw rules/overrides. Generated occurrences are calculated, not saved as duplicate WBS tasks. Use a recurrence-aware HTML/CLI to edit these plans; older releases do not calculate their rules.
+The optional `recurrence`, `occurrenceOverrides`, and dependency `occurrenceDate` fields, including optional override `progress` and `skipped`, keep `schemaVersion: 1`. Progress must be a finite number in 0–100; skipped must be a boolean. Comparison snapshot occurrences include their effective `progress` and `skipped` while accepting older snapshots that omit them. Existing ordinary-task files remain supported. JSON, local restoration, shared HTML, Undo/Redo, version snapshots, and CLI plans preserve the raw rules/overrides. Generated occurrences are calculated, not saved as duplicate WBS tasks. Use a recurrence-aware HTML/CLI to edit these plans; older releases do not calculate their rules.
 
 ## 日本語
 
@@ -70,7 +79,7 @@ The optional `recurrence`, `occurrenceOverrides`, and dependency `occurrenceDate
 
 ### 各回の編集・依存関係
 
-バーまたは詳細の各回一覧から開始・終了日を変更し、「この回を保存」で確定します。キャンセル・パネルを閉じる操作・不完全な入力では保存しません。「この回の修正を解除」はその回だけを規則に戻します。
+バーまたは詳細の各回一覧から開始・終了日や先行タスクを変更し、「この回を保存」で確定します。キャンセル・パネルを閉じる操作・不完全な入力では保存しません。各回の日程・依存の修正解除は `startDate`・`endDate`・`predecessors` のみを取り除き、進捗・スキップ状態・拡張項目を保持します。
 
 各回の識別子は変更前の元の予定日です。規則と個別修正を分けて保持し、規則変更で対象外になった修正は休止状態で残します。別の回への付け替えは行いません。元の日付を含む規則に戻すと再適用され、繰り返しを無効にしても修正は保持します。
 
@@ -78,14 +87,23 @@ The optional `recurrence`, `occurrenceOverrides`, and dependency `occurrenceDate
 - 特定回は `2@2026-12-31FS+1` のように、WBS番号と元の予定日を指定します。移動後の日付ではありません。FS/SS/FF/SF・稼働日単位のリード/ラグに対応します。
 - シリーズの先行タスクは各回へ適用します。各回で個別の先行タスクへ置き換えることもでき、明示的な空配列はその回だけ依存なしです。
 - 自動スケジューリング・平準化・休日・スプリント・依存関係で各回の日程を移動・延長しません。矛盾・循環・規則変更で参照先の回がなくなった場合は警告し、参照と保存データは保持します。
+- スキップした特定回、またはスキップした回を含むシリーズ全体への直接依存は保持し、`predecessor-occurrence-skipped` の警告を出します。スキップで先行を完了扱いにしたり、依存・日程境界を消したりしません。後続作業を進めてよいか確認してください。
+
+### 各回の進捗・スキップ
+
+各回に0〜100%の進捗と独立したスキップ状態を設定できます。各回一覧の進捗欄はEnterまたはフォーカスを外す操作で確定し、未確定の数値入力はEscapeで取り消せます。完了・スキップ・復帰のボタンはその回だけを変更します。スキップはその回を実施しない状態であり、完了扱いにはしません。スキップの表示を付け、工数・リソース負荷には含めません。
+
+シリーズの進捗は、**有限の計算対象期間**に生成されたスキップ以外の各回の単純平均です。完了済みの回も集計対象です。休止した修正や期間外の回は集計しないため、計算期間を変えると平均値も変わる場合があります。全回スキップの場合は画面上で集計対象なしと表示し、内部集計値は `0` です。`recurrenceMetadata.activeOccurrenceCount` はスキップ以外の生成回数、`skippedOccurrenceCount` はスキップした生成回数です。
+
+個別の `progress` がない回は、保存済みシリーズの `task.progress` を引き継ぎます。旧データの100%や新たに生成する回も同じです。明示的な `progress: 0` は基準値より優先します。集計した平均値を raw の `task.progress` へ書き戻さないため、規則の延長で新しい回が直前の平均値を引き継ぐことはありません。`skipped` の省略はfalseです。スキップしても進捗・日程・依存を保持し、解除すると保存済み進捗（未指定なら引き継ぎ値）に戻ります。他の回には影響しません。日程・依存の修正解除でも進捗とスキップ状態は保持します。
 
 ### 工数・保存
 
-各回はシリーズの工数・担当者・進捗・スプリントを共有します。既定の日程幅は工数を切り上げた暦日数（最小1日）。開始日だけの修正は既定幅を維持し、終了日を指定した場合はその固定幅を使います。工数は土日祝日を含む固定期間に均等配分し、日程幅を伸ばしても工数は増えません。固定回の負荷を先に確保し、容量超過は移動せず警告します。期間の隙間を進捗として誤表示しないため、稲妻線では繰り返し行を除外し、各バーに共通進捗を表示します。各回別の工数・担当者・進捗や休日の自動順延は初期対応に含みません。
+各回はシリーズの工数・担当者・スプリントを共有します。既定の日程幅は工数を切り上げた暦日数（最小1日）。開始日だけの修正は既定幅を維持し、終了日を指定した場合はその固定幅を使います。工数は土日祝日を含む固定期間に均等配分し、日程幅を伸ばしても工数は増えません。固定回の負荷を先に確保し、容量超過は移動せず警告します。期間の隙間を進捗として誤表示しないため、稲妻線では繰り返し行を除外し、スキップ以外の各バーにその回の実効進捗を表示します。各回別の工数・担当者や休日の自動順延は対象外です。スキップした回の日程・識別子は保持しますが、工数・リソース負荷は発生しません。
 
-保存形式は引き続き `schemaVersion: 1` で、新しい項目は任意です。既存の通常タスクを読み込めます。JSON・ブラウザ保存・共有HTML・Undo/Redo・バージョン復元・CLIの提案に規則と修正を保持し、生成回を重複したWBSタスクとして保存しません。繰り返し対応前のHTML・CLIでは規則を計算できないため、対応版を使ってください。
+保存形式は引き続き `schemaVersion: 1` で、個別修正の `progress`・`skipped` は任意です。進捗は0〜100の有限数、スキップはbooleanのみを受け付けます。比較用の各回スナップショットにも実効進捗・スキップ状態を保存し、これらがない旧版スナップショットも読み込めます。既存の通常タスクを読み込めます。JSON・ブラウザ保存・共有HTML・Undo/Redo・バージョン復元・CLIの提案に規則と修正を保持し、生成回を重複したWBSタスクとして保存しません。繰り返し対応前のHTML・CLIでは規則を計算できないため、対応版を使ってください。
 
-CLIは `explain project.json --task review --occurrence 2026-12-31` で元の日付を指定して各回を確認できます。`--occurrence` を省くとシリーズ全体と各回一覧、`recalc` は各回の日程、`plan` はシリーズの開始・終了が変わらない内側の回の変更も報告します。
+CLIは `explain project.json --task review --occurrence 2026-12-31` で元の日付を指定し、各回の日程・依存・進捗・スキップ状態を確認できます。`--occurrence` を省くとシリーズ全体・集計進捗・対象回数・各回一覧を表示します。シリーズの `task.progress` は保存済み基準値、`schedule.progress` は集計値です。`recalc` は各回の状態を出し、`plan` は日程が一切変わらない進捗のみ・スキップのみの変更も報告します。提案JSONと調整前バージョンには raw の基準値と修正を保持します。
 
 ## JSON example / 設定例
 
@@ -104,7 +122,8 @@ CLIは `explain project.json --task review --occurrence 2026-12-31` で元の日
     "endDate": "2027-04-30"
   },
   "occurrenceOverrides": {
-    "2026-12-31": { "startDate": "2027-01-05", "endDate": "2027-01-05" }
+    "2026-12-31": { "startDate": "2027-01-05", "endDate": "2027-01-05", "progress": 60 },
+    "2027-02-28": { "progress": 25, "skipped": true }
   }
 }
 ```

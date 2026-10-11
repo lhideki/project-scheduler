@@ -6,6 +6,22 @@ const series = (changes = {}) => ({ id: "series", name: "Review", parentId: null
 const dates = task => generateOccurrences(task).occurrences.map(o => o.occurrenceDate);
 
 describe("calendar recurrences", () => {
+  it("inherits legacy progress and resolves per-occurrence progress/skip without changing raw data", () => {
+    const task = series({ progress: 75, skipped: true, occurrenceOverrides: {
+      "2024-02-29": { progress: 0 }, "2024-03-31": { progress: 100, skipped: true },
+      "2024-04-30": { skipped: true }, "2024-05-31": { progress: 12.5, skipped: false },
+      "2024-02-10": { progress: 55, skipped: true },
+    } });
+    const before = structuredClone(task);
+    const occurrences = generateOccurrences(task).occurrences;
+    expect(occurrences.map(o => [o.progress, o.skipped])).toEqual([[75, false], [0, false], [100, true], [75, true], [12.5, false]]);
+    expect(occurrenceLoads(occurrences[2])).toEqual([]);
+    expect(occurrenceLoads(occurrences[3])).toEqual([]);
+    expect(occurrenceLoads(occurrences[0])).toHaveLength(2);
+    expect(task).toEqual(before);
+    expect(expandRecurringTasks([task])[0].recurrenceMetadata).toMatchObject({ occurrenceCount: 5, activeOccurrenceCount: 3, skippedOccurrenceCount: 2 });
+    expect(generateOccurrences(series({ progress: 100 })).occurrences.every(o => o.progress === 100 && !o.skipped)).toBe(true);
+  });
   it("clamps monthly dates without drifting after February, including leap years", () => {
     expect(dates(series())).toEqual(["2024-01-31", "2024-02-29", "2024-03-31", "2024-04-30", "2024-05-31"]);
     expect(dates(series({ startDate: "2023-01-31", recurrence: { frequency: "monthly", interval: 2, endDate: "2023-07-31" } }))).toEqual(["2023-01-31", "2023-03-31", "2023-05-31", "2023-07-31"]);

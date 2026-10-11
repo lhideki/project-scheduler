@@ -91,3 +91,58 @@ describe("version snapshots", () => {
     expect(buildVersionSnapshot(original, new Map(), "Saved").rawLevelingOn).toBe(false);
   });
 });
+
+
+it("captures effective occurrence status while restoring the raw baseline and all dormant overrides", () => {
+  const original = {
+    tasks: [{ id: "series", name: "Review", parentId: null, order: 0, startDate: "2024-01-09", duration: 1, progress: 40,
+      recurrence: { frequency: "daily", interval: 1, endDate: "2024-01-11" },
+      occurrenceOverrides: {
+        "2024-01-09": { progress: 100 },
+        "2024-01-10": { progress: 70, skipped: true, extension: { preserved: true } },
+        "2023-01-09": { progress: 20, skipped: false },
+      }, extension: { preserved: true },
+    }], resources: [], sprints: [], calendarExceptions: [], levelingOn: false,
+  };
+  const before = schedule(original);
+  const saved = buildVersionSnapshot(original, before, "Occurrence progress");
+  expect(saved.tasks[0].progress).toBe(70);
+  expect(saved.tasks[0].occurrences).toEqual([
+    { occurrenceDate: "2024-01-09", schedStart: "2024-01-09", schedFinish: "2024-01-09", progress: 100, skipped: false },
+    { occurrenceDate: "2024-01-10", schedStart: "2024-01-10", schedFinish: "2024-01-10", progress: 70, skipped: true },
+    { occurrenceDate: "2024-01-11", schedStart: "2024-01-11", schedFinish: "2024-01-11", progress: 40, skipped: false },
+  ]);
+  expect(saved.rawTasks).toEqual(original.tasks);
+  expect(saved.rawTasks[0].progress).toBe(40);
+  const exported = buildProjectExport(original.tasks, [], [], [saved]);
+  const imported = normalizeImportedProject(JSON.parse(JSON.stringify(exported)));
+  const restored = restoreVersionSnapshot(imported.versions[0]);
+  expect(restored).toEqual(original);
+  expect(schedule(restored)).toEqual(before);
+  restored.tasks[0].occurrenceOverrides["2024-01-10"].progress = 0;
+  expect(saved.rawTasks[0].occurrenceOverrides["2024-01-10"].progress).toBe(70);
+});
+
+
+it("keeps the inherited baseline through disable, JSON reload, re-enable and horizon extension", () => {
+  const original = {
+    tasks: [{ id: "series", name: "Review", parentId: null, order: 0, startDate: "2024-01-09", duration: 1, progress: 40,
+      recurrence: { frequency: "daily", interval: 1, endDate: "2024-01-11" },
+      occurrenceOverrides: { "2024-01-09": { progress: 100 }, "2024-01-10": { progress: 20, skipped: true } },
+    }], resources: [], sprints: [], calendarExceptions: [], levelingOn: false,
+  };
+  expect(schedule(original).get("series").progress).toBe(70);
+  const disabled = structuredClone(original);
+  delete disabled.tasks[0].recurrence;
+  const reloaded = normalizeImportedProject(buildProjectExport(disabled.tasks, [], [], []));
+  expect(reloaded.tasks[0].progress).toBe(40);
+  expect(reloaded.tasks[0].occurrenceOverrides).toEqual(original.tasks[0].occurrenceOverrides);
+  expect(schedule(reloaded).get("series").progress).toBe(40);
+  reloaded.tasks[0].recurrence = { ...original.tasks[0].recurrence, endDate: "2024-01-12" };
+  const reenabled = schedule(reloaded).get("series");
+  expect(reenabled.progress).toBe(60);
+  expect(reenabled.occurrences.map(({ progress, skipped }) => ({ progress, skipped }))).toEqual([
+    { progress: 100, skipped: false }, { progress: 20, skipped: true }, { progress: 40, skipped: false }, { progress: 40, skipped: false },
+  ]);
+  expect(reloaded.tasks[0].progress).toBe(40);
+});

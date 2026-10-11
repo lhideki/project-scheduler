@@ -21,7 +21,7 @@
  * @property {string} [fixedDate] - milestoneMode "fixed" の場合の固定期日
  * @property {number} [savedDuration] - マイルストーン化する前の工数の退避値（トグルで復元用）
  * @property {Object} [recurrence] - 日/週/月単位の繰り返し。startDate起点の通常リーフのみ
- * @property {Object<string, Object>} [occurrenceOverrides] - 元の予定日をキーとする各回の固定日程・依存関係の修正
+ * @property {Object<string, Object>} [occurrenceOverrides] - 元の予定日をキーとする各回の固定日程・依存関係・progress（0〜100）・skipped（boolean）の修正
  * @property {string} [notes] - メモ（詳細パネルでのみ編集）
  * @property {number} [diagX] - ネットワーク図でのドラッグ後のx座標（未指定なら自動レイアウト）
  * @property {number} [diagY] - ネットワーク図でのドラッグ後のy座標

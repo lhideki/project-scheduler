@@ -191,6 +191,8 @@ function dependencyIssueReason(t, issue) {
       return t("dependencyIssues.message.self");
     case "predecessor-missing":
       return t("dependencyIssues.message.missing", { predecessorId: p.predecessorId });
+    case "predecessor-occurrence-skipped":
+      return t("dependencyIssues.message.predecessorSkipped", { predName: name(p.predName) });
     case "dependency-violation":
       return t(p.side === "finish" ? "dependencyIssues.message.violationFinish" : "dependencyIssues.message.violationStart", {
         predName: name(p.predName), label: p.label, required: dateArg(p.required), actual: dateArg(p.actual),

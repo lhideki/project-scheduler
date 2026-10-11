@@ -54,7 +54,8 @@ const numberField = (key, required = false, check = isNumber) => field(key, chec
 const stringField = (key, required = false) => field(key, isString, required, "string");
 const booleanField = key => field(key, value => typeof value === "boolean", false, "boolean");
 const dateField = (key, required = false, allowEmpty = false) => field(key, value => (allowEmpty && value === "") || isISODate(value), required, "date");
-const progressField = field("progress", value => isNumber(value) && value >= 0 && value <= 100, false, "progress");
+const isProgress = value => isNumber(value) && value >= 0 && value <= 100;
+const progressField = field("progress", isProgress, false, "progress");
 const taskFields = [
   idField, nameField,
   field("parentId", value => value === null || isId(value), true, "nullableId"),
@@ -112,6 +113,8 @@ function checkRecurrence(task, path, issues) {
       for (const key of ["startDate", "endDate"]) {
         if (has(override, key) && !isISODate(override[key])) invalid(`${overridePath}.${key}`, "recurrenceOverride");
       }
+      if (has(override, "progress") && !isProgress(override.progress)) invalid(`${overridePath}.progress`, "recurrenceOverride");
+      if (has(override, "skipped") && typeof override.skipped !== "boolean") invalid(`${overridePath}.skipped`, "recurrenceOverride");
       const start = override.startDate || originalDate;
       if (isISODate(start) && isISODate(originalDate) && Math.abs(Date.parse(start) - Date.parse(originalDate)) / 86400000 > 3660) invalid(`${overridePath}.startDate`, "recurrenceOverride");
       if (isISODate(start) && isISODate(override.endDate) && override.endDate < start) invalid(`${overridePath}.endDate`, "recurrenceOverride");
@@ -184,7 +187,7 @@ function checkVersion(value, path, issues, options) {
         issues.push(issue("error", "version-task-date-range-invalid", `${taskPath}.schedFinish`, "dateRange", {}, { ids: [task.id] }));
       }
       arrayField(task, "occurrences", `${taskPath}.occurrences`, false, issues, (occurrence, occurrencePath) => {
-        if (fields(occurrence, occurrencePath, "version-occurrence", [dateField("occurrenceDate", true), dateField("schedStart", true), dateField("schedFinish", true)], issues)
+        if (fields(occurrence, occurrencePath, "version-occurrence", [dateField("occurrenceDate", true), dateField("schedStart", true), dateField("schedFinish", true), progressField, booleanField("skipped")], issues)
           && isISODate(occurrence.schedStart) && isISODate(occurrence.schedFinish) && occurrence.schedFinish < occurrence.schedStart) {
           issues.push(issue("error", "version-occurrence-date-range-invalid", `${occurrencePath}.schedFinish`, "dateRange"));
         }

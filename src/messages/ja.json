@@ -104,7 +104,8 @@
   },
   "mermaid": {
     "title": "プロジェクトスケジュール",
-    "untitled": "（無題）"
+    "untitled": "（無題）",
+    "skippedLabel": "スキップ"
   },
   "sprintConflicts": {
     "title": "スプリントとの矛盾（{count}件）",
@@ -125,7 +126,8 @@
       "fixed-milestone-overrun": "固定期日の超過",
       "recurrence-truncated": "繰り返し計算の上限",
       "invalid-recurrence": "繰り返し設定の不備",
-      "recurrence-empty": "期間内の発生なし"
+      "recurrence-empty": "期間内の発生なし",
+      "predecessor-occurrence-skipped": "スキップされた先行タスク"
     },
     "dialogTitle": "依存関係の矛盾（{count}件）",
     "dialogDescription": "日程は自動では修正されません。開始日との矛盾は「自動スケジューリング実行」で解消できます。循環参照・存在しない先行タスクは、先行タスク欄を修正してください。項目をクリックすると該当タスクを表示します。",
@@ -147,7 +149,8 @@
       "recurrenceTruncated": "繰り返し計算は{limit}回または3,660日で打ち切られました。{calculationEndDate, date, ymd}までに{occurrenceCount}回を生成しました。それ以降は含まれません。計算期間を短くしてください。",
       "invalidRecurrence": "この繰り返しタスクの設定に不備があります。開始日・繰り返しルール・計算期間を確認してください。",
       "occurrenceContext": "元の予定日 {occurrenceDate, date, short} の回: {reason}",
-      "recurrenceEmpty": "{origin, date, ymd}〜{calculationEndDate, date, ymd}の期間内に発生する回がありません。曜日・月内の日付・計算期間を確認してください。"
+      "recurrenceEmpty": "{origin, date, ymd}〜{calculationEndDate, date, ymd}の期間内に発生する回がありません。曜日・月内の日付・計算期間を確認してください。",
+      "predecessorSkipped": "先行タスク「{predName}」にスキップされた回があるため、この依存条件は未達成です。"
     },
     "tooltipLine": "{label}: {message}"
   },
@@ -475,7 +478,7 @@
     "dependencySubject": "「{name}」: {reason}",
     "recurrence": "繰り返し条件が正しくありません: {field}。",
     "recurrenceLeaf": "繰り返しは通常の末端タスクだけに設定できます。",
-    "recurrenceOverride": "個別の日程修正が正しくありません: {field}。"
+    "recurrenceOverride": "個別の修正が正しくありません: {field}。"
   },
   "projectName": {
     "label": "プロジェクト名",
@@ -551,7 +554,7 @@
     "barLabel": "{name}：元の発生日 {date}、{start}から{finish}。{status}。開くとこの回を編集できます。",
     "scheduled": "予定どおりの回",
     "networkCount": "繰り返し：{count}回",
-    "resourceNote": "繰り返しタスクは、保存済み計算期間内の各回の負荷を土日・祝日も含めて集計します。",
+    "resourceNote": "繰り返しタスクは、保存済みの計算対象期間内でスキップ以外の各回の負荷を含みます（土日祝日を含む固定暦日）。",
     "errors": {
       "startRequired": "完全で有効なシリーズ開始日を入力してください。",
       "intervalInvalid": "繰り返し間隔には1〜365の整数を入力してください。",
@@ -561,13 +564,32 @@
       "occurrenceDatesInvalid": "完全な開始日・終了日を入力してください。終了日は開始日以降にしてください。",
       "dependenciesInvalid": "先行タスクの日付・書式・WBS番号に誤りがあります。変更は保存されていません。",
       "spanInvalid": "各回の期間は3,660日以内にしてください。工数または日付の範囲を短くしてください。",
-      "moveTooFar": "各回の開始日は元の発生日から3,660日以内にしてください。"
+      "moveTooFar": "各回の開始日は元の発生日から3,660日以内にしてください。",
+      "progressInvalid": "0〜100で入力してください。"
     },
     "safetyBounds": "安全上限：間隔1〜365、各回と計算期間は3,660日以内、1シリーズ2,000回まで。",
     "inheritedDeps": "シリーズの先行タスクを引き継ぐ",
     "customDeps": "この回だけの先行タスク",
     "useSeriesDeps": "シリーズの先行タスクに戻す",
     "baselineOccurrence": "比較元の回（元の発生日：{date}）",
-    "reservationName": "{name}（元の発生日：{date}）"
+    "reservationName": "{name}（元の発生日：{date}）",
+    "occurrenceProgress": "各回の進捗",
+    "selected": "選択中",
+    "selectedOccurrence": "選択した回：{date}",
+    "editDates": "日程を編集",
+    "originalDate": "元の予定日：{date}",
+    "dateColumn": "開催日",
+    "actionsColumn": "操作",
+    "progressFor": "{date}の進捗",
+    "skipped": "スキップ",
+    "skip": "スキップ",
+    "restore": "戻す",
+    "markComplete": "完了にする",
+    "completed": "完了",
+    "skipNote": "スキップした回は保存され、「戻す」で元の進捗に戻ります。日程と依存関係は残し、リソース負荷から除外します。",
+    "aggregateProgress": "対象期間内の平均（スキップ除外）",
+    "aggregateNote": "保存済みの計算対象期間内で、スキップ以外の回を平均します。期間を延長すると平均が変わる場合があります。対象がない場合は完了とせず「—」で表示します。",
+    "progressStatus": "進捗 {progress}%",
+    "skippedTooltip": "スキップ：進捗集計・リソース負荷から除外しています。日程と依存関係は保持しています。"
   }
 }

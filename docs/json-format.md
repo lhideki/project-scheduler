@@ -55,7 +55,7 @@ WBS上のタスクです。階層は parentId で表現します。
 | `assigneeId` | `string` \| `null` | 任意 | 担当者ID |
 | `sprintIds` | `string[]` | 任意 | 紐付けるスプリントID一覧 |
 | `predecessors` | `dependency[]` | 任意 | 先行タスク一覧 |
-| `progress` | `number` | 任意 | 進捗率（0〜100） |
+| `progress` | `number` | 任意 | 進捗率（0〜100）。繰り返しでは個別進捗がない既存・新規の回の基準値。画面のシリーズ集計値では上書きしません。 |
 | `milestone` | `boolean` | 任意 | マイルストーンかどうか |
 | `milestoneMode` | `flexible` \| `fixed` | 任意 | 柔軟/固定モード |
 | `fixedDate` | `string` | 任意 | 固定マイルストーンの日付（YYYY-MM-DD） |
@@ -83,6 +83,8 @@ WBS上のタスクです。階層は parentId で表現します。
 
 | フィールド | 型 | 必須 | 説明 |
 | --- | --- | --- | --- |
+| `progress` | `number` | 任意 | この回のみの進捗率（0〜100）。省略時は保存済みtask.progressを引き継ぎます。 |
+| `skipped` | `boolean` | 任意 | trueならこの回をスキップし、工数・進捗集計から除外します。進捗・日程・依存関係は保持します。省略時はfalse。 |
 | `startDate` | `string` | 任意 | この回のみの固定開始日 |
 | `endDate` | `string` | 任意 | この回のみの固定終了日（開始日以上、両端を含む、最大3,660暦日） |
 | `predecessors` | `dependency[]` | 任意 | この回の先行タスク。省略時はシリーズ共通、指定時は共通設定を置き換えます。空配列は依存なし。 |
@@ -167,6 +169,8 @@ WBS上のタスクです。階層は parentId で表現します。
 | `occurrenceDate` | `string` | 必須 | 識別用の元の予定日 |
 | `schedStart` | `string` | 必須 | 保存時点の開始日 |
 | `schedFinish` | `string` | 必須 | 保存時点の終了日 |
+| `progress` | `number` | 任意 | 保存時点の各回の実効進捗率。旧スナップショットでは省略可。 |
+| `skipped` | `boolean` | 任意 | 保存時点のスキップ状態。旧スナップショットでは省略可。 |
 
 ## calendarExceptions の要素
 

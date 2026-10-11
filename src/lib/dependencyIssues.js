@@ -22,6 +22,7 @@ export const DEPENDENCY_ISSUE_CODES = Object.freeze({
   cycle: "dependency-cycle",
   self: "self-dependency",
   missing: "predecessor-missing",
+  skipped: "predecessor-occurrence-skipped",
   violation: "dependency-violation",
   overrun: "fixed-milestone-overrun",
   truncated: "recurrence-truncated",
@@ -39,6 +40,7 @@ const CODE_ORDER = [
   DEPENDENCY_ISSUE_CODES.cycle,
   DEPENDENCY_ISSUE_CODES.self,
   DEPENDENCY_ISSUE_CODES.missing,
+  DEPENDENCY_ISSUE_CODES.skipped,
   DEPENDENCY_ISSUE_CODES.violation,
   DEPENDENCY_ISSUE_CODES.overrun,
   DEPENDENCY_ISSUE_CODES.truncated,
@@ -48,7 +50,7 @@ const CODE_ORDER = [
 
 /**
  * @typedef {Object} DependencyIssue
- * @property {"dependency-cycle"|"self-dependency"|"predecessor-missing"|"dependency-violation"|"fixed-milestone-overrun"} code
+ * @property {"dependency-cycle"|"self-dependency"|"predecessor-missing"|"predecessor-occurrence-skipped"|"dependency-violation"|"fixed-milestone-overrun"} code
  * @property {"error"|"warning"} severity - 循環（自己依存を含む）・存在しない先行は error、日程の矛盾は warning
  * @property {string[]} ids - 警告を表示するタスクのID（循環はその循環に含まれる全タスク、それ以外は1件）
  * @property {Object} params - 表示用メッセージのパラメータ（src/lib/i18n.js の formatDependencyIssueMessage が使う。
@@ -56,6 +58,7 @@ const CODE_ORDER = [
  *   - dependency-cycle: {route: {id, name}[], memberEdges: {childId, childName, parentId, parentName}[]}
  *   - self-dependency: {}
  *   - predecessor-missing: {predecessorId}
+ *   - predecessor-occurrence-skipped: {predName, skippedOccurrenceCount}（特定回またはシリーズ内のスキップが未達成）
  *   - dependency-violation: {side: "start"|"finish", predName, label, required, actual}
  *     （FS/SS は開始日、FF/SF は終了日で条件を説明する。required・actual は side 側の日付）
  *   - fixed-milestone-overrun: {predName, earliest, fixedDate}（先行から求めた最早日が超過）
@@ -400,6 +403,24 @@ export function detectDependencyIssues(tasks, schedule = null, cal = null) {
       predecessorId,
       params: { predecessorId: predecessorOccurrenceDate ? `${predecessorSeriesId} [${predecessorOccurrenceDate}]` : predecessorId,
         ...(predecessorOccurrenceDate ? { predecessorSeriesId, predecessorOccurrenceDate } : {}) },
+    });
+  });
+
+  // Skipped occurrences still own their dates and graph edges, but they are not
+  // completed predecessors. This also applies to references to their complete
+  // series. Report independently of timing/progress so a satisfied date or a
+  // 100% active-occurrence aggregate cannot silently hide the unmet work.
+  list.forEach(task => {
+    (task.predecessors || []).forEach(dep => {
+      const predecessor = byId[dep.id];
+      const skippedOccurrenceCount = isOccurrenceTask(predecessor) && predecessor.skipped ? 1
+        : isRecurringSummaryTask(predecessor) ? predecessor.recurrenceMetadata.skippedOccurrenceCount : 0;
+      if (!skippedOccurrenceCount) return;
+      issues.push({
+        code: DEPENDENCY_ISSUE_CODES.skipped, severity: "warning", blocking: false,
+        ids: [task.id], predecessorId: dep.id,
+        params: { predName: taskName(predecessor, dep.id), skippedOccurrenceCount },
+      });
     });
   });
 

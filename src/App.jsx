@@ -551,6 +551,7 @@ export default function App() {
   }
   async function copyMermaidGantt() {
     const text = generateMermaidGantt(tasks, schedule, {
+      skippedLabel: t("mermaid.skippedLabel"),
       title: t("mermaid.title"), untitled: t("mermaid.untitled"),
     });
     try {

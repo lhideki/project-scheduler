@@ -50,7 +50,11 @@ export function taskCellText(task, column, context) {
       return resources.find(r => r.id === task.assigneeId)?.name || "";
     }
     case "sprint": return sprints.filter(sp => (task.sprintIds || []).includes(sp.id)).map(sp => sp.name).join(", ");
-    case "progress": return String(task.progress || 0);
+    case "progress": {
+      const result = schedule?.get(task.id);
+      if (task.recurrence && result) return result.recurrenceMetadata?.activeOccurrenceCount === 0 ? "—" : String(result.progress || 0);
+      return String(task.progress || 0);
+    }
     case "predecessors": return formatDeps(task.predecessors, idToNo);
     default: return "";
   }
@@ -96,6 +100,7 @@ export function taskCellPatch(task, column, rawText, context) {
       return { ok: true, patch: { sprintIds: [...new Set(resolved)] } };
     }
     case "progress": {
+      if (task.recurrence) return { ok: false, patch: {}, error: "protected-recurrence" };
       if (hasChildren) return { ok: false, patch: {} };
       const normalized = text.toLowerCase();
       if (task.milestone && DONE_TOKENS.includes(normalized)) return { ok: true, patch: { progress: 100 } };
@@ -147,7 +152,7 @@ export function copiedTaskRowPatch(source, target, targetHasChildren, sourceHasC
   if (targetHasChildren || sourceHasChildren) return patch;
 
   patch.sprintIds = [...(source.sprintIds || [])];
-  patch.progress = source.progress || 0;
+  if (!target.recurrence) patch.progress = source.progress || 0;
   const copiedStart = source.milestone && source.milestoneMode === "fixed" ? source.fixedDate : source.startDate;
   if (target.milestone) {
     patch.startDate = copiedStart || "";

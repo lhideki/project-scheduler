@@ -262,7 +262,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
     const lines = [`${t.wbsNo ? `${t.wbsNo} ` : ""}${t.name}`];
     if (s.occurrenceDate) {
       lines.push(tr("recurrence.occurrenceIdentity", { date: s.occurrenceDate }));
-      lines.push(tr(t.occurrenceOverrides?.[s.occurrenceDate] ? "recurrence.overridden" : "recurrence.scheduled"));
+      lines.push(tr(s.skipped ? "recurrence.skipped" : t.occurrenceOverrides?.[s.occurrenceDate] ? "recurrence.overridden" : "recurrence.scheduled"));
       lines.push(tr("recurrence.fixedDatesNote"));
     }
     lines.push(tr("gantt.tooltip.period", { start: fmtDate(s.schedStart), finish: fmtDate(s.schedFinish) }));
@@ -271,7 +271,8 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
       lines.push((t.progress || 0) >= 100 ? tr("taskDetail.completed") : tr("common.notDone"));
       if (t.assigneeId) lines.push(tr("gantt.tooltip.assignee", { name: resourceNameById.get(t.assigneeId) || "" }));
     } else {
-      lines.push(tr("gantt.tooltip.effortProgress", { duration: String(t.duration ?? 0), progress: Math.max(0, Math.min(100, t.progress || 0)) }));
+      if (s.skipped) lines.push(tr("recurrence.skippedTooltip"));
+      else lines.push(tr("gantt.tooltip.effortProgress", { duration: String(t.duration ?? 0), progress: Math.max(0, Math.min(100, s.occurrenceDate ? s.progress || 0 : t.progress || 0)) }));
       if (t.assigneeId) lines.push(tr("gantt.tooltip.assignee", { name: resourceNameById.get(t.assigneeId) || "" }));
       lines.push(...allocationTooltipLines(t, s.allocation));
       if (nonWorkdaySegments(cal, s.schedStart, s.schedFinish).length > 0) lines.push(tr("gantt.tooltip.includesNonWorkdays"));
@@ -539,6 +540,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
     }
     const snapshot = JSON.parse(JSON.stringify(task));
     snapshot.startDate = taskCellText(task, "startDate", context);
+    if (isRecurringTask(task)) snapshot.progress = Number(taskCellText(task, "progress", context)) || 0;
     return {
       kind: "row",
       text: taskRowText(task, context),
@@ -1280,7 +1282,16 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                   )}
                 </div>
                 <div style={{ width: colWidths.progress }} className="px-1">
-                  {!isSummary && !t.hasChildren ? (
+                  {isRecurringTask(t) ? (
+                    <div className="flex items-center gap-0.5">
+                      <input type="text" readOnly value={sched?.recurrenceMetadata?.activeOccurrenceCount ? String(sched.progress) : "—"}
+                        title={tr("recurrence.aggregateProgress") + ". " + tr("recurrence.aggregateNote")}
+                        ref={cellRefCallback(t.id, "progress")} {...cellInputProps(t.id, "progress")}
+                        onClick={() => setDetailId(t.id)} onKeyDown={e => handleGridCellKeyDown(e, t.id, "progress")}
+                        className="bg-transparent outline-hidden w-full rounded-sm font-mono text-[11px] text-slate-500 focus:bg-indigo-100 focus:ring-1 focus:ring-indigo-300" />
+                      {!!sched?.recurrenceMetadata?.activeOccurrenceCount && <span className="text-[10px] text-slate-400 shrink-0">%</span>}
+                    </div>
+                  ) : !isSummary && !t.hasChildren ? (
                     t.milestone ? (
                       <input type="checkbox" checked={(t.progress || 0) >= 100}
                         title={tr("wbs.row.doneCheckTitle")}
@@ -1486,9 +1497,12 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                       if (!occurrence.schedStart || !occurrence.schedFinish) return null;
                       const startX = xOf(occurrence.schedStart);
                       const width = Math.max(2, xOf(occurrence.schedFinish) + dayWidth - startX);
-                      return <rect key={occurrence.occurrenceDate} data-baseline-occurrence={occurrence.occurrenceDate} x={startX} y={baseY + 4} width={width} height={Math.max(4, ROW_H_BASE - 8)} rx={3} fill="#94A3B8" opacity={0.85}>
-                        <title>{tr("recurrence.baselineOccurrence", { date: occurrence.occurrenceDate })}</title>
-                      </rect>;
+                      return <g key={occurrence.occurrenceDate}>
+                        <rect data-baseline-occurrence={occurrence.occurrenceDate} x={startX} y={baseY + 4} width={width} height={Math.max(4, ROW_H_BASE - 8)} rx={3} fill="#94A3B8" opacity={0.85}>
+                          <title>{tr("recurrence.baselineOccurrence", { date: occurrence.occurrenceDate }) + (occurrence.skipped ? ` (${tr("recurrence.skipped")})` : "")}</title>
+                        </rect>
+                        {occurrence.skipped && <rect x={startX} y={baseY + 4} width={width} height={Math.max(4, ROW_H_BASE - 8)} rx={3} fill="url(#ganttSkippedHatch)" />}
+                      </g>;
                     })}</g>;
                     const bx1 = xOf(baselineRow.schedStart);
                     const bx2 = xOf(baselineRow.schedFinish) + dayWidth;
@@ -1522,11 +1536,13 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                       {(s.occurrences || []).map(o => {
                         if (!o.schedStart || !o.schedFinish) return null;
                         const ox = xOf(o.schedStart), ow = Math.max(3, xOf(o.schedFinish) + dayWidth - ox);
-                        const overridden = !!t.occurrenceOverrides?.[o.occurrenceDate];
-                        const occurrenceColor = showCritical && o.critical ? "#DC2626" : overridden ? "#14B8A6" : "#6366F1";
-                        const label = tr("recurrence.barLabel", { name: t.name, date: o.occurrenceDate, start: fmtDate(o.schedStart), finish: fmtDate(o.schedFinish), status: tr(overridden ? "recurrence.overridden" : "recurrence.scheduled") });
-                        const progress = Math.max(0, Math.min(100, t.progress || 0));
-                        return <g key={o.id} data-occurrence-date={o.occurrenceDate} data-series-id={t.id} data-overridden={overridden || undefined}
+                        const overridden = ["startDate", "endDate", "predecessors"].some(field => Object.hasOwn(t.occurrenceOverrides?.[o.occurrenceDate] || {}, field));
+                        const skipped = o.skipped === true;
+                        const progress = Math.max(0, Math.min(100, o.progress || 0));
+                        const occurrenceColor = skipped ? "#94A3B8" : progress >= 100 ? "#059669" : showCritical && o.critical ? "#DC2626" : overridden ? "#14B8A6" : "#6366F1";
+                        const status = skipped ? tr("recurrence.skipped") : tr("recurrence.progressStatus", { progress });
+                        const label = tr("recurrence.barLabel", { name: t.name, date: o.occurrenceDate, start: fmtDate(o.schedStart), finish: fmtDate(o.schedFinish), status });
+                        return <g key={o.id} data-occurrence-date={o.occurrenceDate} data-series-id={t.id} data-overridden={overridden || undefined} data-skipped={skipped || undefined} data-progress={skipped ? undefined : progress}
                           tabIndex={0} role="button" aria-haspopup="dialog" aria-label={label} className="focus-visible:outline-2 focus-visible:outline-indigo-600" style={{ cursor: "pointer" }}
                           onClick={() => openOccurrence(t.id, o.occurrenceDate)}
                           onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openOccurrence(t.id, o.occurrenceDate); } }}
@@ -1535,8 +1551,12 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                           onFocus={e => showBarTooltipOnFocus(e, t.id, o.occurrenceDate)} onBlur={hideBarTooltip}>
                           <title>{label}</title>
                           <rect x={ox} y={y + 6} width={ow} height={ROW_H - 12} rx={4} fill={occurrenceColor} opacity={0.45} />
-                          {progress > 0 && <rect x={ox} y={y + 6} width={ow * progress / 100} height={ROW_H - 12} rx={4} fill={occurrenceColor} opacity={0.95} />}
-                          {overridden && <rect x={ox} y={y + 6} width={ow} height={ROW_H - 12} rx={4} fill="none" stroke={occurrenceColor} strokeWidth={2} strokeDasharray="3,2" />}
+                          {!skipped && progress > 0 && <rect data-occurrence-progress-fill="true" x={ox} y={y + 6} width={ow * progress / 100} height={ROW_H - 12} rx={4} fill={occurrenceColor} opacity={0.95} />}
+                          {skipped && <>
+                            <rect data-occurrence-skipped-mark="true" x={ox} y={y + 6} width={ow} height={ROW_H - 12} rx={4} fill="url(#ganttSkippedHatch)" stroke="#64748B" strokeWidth={1} />
+                            {ow >= 28 && <text x={ox + ow / 2} y={y + ROW_H / 2 + 3} textAnchor="middle" fontSize={9} fill="#334155" paintOrder="stroke" stroke="#E2E8F0" strokeWidth={2} {...(ow < 52 ? { textLength: ow - 6, lengthAdjust: "spacingAndGlyphs" } : {})}>{tr("recurrence.skipped")}</text>}
+                          </>}
+                          {overridden && !skipped && <rect x={ox} y={y + 6} width={ow} height={ROW_H - 12} rx={4} fill="none" stroke={occurrenceColor} strokeWidth={2} strokeDasharray="3,2" />}
                           {issueOutline && <rect x={ox - 2} y={y + 3} width={ow + 4} height={ROW_H - 6} rx={5} {...issueOutline} />}
                         </g>;
                       })}
@@ -1641,6 +1661,9 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
                   </marker>
                   {/* 非稼働日の網掛け模様。斜めの白線を重ねることで、バーの色（通常/クリティカル/サマリー）が
                       変わっても一貫して視認できるようにする。透明度は模様を使う側（<rect opacity>）で調整する。 */}
+                  <pattern id="ganttSkippedHatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                    <line x1="0" y1="0" x2="0" y2="6" stroke="#64748B" strokeWidth="1.2" />
+                  </pattern>
                   <pattern id="ganttNonWorkdayHatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
                     <line x1="0" y1="0" x2="0" y2="6" stroke="#FFFFFF" strokeWidth="3" />
                   </pattern>

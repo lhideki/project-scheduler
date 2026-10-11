@@ -15,6 +15,7 @@ export function buildVersionSnapshot(data, schedule, name) {
       progress: typeof result.progress === "number" ? result.progress : 0,
       ...(result.occurrences ? { occurrences: result.occurrences.map(occurrence => ({
         occurrenceDate: occurrence.occurrenceDate, schedStart: occurrence.schedStart, schedFinish: occurrence.schedFinish,
+        progress: typeof occurrence.progress === "number" ? occurrence.progress : (task.progress || 0), skipped: occurrence.skipped === true,
       })) } : {}),
     };
   });

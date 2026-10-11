@@ -39,14 +39,14 @@ export function TaskDetailModal({ task, schedule, tasks, resources, sprints, idT
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-backdrop p-4" style={viewportStyle} onClick={onClose}>
-      <div role="dialog" aria-modal="true" aria-label={task.name} className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-full overflow-y-auto" onClick={e => e.stopPropagation()}
+      <div role="dialog" aria-modal="true" aria-label={task.name} className={"bg-white rounded-xl shadow-2xl w-full max-h-full overflow-y-auto " + (recurring ? "max-w-2xl" : "max-w-lg")} onClick={e => e.stopPropagation()}
         onKeyDown={e => {
           if (e.key === "Enter" && e.target.tagName === "INPUT" && !e.nativeEvent.isComposing && e.keyCode !== 229) {
             e.preventDefault();
             e.target.blur();
           }
         }}>
-        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 sticky top-0 bg-white rounded-t-xl">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 sticky top-0 z-20 bg-white rounded-t-xl">
           <div className="flex items-center gap-2 text-xs text-slate-400 font-mono">
             <span>WBS {task.wbsNo}</span>
             {task.milestone && <Diamond size={11} className="text-amber-500" fill="#F59E0B" />}
@@ -153,10 +153,12 @@ export function TaskDetailModal({ task, schedule, tasks, resources, sprints, idT
 
           <div>
             <label className="block text-[11px] text-slate-500 mb-1">
-              {task.milestone ? t("common.done") : t("taskDetail.progress")}
+              {recurring ? t("recurrence.aggregateProgress") : task.milestone ? t("common.done") : t("taskDetail.progress")}
               {isSummary && <span className="text-slate-400 font-normal">{t("taskDetail.progressSummaryNote")}</span>}
             </label>
-            {isSummary ? (
+            {recurring ? (
+              <div><p className="text-sm font-mono text-slate-600">{sched?.recurrenceMetadata?.activeOccurrenceCount ? `${sched.progress}%` : "—"}</p><p className="mt-1 text-[11px] text-slate-500">{t("recurrence.aggregateNote")}</p></div>
+            ) : isSummary ? (
               <div className="w-full border border-slate-100 bg-slate-50 rounded-md px-2.5 py-1.5 text-sm font-mono text-slate-500">{sched?.progress ?? 0}%</div>
             ) : task.milestone ? (
               <label className="flex items-center gap-2 text-sm text-slate-600">

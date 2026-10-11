@@ -442,6 +442,8 @@ function generateOccurrences(task) {
       milestone: false,
       milestoneMode: void 0,
       fixedDate: void 0,
+      progress: typeof override.progress === "number" ? override.progress : task.progress || 0,
+      skipped: override.skipped === true,
       predecessors: (Array.isArray(override.predecessors) ? override.predecessors : task.predecessors || []).map((d) => ({ ...d }))
     });
     return true;
@@ -471,7 +473,7 @@ function generateOccurrences(task) {
   return result;
 }
 function occurrenceLoads(task) {
-  if (!(task.duration > 0) || !isISODate(task.startDate) || !isISODate(task.endDate)) return [];
+  if (task.skipped || !(task.duration > 0) || !isISODate(task.startDate) || !isISODate(task.endDate)) return [];
   const days = Math.round((Date.parse(task.endDate) - Date.parse(task.startDate)) / DAY_MS) + 1;
   if (days <= 0 || days > MAX_RECURRENCE_SPAN_DAYS) return [];
   const units = Math.max(1, Math.round(task.duration * ALLOCATION_UNITS_PER_DAY));
@@ -492,7 +494,13 @@ function expandRecurringTasks(tasks = []) {
       metadata.invalidReason = "occurrence-id-collision";
       occurrences = [];
     }
-    expanded.push({ ...task, isRecurringSummary: true, isOccurrence: false, [INTERNAL_KIND]: "series", recurrencePredecessors: task.predecessors || [], predecessors: [], recurrenceMetadata: { ...metadata, occurrenceCount: occurrences.length } });
+    const skippedOccurrenceCount = occurrences.filter((occurrence) => occurrence.skipped).length;
+    expanded.push({ ...task, isRecurringSummary: true, isOccurrence: false, [INTERNAL_KIND]: "series", recurrencePredecessors: task.predecessors || [], predecessors: [], recurrenceMetadata: {
+      ...metadata,
+      occurrenceCount: occurrences.length,
+      skippedOccurrenceCount,
+      activeOccurrenceCount: occurrences.length - skippedOccurrenceCount
+    } });
     expanded.push(...occurrences);
   }
   return expanded.map((task) => {
@@ -763,7 +771,7 @@ function runCPM(tasks, cal, projectStart, sprints, opts = {}) {
       schedStart: useBackward ? LS[id] : ES[id],
       schedFinish: useBackward ? LF[id] : EF[id],
       progress: typeof t.progress === "number" ? t.progress : 0,
-      ...isOccurrenceTask(t) ? { id: t.id, seriesId: t.seriesId, occurrenceDate: t.occurrenceDate, isOccurrence: true, startDate: t.startDate, endDate: t.endDate } : {}
+      ...isOccurrenceTask(t) ? { id: t.id, seriesId: t.seriesId, occurrenceDate: t.occurrenceDate, isOccurrence: true, startDate: t.startDate, endDate: t.endDate, skipped: t.skipped } : {}
     });
   });
   rollupSummaries(tasks, result);
@@ -776,6 +784,8 @@ function rollupSummaries(tasks, result) {
   const summaries = tasks.filter((t) => summaryIds.has(t.id));
   function rollup(id) {
     const children = childrenById.get(id) || [];
+    const task = byId.get(id);
+    const recurring = isRecurringSummaryTask(task);
     let min = null, max = null, anyCritical = false, progressSum = 0, progressCount = 0;
     children.forEach((c) => {
       const r2 = summaryIds.has(c.id) ? rollup(c.id) : result.get(c.id);
@@ -783,15 +793,14 @@ function rollupSummaries(tasks, result) {
       if (min === null || r2.schedStart < min) min = r2.schedStart;
       if (max === null || r2.schedFinish > max) max = r2.schedFinish;
       if (r2.critical) anyCritical = true;
-      if (typeof r2.progress === "number") {
+      if (typeof r2.progress === "number" && !(recurring && c.skipped)) {
         progressSum += r2.progress;
         progressCount++;
       }
     });
     const progress = progressCount ? Math.round(progressSum / progressCount) : 0;
     const r = { ES: min, EF: max, LS: min, LF: max, float: 0, critical: anyCritical, governed: false, schedStart: min, schedFinish: max, isSummary: true, progress };
-    const task = byId.get(id);
-    if (isRecurringSummaryTask(task)) {
+    if (recurring) {
       r.occurrences = children.filter((t) => isOccurrenceTask(t)).map((t) => ({ ...t, ...result.get(t.id) }));
       r.recurrenceMetadata = task.recurrenceMetadata;
     }
@@ -1078,7 +1087,9 @@ function buildVersionSnapshot(data, schedule, name) {
       ...result.occurrences ? { occurrences: result.occurrences.map((occurrence) => ({
         occurrenceDate: occurrence.occurrenceDate,
         schedStart: occurrence.schedStart,
-        schedFinish: occurrence.schedFinish
+        schedFinish: occurrence.schedFinish,
+        progress: typeof occurrence.progress === "number" ? occurrence.progress : task.progress || 0,
+        skipped: occurrence.skipped === true
       })) } : {}
     };
   });
@@ -1164,6 +1175,7 @@ var DEPENDENCY_ISSUE_CODES = Object.freeze({
   cycle: "dependency-cycle",
   self: "self-dependency",
   missing: "predecessor-missing",
+  skipped: "predecessor-occurrence-skipped",
   violation: "dependency-violation",
   overrun: "fixed-milestone-overrun",
   truncated: "recurrence-truncated",
@@ -1178,6 +1190,7 @@ var CODE_ORDER = [
   DEPENDENCY_ISSUE_CODES.cycle,
   DEPENDENCY_ISSUE_CODES.self,
   DEPENDENCY_ISSUE_CODES.missing,
+  DEPENDENCY_ISSUE_CODES.skipped,
   DEPENDENCY_ISSUE_CODES.violation,
   DEPENDENCY_ISSUE_CODES.overrun,
   DEPENDENCY_ISSUE_CODES.truncated,
@@ -1460,6 +1473,21 @@ function detectDependencyIssues(tasks, schedule = null, cal = null) {
         predecessorId: predecessorOccurrenceDate ? `${predecessorSeriesId} [${predecessorOccurrenceDate}]` : predecessorId,
         ...predecessorOccurrenceDate ? { predecessorSeriesId, predecessorOccurrenceDate } : {}
       }
+    });
+  });
+  list.forEach((task) => {
+    (task.predecessors || []).forEach((dep) => {
+      const predecessor = byId[dep.id];
+      const skippedOccurrenceCount = isOccurrenceTask(predecessor) && predecessor.skipped ? 1 : isRecurringSummaryTask(predecessor) ? predecessor.recurrenceMetadata.skippedOccurrenceCount : 0;
+      if (!skippedOccurrenceCount) return;
+      issues.push({
+        code: DEPENDENCY_ISSUE_CODES.skipped,
+        severity: "warning",
+        blocking: false,
+        ids: [task.id],
+        predecessorId: dep.id,
+        params: { predName: taskName(predecessor, dep.id), skippedOccurrenceCount }
+      });
     });
   });
   if (schedule && cal) {
@@ -4375,7 +4403,8 @@ var ja_default = {
   },
   mermaid: {
     title: "\u30D7\u30ED\u30B8\u30A7\u30AF\u30C8\u30B9\u30B1\u30B8\u30E5\u30FC\u30EB",
-    untitled: "\uFF08\u7121\u984C\uFF09"
+    untitled: "\uFF08\u7121\u984C\uFF09",
+    skippedLabel: "\u30B9\u30AD\u30C3\u30D7"
   },
   sprintConflicts: {
     title: "\u30B9\u30D7\u30EA\u30F3\u30C8\u3068\u306E\u77DB\u76FE\uFF08{count}\u4EF6\uFF09",
@@ -4396,7 +4425,8 @@ var ja_default = {
       "fixed-milestone-overrun": "\u56FA\u5B9A\u671F\u65E5\u306E\u8D85\u904E",
       "recurrence-truncated": "\u7E70\u308A\u8FD4\u3057\u8A08\u7B97\u306E\u4E0A\u9650",
       "invalid-recurrence": "\u7E70\u308A\u8FD4\u3057\u8A2D\u5B9A\u306E\u4E0D\u5099",
-      "recurrence-empty": "\u671F\u9593\u5185\u306E\u767A\u751F\u306A\u3057"
+      "recurrence-empty": "\u671F\u9593\u5185\u306E\u767A\u751F\u306A\u3057",
+      "predecessor-occurrence-skipped": "\u30B9\u30AD\u30C3\u30D7\u3055\u308C\u305F\u5148\u884C\u30BF\u30B9\u30AF"
     },
     dialogTitle: "\u4F9D\u5B58\u95A2\u4FC2\u306E\u77DB\u76FE\uFF08{count}\u4EF6\uFF09",
     dialogDescription: "\u65E5\u7A0B\u306F\u81EA\u52D5\u3067\u306F\u4FEE\u6B63\u3055\u308C\u307E\u305B\u3093\u3002\u958B\u59CB\u65E5\u3068\u306E\u77DB\u76FE\u306F\u300C\u81EA\u52D5\u30B9\u30B1\u30B8\u30E5\u30FC\u30EA\u30F3\u30B0\u5B9F\u884C\u300D\u3067\u89E3\u6D88\u3067\u304D\u307E\u3059\u3002\u5FAA\u74B0\u53C2\u7167\u30FB\u5B58\u5728\u3057\u306A\u3044\u5148\u884C\u30BF\u30B9\u30AF\u306F\u3001\u5148\u884C\u30BF\u30B9\u30AF\u6B04\u3092\u4FEE\u6B63\u3057\u3066\u304F\u3060\u3055\u3044\u3002\u9805\u76EE\u3092\u30AF\u30EA\u30C3\u30AF\u3059\u308B\u3068\u8A72\u5F53\u30BF\u30B9\u30AF\u3092\u8868\u793A\u3057\u307E\u3059\u3002",
@@ -4418,7 +4448,8 @@ var ja_default = {
       recurrenceTruncated: "\u7E70\u308A\u8FD4\u3057\u8A08\u7B97\u306F{limit}\u56DE\u307E\u305F\u306F3,660\u65E5\u3067\u6253\u3061\u5207\u3089\u308C\u307E\u3057\u305F\u3002{calculationEndDate, date, ymd}\u307E\u3067\u306B{occurrenceCount}\u56DE\u3092\u751F\u6210\u3057\u307E\u3057\u305F\u3002\u305D\u308C\u4EE5\u964D\u306F\u542B\u307E\u308C\u307E\u305B\u3093\u3002\u8A08\u7B97\u671F\u9593\u3092\u77ED\u304F\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
       invalidRecurrence: "\u3053\u306E\u7E70\u308A\u8FD4\u3057\u30BF\u30B9\u30AF\u306E\u8A2D\u5B9A\u306B\u4E0D\u5099\u304C\u3042\u308A\u307E\u3059\u3002\u958B\u59CB\u65E5\u30FB\u7E70\u308A\u8FD4\u3057\u30EB\u30FC\u30EB\u30FB\u8A08\u7B97\u671F\u9593\u3092\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
       occurrenceContext: "\u5143\u306E\u4E88\u5B9A\u65E5 {occurrenceDate, date, short} \u306E\u56DE: {reason}",
-      recurrenceEmpty: "{origin, date, ymd}\u301C{calculationEndDate, date, ymd}\u306E\u671F\u9593\u5185\u306B\u767A\u751F\u3059\u308B\u56DE\u304C\u3042\u308A\u307E\u305B\u3093\u3002\u66DC\u65E5\u30FB\u6708\u5185\u306E\u65E5\u4ED8\u30FB\u8A08\u7B97\u671F\u9593\u3092\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044\u3002"
+      recurrenceEmpty: "{origin, date, ymd}\u301C{calculationEndDate, date, ymd}\u306E\u671F\u9593\u5185\u306B\u767A\u751F\u3059\u308B\u56DE\u304C\u3042\u308A\u307E\u305B\u3093\u3002\u66DC\u65E5\u30FB\u6708\u5185\u306E\u65E5\u4ED8\u30FB\u8A08\u7B97\u671F\u9593\u3092\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
+      predecessorSkipped: "\u5148\u884C\u30BF\u30B9\u30AF\u300C{predName}\u300D\u306B\u30B9\u30AD\u30C3\u30D7\u3055\u308C\u305F\u56DE\u304C\u3042\u308B\u305F\u3081\u3001\u3053\u306E\u4F9D\u5B58\u6761\u4EF6\u306F\u672A\u9054\u6210\u3067\u3059\u3002"
     },
     tooltipLine: "{label}: {message}"
   },
@@ -4746,7 +4777,7 @@ var ja_default = {
     dependencySubject: "\u300C{name}\u300D: {reason}",
     recurrence: "\u7E70\u308A\u8FD4\u3057\u6761\u4EF6\u304C\u6B63\u3057\u304F\u3042\u308A\u307E\u305B\u3093: {field}\u3002",
     recurrenceLeaf: "\u7E70\u308A\u8FD4\u3057\u306F\u901A\u5E38\u306E\u672B\u7AEF\u30BF\u30B9\u30AF\u3060\u3051\u306B\u8A2D\u5B9A\u3067\u304D\u307E\u3059\u3002",
-    recurrenceOverride: "\u500B\u5225\u306E\u65E5\u7A0B\u4FEE\u6B63\u304C\u6B63\u3057\u304F\u3042\u308A\u307E\u305B\u3093: {field}\u3002"
+    recurrenceOverride: "\u500B\u5225\u306E\u4FEE\u6B63\u304C\u6B63\u3057\u304F\u3042\u308A\u307E\u305B\u3093: {field}\u3002"
   },
   projectName: {
     label: "\u30D7\u30ED\u30B8\u30A7\u30AF\u30C8\u540D",
@@ -4822,7 +4853,7 @@ var ja_default = {
     barLabel: "{name}\uFF1A\u5143\u306E\u767A\u751F\u65E5 {date}\u3001{start}\u304B\u3089{finish}\u3002{status}\u3002\u958B\u304F\u3068\u3053\u306E\u56DE\u3092\u7DE8\u96C6\u3067\u304D\u307E\u3059\u3002",
     scheduled: "\u4E88\u5B9A\u3069\u304A\u308A\u306E\u56DE",
     networkCount: "\u7E70\u308A\u8FD4\u3057\uFF1A{count}\u56DE",
-    resourceNote: "\u7E70\u308A\u8FD4\u3057\u30BF\u30B9\u30AF\u306F\u3001\u4FDD\u5B58\u6E08\u307F\u8A08\u7B97\u671F\u9593\u5185\u306E\u5404\u56DE\u306E\u8CA0\u8377\u3092\u571F\u65E5\u30FB\u795D\u65E5\u3082\u542B\u3081\u3066\u96C6\u8A08\u3057\u307E\u3059\u3002",
+    resourceNote: "\u7E70\u308A\u8FD4\u3057\u30BF\u30B9\u30AF\u306F\u3001\u4FDD\u5B58\u6E08\u307F\u306E\u8A08\u7B97\u5BFE\u8C61\u671F\u9593\u5185\u3067\u30B9\u30AD\u30C3\u30D7\u4EE5\u5916\u306E\u5404\u56DE\u306E\u8CA0\u8377\u3092\u542B\u307F\u307E\u3059\uFF08\u571F\u65E5\u795D\u65E5\u3092\u542B\u3080\u56FA\u5B9A\u66A6\u65E5\uFF09\u3002",
     errors: {
       startRequired: "\u5B8C\u5168\u3067\u6709\u52B9\u306A\u30B7\u30EA\u30FC\u30BA\u958B\u59CB\u65E5\u3092\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
       intervalInvalid: "\u7E70\u308A\u8FD4\u3057\u9593\u9694\u306B\u306F1\u301C365\u306E\u6574\u6570\u3092\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
@@ -4832,14 +4863,33 @@ var ja_default = {
       occurrenceDatesInvalid: "\u5B8C\u5168\u306A\u958B\u59CB\u65E5\u30FB\u7D42\u4E86\u65E5\u3092\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044\u3002\u7D42\u4E86\u65E5\u306F\u958B\u59CB\u65E5\u4EE5\u964D\u306B\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
       dependenciesInvalid: "\u5148\u884C\u30BF\u30B9\u30AF\u306E\u65E5\u4ED8\u30FB\u66F8\u5F0F\u30FBWBS\u756A\u53F7\u306B\u8AA4\u308A\u304C\u3042\u308A\u307E\u3059\u3002\u5909\u66F4\u306F\u4FDD\u5B58\u3055\u308C\u3066\u3044\u307E\u305B\u3093\u3002",
       spanInvalid: "\u5404\u56DE\u306E\u671F\u9593\u306F3,660\u65E5\u4EE5\u5185\u306B\u3057\u3066\u304F\u3060\u3055\u3044\u3002\u5DE5\u6570\u307E\u305F\u306F\u65E5\u4ED8\u306E\u7BC4\u56F2\u3092\u77ED\u304F\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
-      moveTooFar: "\u5404\u56DE\u306E\u958B\u59CB\u65E5\u306F\u5143\u306E\u767A\u751F\u65E5\u304B\u30893,660\u65E5\u4EE5\u5185\u306B\u3057\u3066\u304F\u3060\u3055\u3044\u3002"
+      moveTooFar: "\u5404\u56DE\u306E\u958B\u59CB\u65E5\u306F\u5143\u306E\u767A\u751F\u65E5\u304B\u30893,660\u65E5\u4EE5\u5185\u306B\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
+      progressInvalid: "0\u301C100\u3067\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044\u3002"
     },
     safetyBounds: "\u5B89\u5168\u4E0A\u9650\uFF1A\u9593\u96941\u301C365\u3001\u5404\u56DE\u3068\u8A08\u7B97\u671F\u9593\u306F3,660\u65E5\u4EE5\u5185\u30011\u30B7\u30EA\u30FC\u30BA2,000\u56DE\u307E\u3067\u3002",
     inheritedDeps: "\u30B7\u30EA\u30FC\u30BA\u306E\u5148\u884C\u30BF\u30B9\u30AF\u3092\u5F15\u304D\u7D99\u3050",
     customDeps: "\u3053\u306E\u56DE\u3060\u3051\u306E\u5148\u884C\u30BF\u30B9\u30AF",
     useSeriesDeps: "\u30B7\u30EA\u30FC\u30BA\u306E\u5148\u884C\u30BF\u30B9\u30AF\u306B\u623B\u3059",
     baselineOccurrence: "\u6BD4\u8F03\u5143\u306E\u56DE\uFF08\u5143\u306E\u767A\u751F\u65E5\uFF1A{date}\uFF09",
-    reservationName: "{name}\uFF08\u5143\u306E\u767A\u751F\u65E5\uFF1A{date}\uFF09"
+    reservationName: "{name}\uFF08\u5143\u306E\u767A\u751F\u65E5\uFF1A{date}\uFF09",
+    occurrenceProgress: "\u5404\u56DE\u306E\u9032\u6357",
+    selected: "\u9078\u629E\u4E2D",
+    selectedOccurrence: "\u9078\u629E\u3057\u305F\u56DE\uFF1A{date}",
+    editDates: "\u65E5\u7A0B\u3092\u7DE8\u96C6",
+    originalDate: "\u5143\u306E\u4E88\u5B9A\u65E5\uFF1A{date}",
+    dateColumn: "\u958B\u50AC\u65E5",
+    actionsColumn: "\u64CD\u4F5C",
+    progressFor: "{date}\u306E\u9032\u6357",
+    skipped: "\u30B9\u30AD\u30C3\u30D7",
+    skip: "\u30B9\u30AD\u30C3\u30D7",
+    restore: "\u623B\u3059",
+    markComplete: "\u5B8C\u4E86\u306B\u3059\u308B",
+    completed: "\u5B8C\u4E86",
+    skipNote: "\u30B9\u30AD\u30C3\u30D7\u3057\u305F\u56DE\u306F\u4FDD\u5B58\u3055\u308C\u3001\u300C\u623B\u3059\u300D\u3067\u5143\u306E\u9032\u6357\u306B\u623B\u308A\u307E\u3059\u3002\u65E5\u7A0B\u3068\u4F9D\u5B58\u95A2\u4FC2\u306F\u6B8B\u3057\u3001\u30EA\u30BD\u30FC\u30B9\u8CA0\u8377\u304B\u3089\u9664\u5916\u3057\u307E\u3059\u3002",
+    aggregateProgress: "\u5BFE\u8C61\u671F\u9593\u5185\u306E\u5E73\u5747\uFF08\u30B9\u30AD\u30C3\u30D7\u9664\u5916\uFF09",
+    aggregateNote: "\u4FDD\u5B58\u6E08\u307F\u306E\u8A08\u7B97\u5BFE\u8C61\u671F\u9593\u5185\u3067\u3001\u30B9\u30AD\u30C3\u30D7\u4EE5\u5916\u306E\u56DE\u3092\u5E73\u5747\u3057\u307E\u3059\u3002\u671F\u9593\u3092\u5EF6\u9577\u3059\u308B\u3068\u5E73\u5747\u304C\u5909\u308F\u308B\u5834\u5408\u304C\u3042\u308A\u307E\u3059\u3002\u5BFE\u8C61\u304C\u306A\u3044\u5834\u5408\u306F\u5B8C\u4E86\u3068\u305B\u305A\u300C\u2014\u300D\u3067\u8868\u793A\u3057\u307E\u3059\u3002",
+    progressStatus: "\u9032\u6357 {progress}%",
+    skippedTooltip: "\u30B9\u30AD\u30C3\u30D7\uFF1A\u9032\u6357\u96C6\u8A08\u30FB\u30EA\u30BD\u30FC\u30B9\u8CA0\u8377\u304B\u3089\u9664\u5916\u3057\u3066\u3044\u307E\u3059\u3002\u65E5\u7A0B\u3068\u4F9D\u5B58\u95A2\u4FC2\u306F\u4FDD\u6301\u3057\u3066\u3044\u307E\u3059\u3002"
   }
 };
 
@@ -4950,7 +5000,8 @@ var en_default = {
   },
   mermaid: {
     title: "Project schedule",
-    untitled: "(untitled)"
+    untitled: "(untitled)",
+    skippedLabel: "Skipped"
   },
   sprintConflicts: {
     title: "Sprint conflicts ({count})",
@@ -4971,7 +5022,8 @@ var en_default = {
       "fixed-milestone-overrun": "Fixed date overrun",
       "recurrence-truncated": "Recurrence calculation limit",
       "invalid-recurrence": "Invalid recurrence",
-      "recurrence-empty": "No occurrences in period"
+      "recurrence-empty": "No occurrences in period",
+      "predecessor-occurrence-skipped": "Skipped predecessor"
     },
     dialogTitle: "Dependency issues ({count})",
     dialogDescription: 'Dates are not corrected automatically. Start date conflicts can be resolved with "Run auto-scheduling". For circular dependencies and missing predecessors, fix the predecessors field. Click an item to show the task.',
@@ -4993,7 +5045,8 @@ var en_default = {
       recurrenceTruncated: "Recurrence calculation was capped at {limit} occurrences or 3,660 calendar days. {occurrenceCount} occurrences were generated through {calculationEndDate, date, ymd}. Later occurrences are excluded; shorten the calculation period.",
       invalidRecurrence: "This recurring task has invalid settings. Review the start date, repeat rule and calculation period.",
       occurrenceContext: "Occurrence originally on {occurrenceDate, date, short}: {reason}",
-      recurrenceEmpty: "The recurrence rule produces no occurrences from {origin, date, ymd} through {calculationEndDate, date, ymd}. Review the weekdays, month mode or calculation period."
+      recurrenceEmpty: "The recurrence rule produces no occurrences from {origin, date, ymd} through {calculationEndDate, date, ymd}. Review the weekdays, month mode or calculation period.",
+      predecessorSkipped: "Predecessor \u201C{predName}\u201D is skipped or includes skipped occurrences; this dependency remains unmet."
     },
     tooltipLine: "{label}: {message}"
   },
@@ -5397,7 +5450,7 @@ var en_default = {
     barLabel: "{name}: original occurrence {date}, {start} to {finish}. {status}. Open to edit this occurrence.",
     scheduled: "Scheduled occurrence",
     networkCount: "Recurring: {count} occurrences",
-    resourceNote: "Recurring tasks include the load of every occurrence in their saved calculation period, including calendar holidays.",
+    resourceNote: "Recurring tasks include the load of non-skipped occurrences in their saved calculation period, including calendar holidays.",
     errors: {
       startRequired: "Enter a complete, valid series start date.",
       intervalInvalid: "The interval must be a whole number from 1 to 365.",
@@ -5407,14 +5460,33 @@ var en_default = {
       occurrenceDatesInvalid: "Enter complete start and end dates. The end must be on or after the start.",
       dependenciesInvalid: "Predecessors contain an invalid date, format or WBS number. No changes were saved.",
       spanInvalid: "Each occurrence must span no more than 3,660 calendar days. Reduce its effort or date range.",
-      moveTooFar: "Move an occurrence no more than 3,660 days from its original date."
+      moveTooFar: "Move an occurrence no more than 3,660 days from its original date.",
+      progressInvalid: "Enter 0\u2013100."
     },
     safetyBounds: "Safety limits: intervals 1\u2013365; each occurrence and calculation period at most 3,660 calendar days; at most 2,000 occurrences per series.",
     inheritedDeps: "Inherits series predecessors",
     customDeps: "Predecessors for this occurrence only",
     useSeriesDeps: "Use series predecessors",
     baselineOccurrence: "Baseline occurrence originally on {date}",
-    reservationName: "{name} (original occurrence {date})"
+    reservationName: "{name} (original occurrence {date})",
+    occurrenceProgress: "Progress by occurrence",
+    selected: "Selected",
+    selectedOccurrence: "Selected occurrence: {date}",
+    editDates: "Edit dates",
+    originalDate: "Original date: {date}",
+    dateColumn: "Date",
+    actionsColumn: "Actions",
+    progressFor: "Progress for {date}",
+    skipped: "Skipped",
+    skip: "Skip",
+    restore: "Restore",
+    markComplete: "Mark complete",
+    completed: "Complete",
+    skipNote: "Skipped occurrences stay saved. Restore brings back the previous progress. Dates and dependencies stay in place; resource load is excluded.",
+    aggregateProgress: "Average in calculation period (excluding skipped)",
+    aggregateNote: "The average includes all non-skipped occurrences in the saved calculation period. Extending the period may change it. No active occurrences is shown as \u2014, not complete.",
+    progressStatus: "Progress {progress}%",
+    skippedTooltip: "Skipped: progress is not counted and no resource load is reserved. Dates and dependencies remain."
   }
 };
 
@@ -5526,6 +5598,8 @@ function dependencyIssueReason(t, issue2) {
       return t("dependencyIssues.message.self");
     case "predecessor-missing":
       return t("dependencyIssues.message.missing", { predecessorId: p.predecessorId });
+    case "predecessor-occurrence-skipped":
+      return t("dependencyIssues.message.predecessorSkipped", { predName: name(p.predName) });
     case "dependency-violation":
       return t(p.side === "finish" ? "dependencyIssues.message.violationFinish" : "dependencyIssues.message.violationStart", {
         predName: name(p.predName),
@@ -5646,7 +5720,8 @@ var numberField = (key, required = false, check = isNumber) => field(
 var stringField = (key, required = false) => field(key, isString, required, "string");
 var booleanField = (key) => field(key, (value) => typeof value === "boolean", false, "boolean");
 var dateField = (key, required = false, allowEmpty = false) => field(key, (value) => allowEmpty && value === "" || isISODate2(value), required, "date");
-var progressField = field("progress", (value) => isNumber(value) && value >= 0 && value <= 100, false, "progress");
+var isProgress = (value) => isNumber(value) && value >= 0 && value <= 100;
+var progressField = field("progress", isProgress, false, "progress");
 var taskFields = [
   idField,
   nameField,
@@ -5720,6 +5795,8 @@ function checkRecurrence(task, path, issues) {
       for (const key of ["startDate", "endDate"]) {
         if (has(override, key) && !isISODate2(override[key])) invalid(`${overridePath}.${key}`, "recurrenceOverride");
       }
+      if (has(override, "progress") && !isProgress(override.progress)) invalid(`${overridePath}.progress`, "recurrenceOverride");
+      if (has(override, "skipped") && typeof override.skipped !== "boolean") invalid(`${overridePath}.skipped`, "recurrenceOverride");
       const start = override.startDate || originalDate;
       if (isISODate2(start) && isISODate2(originalDate) && Math.abs(Date.parse(start) - Date.parse(originalDate)) / 864e5 > 3660) invalid(`${overridePath}.startDate`, "recurrenceOverride");
       if (isISODate2(start) && isISODate2(override.endDate) && override.endDate < start) invalid(`${overridePath}.endDate`, "recurrenceOverride");
@@ -5794,7 +5871,7 @@ function checkVersion(value, path, issues, options) {
         issues.push(issue("error", "version-task-date-range-invalid", `${taskPath}.schedFinish`, "dateRange", {}, { ids: [task.id] }));
       }
       arrayField(task, "occurrences", `${taskPath}.occurrences`, false, issues, (occurrence, occurrencePath) => {
-        if (fields(occurrence, occurrencePath, "version-occurrence", [dateField("occurrenceDate", true), dateField("schedStart", true), dateField("schedFinish", true)], issues) && isISODate2(occurrence.schedStart) && isISODate2(occurrence.schedFinish) && occurrence.schedFinish < occurrence.schedStart) {
+        if (fields(occurrence, occurrencePath, "version-occurrence", [dateField("occurrenceDate", true), dateField("schedStart", true), dateField("schedFinish", true), progressField, booleanField("skipped")], issues) && isISODate2(occurrence.schedStart) && isISODate2(occurrence.schedFinish) && occurrence.schedFinish < occurrence.schedStart) {
           issues.push(issue("error", "version-occurrence-date-range-invalid", `${occurrencePath}.schedFinish`, "dateRange"));
         }
       });
@@ -5989,9 +6066,11 @@ var PROJECT_JSON_SCHEMA = Object.freeze({
     },
     occurrenceOverride: {
       type: "object",
-      additionalProperties: false,
+      additionalProperties: true,
       description: "\u5143\u306E\u4E88\u5B9A\u65E5\u3092\u30AD\u30FC\u3068\u3059\u308B\u500B\u5225\u4FEE\u6B63\u3002\u898F\u5247\u5909\u66F4\u3067\u5BFE\u8C61\u5916\u306B\u306A\u3063\u305F\u4FEE\u6B63\u306F\u4FDD\u6301\u3057\u3001\u5225\u306E\u56DE\u3078\u4ED8\u3051\u66FF\u3048\u307E\u305B\u3093\u3002",
       properties: {
+        progress: { type: "number", minimum: 0, maximum: 100, description: "\u3053\u306E\u56DE\u306E\u307F\u306E\u9032\u6357\u7387\uFF080\u301C100\uFF09\u3002\u7701\u7565\u6642\u306F\u4FDD\u5B58\u6E08\u307Ftask.progress\u3092\u5F15\u304D\u7D99\u304E\u307E\u3059\u3002" },
+        skipped: { type: "boolean", description: "true\u306A\u3089\u3053\u306E\u56DE\u3092\u30B9\u30AD\u30C3\u30D7\u3057\u3001\u5DE5\u6570\u30FB\u9032\u6357\u96C6\u8A08\u304B\u3089\u9664\u5916\u3057\u307E\u3059\u3002\u9032\u6357\u30FB\u65E5\u7A0B\u30FB\u4F9D\u5B58\u95A2\u4FC2\u306F\u4FDD\u6301\u3057\u307E\u3059\u3002\u7701\u7565\u6642\u306Ffalse\u3002" },
         startDate: { type: "string", format: "date", description: "\u3053\u306E\u56DE\u306E\u307F\u306E\u56FA\u5B9A\u958B\u59CB\u65E5" },
         endDate: { type: "string", format: "date", description: "\u3053\u306E\u56DE\u306E\u307F\u306E\u56FA\u5B9A\u7D42\u4E86\u65E5\uFF08\u958B\u59CB\u65E5\u4EE5\u4E0A\u3001\u4E21\u7AEF\u3092\u542B\u3080\u3001\u6700\u59273,660\u66A6\u65E5\uFF09" },
         predecessors: { type: "array", items: { $ref: "#/$defs/dependency" }, description: "\u3053\u306E\u56DE\u306E\u5148\u884C\u30BF\u30B9\u30AF\u3002\u7701\u7565\u6642\u306F\u30B7\u30EA\u30FC\u30BA\u5171\u901A\u3001\u6307\u5B9A\u6642\u306F\u5171\u901A\u8A2D\u5B9A\u3092\u7F6E\u304D\u63DB\u3048\u307E\u3059\u3002\u7A7A\u914D\u5217\u306F\u4F9D\u5B58\u306A\u3057\u3002" }
@@ -6015,7 +6094,7 @@ var PROJECT_JSON_SCHEMA = Object.freeze({
         assigneeId: { type: ["string", "null"], description: "\u62C5\u5F53\u8005ID" },
         sprintIds: { type: "array", description: "\u7D10\u4ED8\u3051\u308B\u30B9\u30D7\u30EA\u30F3\u30C8ID\u4E00\u89A7", items: { type: "string" } },
         predecessors: { type: "array", description: "\u5148\u884C\u30BF\u30B9\u30AF\u4E00\u89A7", items: { $ref: "#/$defs/dependency" } },
-        progress: { type: "number", description: "\u9032\u6357\u7387\uFF080\u301C100\uFF09" },
+        progress: { type: "number", minimum: 0, maximum: 100, description: "\u9032\u6357\u7387\uFF080\u301C100\uFF09\u3002\u7E70\u308A\u8FD4\u3057\u3067\u306F\u500B\u5225\u9032\u6357\u304C\u306A\u3044\u65E2\u5B58\u30FB\u65B0\u898F\u306E\u56DE\u306E\u57FA\u6E96\u5024\u3002\u753B\u9762\u306E\u30B7\u30EA\u30FC\u30BA\u96C6\u8A08\u5024\u3067\u306F\u4E0A\u66F8\u304D\u3057\u307E\u305B\u3093\u3002" },
         milestone: { type: "boolean", description: "\u30DE\u30A4\u30EB\u30B9\u30C8\u30FC\u30F3\u304B\u3069\u3046\u304B" },
         milestoneMode: { type: "string", enum: ["flexible", "fixed"], description: "\u67D4\u8EDF/\u56FA\u5B9A\u30E2\u30FC\u30C9" },
         fixedDate: { type: "string", format: "date", description: "\u56FA\u5B9A\u30DE\u30A4\u30EB\u30B9\u30C8\u30FC\u30F3\u306E\u65E5\u4ED8\uFF08YYYY-MM-DD\uFF09" },
@@ -6057,7 +6136,9 @@ var PROJECT_JSON_SCHEMA = Object.freeze({
       properties: {
         occurrenceDate: { type: "string", format: "date", description: "\u8B58\u5225\u7528\u306E\u5143\u306E\u4E88\u5B9A\u65E5" },
         schedStart: { type: "string", format: "date", description: "\u4FDD\u5B58\u6642\u70B9\u306E\u958B\u59CB\u65E5" },
-        schedFinish: { type: "string", format: "date", description: "\u4FDD\u5B58\u6642\u70B9\u306E\u7D42\u4E86\u65E5" }
+        schedFinish: { type: "string", format: "date", description: "\u4FDD\u5B58\u6642\u70B9\u306E\u7D42\u4E86\u65E5" },
+        progress: { type: "number", minimum: 0, maximum: 100, description: "\u4FDD\u5B58\u6642\u70B9\u306E\u5404\u56DE\u306E\u5B9F\u52B9\u9032\u6357\u7387\u3002\u65E7\u30B9\u30CA\u30C3\u30D7\u30B7\u30E7\u30C3\u30C8\u3067\u306F\u7701\u7565\u53EF\u3002" },
+        skipped: { type: "boolean", description: "\u4FDD\u5B58\u6642\u70B9\u306E\u30B9\u30AD\u30C3\u30D7\u72B6\u614B\u3002\u65E7\u30B9\u30CA\u30C3\u30D7\u30B7\u30E7\u30C3\u30C8\u3067\u306F\u7701\u7565\u53EF\u3002" }
       }
     },
     versionTask: {
@@ -6249,7 +6330,9 @@ function scheduleRows(data, schedule) {
           id: occurrence.id,
           occurrenceDate: occurrence.occurrenceDate,
           schedStart: occurrence.schedStart,
-          schedFinish: occurrence.schedFinish
+          schedFinish: occurrence.schedFinish,
+          progress: typeof occurrence.progress === "number" ? occurrence.progress : t.progress || 0,
+          skipped: occurrence.skipped === true
         })),
         recurrenceMetadata: s.recurrenceMetadata
       } : {}
@@ -6446,8 +6529,9 @@ function cmdPlan(positional, opts) {
     const startChanged = b.schedStart !== a.schedStart;
     const finishChanged = b.schedFinish !== a.schedFinish;
     const critChanged = b.critical !== a.critical;
+    const progressChanged = b.progress !== a.progress;
     const occurrencesChanged = JSON.stringify(b.occurrences) !== JSON.stringify(a.occurrences);
-    if (!startChanged && !finishChanged && !critChanged && !occurrencesChanged) continue;
+    if (!startChanged && !finishChanged && !critChanged && !progressChanged && !occurrencesChanged) continue;
     let shiftWorkdays;
     if (startChanged && b.schedStart && a.schedStart) {
       shiftWorkdays = after.cal.workdaysBetween(b.schedStart, a.schedStart);
@@ -6460,6 +6544,7 @@ function cmdPlan(positional, opts) {
       ...startChanged ? { schedStart: { from: b.schedStart, to: a.schedStart } } : {},
       ...finishChanged ? { schedFinish: { from: b.schedFinish, to: a.schedFinish } } : {},
       ...critChanged ? { critical: { from: b.critical, to: a.critical } } : {},
+      ...progressChanged ? { progress: { from: b.progress, to: a.progress } } : {},
       ...occurrencesChanged ? { occurrences: { from: b.occurrences || [], to: a.occurrences || [] } } : {},
       ...shiftWorkdays !== void 0 ? { shiftWorkdays } : {}
     });
@@ -6564,7 +6649,7 @@ function cmdExplain(positional, opts) {
     file: path,
     task: {
       id: taskId,
-      ...isOccurrenceTask(task) ? { occurrenceDate: task.occurrenceDate } : {},
+      ...isOccurrenceTask(task) ? { occurrenceDate: task.occurrenceDate, skipped: task.skipped === true } : {},
       ...storedTask.recurrence ? { recurrence: storedTask.recurrence } : {},
       name: task.name,
       duration: task.duration ?? null,
@@ -6584,9 +6669,11 @@ function cmdExplain(positional, opts) {
       schedStart: s.schedStart ?? null,
       schedFinish: s.schedFinish ?? null,
       float: typeof s.float === "number" ? s.float : null,
+      progress: typeof s.progress === "number" ? s.progress : task.progress || 0,
+      ...isOccurrenceTask(task) ? { skipped: task.skipped === true } : {},
       critical: !!s.critical,
       governed: !!s.governed,
-      ...s.occurrences ? { occurrences: s.occurrences.map((o) => ({ occurrenceDate: o.occurrenceDate, schedStart: o.schedStart, schedFinish: o.schedFinish })), recurrenceMetadata: s.recurrenceMetadata } : {}
+      ...s.occurrences ? { occurrences: s.occurrences.map((o) => ({ occurrenceDate: o.occurrenceDate, schedStart: o.schedStart, schedFinish: o.schedFinish, progress: typeof o.progress === "number" ? o.progress : storedTask.progress || 0, skipped: o.skipped === true })), recurrenceMetadata: s.recurrenceMetadata } : {}
     },
     drivers: {
       pinned: isPinned,

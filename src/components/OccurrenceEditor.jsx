@@ -1,11 +1,11 @@
 import React, { useEffect, useRef, useState } from "react";
-import { buildOccurrenceOverridePatch } from "../lib/recurrenceEditing.js";
+import { buildOccurrenceOverridePatch, buildOccurrenceScheduleResetPatch } from "../lib/recurrenceEditing.js";
 import { formatDeps, parseDepInput } from "../lib/deps.js";
 import { isISODate, MAX_RECURRENCE_SPAN_DAYS, MAX_RECURRENCE_MOVE_DAYS } from "../lib/recurrence.js";
 import { useI18n } from "./I18nProvider.jsx";
 
 /** Local draft only: blur, Escape, cancellation and reopening cannot write an override. */
-export function OccurrenceEditor({ task, occurrence, idToNo, noToId, onUpdate, onClose }) {
+export function OccurrenceEditor({ task, occurrence, idToNo, noToId, onUpdate, onClose, autoScroll = true }) {
   const { t } = useI18n();
   const editorRef = useRef(null);
   // Until the user edits a date, follow regenerated props (for example when
@@ -24,7 +24,7 @@ export function OccurrenceEditor({ task, occurrence, idToNo, noToId, onUpdate, o
   const [dependenciesDirty, setDependenciesDirty] = useState(false);
   const [inheritDeps, setInheritDeps] = useState(!Object.hasOwn(originalOverride, "predecessors"));
   const originalDate = occurrence.occurrenceDate;
-  useEffect(() => { editorRef.current?.scrollIntoView?.({ block: "nearest" }); }, []);
+  useEffect(() => { if (autoScroll) editorRef.current?.scrollIntoView?.({ block: "nearest" }); }, [autoScroll]);
   const inputClass = "w-full min-w-0 border border-slate-200 rounded-md px-2 py-1.5 text-xs outline-hidden focus:border-indigo-400";
   function save() {
     if (!isISODate(startDate) || !isISODate(endDate) || endDate < startDate) { setError("occurrenceDatesInvalid"); return; }
@@ -45,9 +45,8 @@ export function OccurrenceEditor({ task, occurrence, idToNo, noToId, onUpdate, o
     onClose();
   }
   function reset() {
-    const next = { ...(task.occurrenceOverrides || {}) };
-    delete next[originalDate];
-    onUpdate({ occurrenceOverrides: next });
+    const patch = buildOccurrenceScheduleResetPatch(task, originalDate);
+    if (patch) onUpdate(patch);
     onClose();
   }
   return <section ref={editorRef} className="bg-slate-50 rounded-lg border border-slate-200 p-3 space-y-3" aria-label={t("recurrence.editOccurrence")} data-recurrence-editor="occurrence">
@@ -62,7 +61,7 @@ export function OccurrenceEditor({ task, occurrence, idToNo, noToId, onUpdate, o
     <p className="text-[11px] text-slate-500">{t("recurrence.dependencyHelp")}</p>
     {error && <p role="alert" className="text-xs text-red-700">{t(`recurrence.errors.${error}`)}</p>}
     <div className="flex flex-wrap justify-end gap-2">
-      {task.occurrenceOverrides?.[originalDate] && <button type="button" className="mr-auto text-xs text-red-600 hover:underline" onClick={reset}>{t("recurrence.resetOccurrence")}</button>}
+      {["startDate", "endDate", "predecessors"].some(field => Object.hasOwn(originalOverride, field)) && <button type="button" className="mr-auto text-xs text-red-600 hover:underline" onClick={reset}>{t("recurrence.resetOccurrence")}</button>}
       <button type="button" className="border border-slate-200 rounded-md px-3 py-1.5 text-xs hover:bg-white" onClick={onClose}>{t("common.cancel")}</button>
       <button type="button" className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-md px-3 py-1.5 text-xs" onClick={save}>{t("recurrence.saveOccurrence")}</button>
     </div>

@@ -150,3 +150,31 @@ plan/history key. Language preference remains a separate UI preference.
 `tasks[].recurrence`、`tasks[].occurrenceOverrides`、`predecessors[].occurrenceDate` を保存形式v1の任意項目として扱います。通常タスクの旧JSONは変更不要です。繰り返しの開始日、規則の列挙値・整数間隔、曜日、実在する暦日、個別修正の範囲を共通検証します。繰り返しグループ/マイルストーンと内部用ID接頭辞`@recurrence:`は拒否します。バージョン内のrawTasksも同じ検証を通します。
 
 元の予定日が現行規則の対象外になった個別修正は休止状態として保持します。特定回への依存が規則変更で見つからなくなった場合は診断を返しますが、再読み込みを妨げず修正可能にします。通常タスクの欠落参照については既存の検証方針を維持します。詳細は[繰り返し仕様](recurring-tasks.md)。
+
+
+## Per-occurrence progress and skip / 各回の進捗・スキップ
+
+`occurrenceOverrides[originalDate].progress` is optional and must be a finite number
+from 0 through 100; `skipped` is optional and must be a boolean. Invalid values are
+blocking `task-recurrenceOverride-invalid` diagnostics at the specific override
+field path, including dormant overrides and `versions[].rawTasks`. They are checked
+before cloning, so `NaN` or infinity cannot be silently normalized to `null`.
+Missing progress inherits raw `task.progress`; explicit zero stays zero. Missing
+skip is false, and explicit false is preserved. Skip retains progress and all other
+override data. Unknown task, version, and occurrence-override extension fields are
+preserved through import/export and snapshot restoration.
+
+New comparison snapshot `occurrences` entries store effective `progress` and boolean
+`skipped`. Both fields remain optional for older schema-v1 snapshots. Invalid
+present values produce `version-occurrence-progress-invalid` or
+`version-occurrence-skipped-invalid` at the comparison-row field path. Raw task
+progress remains the legacy/new-occurrence baseline, never the calculated average.
+No schema version bump or new required field is introduced.
+
+個別修正の `progress` は0〜100の有限数、`skipped` はbooleanのみを受け付ける任意項目です。
+不正値は休止中の修正やバージョン内のrawTasksも含め、該当フィールドのパスで
+`task-recurrenceOverride-invalid` として読み込みを拒否します。未指定の進捗は
+raw の `task.progress` を引き継ぎ、明示的な0はそのまま優先します。スキップの省略はfalseです。
+スキップや日程・依存の修正解除では進捗を消しません。未知の拡張項目も保持します。
+比較用の各回スナップショットには実効進捗・スキップ状態を保存しますが、旧版の省略は有効です。
+保存形式はv1のままで、集計平均を保存済みシリーズの基準進捗に書き戻しません。
