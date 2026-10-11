@@ -226,6 +226,55 @@ test("calendar dates and finite horizons survive recalculation, leveling and vie
   await evidence(page, testInfo, "60-recurrence-ja.png");
 });
 
+test("a year of recurring capacity warnings remains bounded and keyboard scrollable in both locales", async ({ page }, testInfo) => {
+  const data = fixture(true);
+  data.tasks = [data.tasks[0]];
+  data.tasks[0].recurrence = { frequency: "daily", interval: 1, calculationEndDate: "2027-10-11" };
+  data.resources[0].weeklyCapacity = 5;
+  data.resources[0].monthlyCapacity = 0;
+  data.calendarExceptions = [];
+  data.levelingOn = true;
+  await boot(page, data);
+  await expect(bars(page)).toHaveCount(365);
+  for (const locale of ["en", "ja"]) {
+    if (locale === "ja") await page.getByLabel("Display language", { exact: true }).selectOption("ja");
+    const warnings = page.getByRole("region", { name: locale === "en" ? "Resource capacity warnings" : "リソース稼働上限の警告", exact: true });
+    const marker = locale === "en" ? "original occurrence:" : "元の発生日:";
+    expect((await warnings.textContent()).split(marker)).toHaveLength(365);
+    await expect(warnings).toContainText(locale === "en" ? "Oct 12, 2026" : "2026/10/12");
+    await expect(warnings).toContainText(locale === "en" ? "Oct 10, 2027" : "2027/10/10");
+    await expect(warnings).toHaveAttribute("tabindex", "0");
+    expect(await warnings.evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true);
+    expect((await page.getByTestId("level-warning-banner").boundingBox()).height).toBeLessThanOrEqual(128);
+    const run = page.getByRole("button", { name: locale === "en" ? "Run auto-scheduling" : "自動スケジューリング実行", exact: true });
+    await expect(run).toBeInViewport();
+    await expect(run).toBeEnabled();
+    await expect(cell(page, "series", "name")).toBeInViewport();
+    await warnings.focus();
+    await warnings.press("Home");
+    await expect.poll(() => warnings.evaluate(el => el.scrollTop)).toBe(0);
+    const edgeVisible = last => warnings.evaluate((el, last) => {
+      const range = document.createRange();
+      const node = el.firstChild;
+      const offset = last ? node.textContent.length - 1 : 0;
+      range.setStart(node, offset); range.setEnd(node, offset + 1);
+      const text = range.getBoundingClientRect(), panel = el.getBoundingClientRect();
+      return text.top >= panel.top - 1 && text.bottom <= panel.bottom + 1;
+    }, last);
+    await expect.poll(() => edgeVisible(false)).toBe(true);
+    await warnings.press("End");
+    await expect.poll(() => warnings.evaluate(el => el.scrollHeight - el.clientHeight - el.scrollTop)).toBeLessThanOrEqual(1);
+    await expect.poll(() => edgeVisible(true)).toBe(true);
+    await evidence(page, testInfo, `60-capacity-warning-scroll-${locale}.png`, false);
+    await warnings.press("Home");
+    await expect.poll(() => warnings.evaluate(el => el.scrollTop)).toBe(0);
+    await run.click();
+    await expect(page.getByRole("region", { name: locale === "en" ? "Recalculation result" : "再計算結果", exact: true })).toBeVisible();
+    await expect(cell(page, "series", "name")).toBeInViewport();
+    expect((await warnings.textContent()).split(marker)).toHaveLength(365);
+  }
+});
+
 
 test("date-only edits preserve inherited dependencies and dormant changes survive rule edits", async ({ page }) => {
   const data = fixture(true);

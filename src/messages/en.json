@@ -152,6 +152,7 @@
     "tooltipLine": "{label}: {message}"
   },
   "levelWarnings": {
+    "regionLabel": "Resource capacity warnings",
     "limit": {
       "daily": "{value, plural, one {# person-day} other {# person-days}} daily",
       "weekly": "{value, plural, one {# person-day} other {# person-days}} weekly",

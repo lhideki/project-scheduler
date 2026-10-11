@@ -10,11 +10,12 @@ import { migrateSprintIds, isGroupId, buildFlatList, ancestorChain } from "./lib
 import { runCPM, buildDisplaySchedule, deriveProjectStart, computeAutoSchedule } from "./lib/scheduling.js";
 import { applyScheduleStartDates } from "./lib/schedulingFeedback.js";
 import { SchedulingResult } from "./components/SchedulingResult.jsx";
+import { LevelWarningsBanner } from "./components/LevelWarningsBanner.jsx";
 import { detectSprintConflicts } from "./lib/sprints.js";
 import { detectDependencyIssues, groupDependencyIssuesByTask } from "./lib/dependencyIssues.js";
 import {
   LOCALES, formatDependencyIssueMessage, dependencyIssueLabel,
-  formatSprintConflictReason, formatSprintConflictSprintNames, formatLevelWarning, formatProjectIssue,
+  formatSprintConflictReason, formatSprintConflictSprintNames, formatProjectIssue,
 } from "./lib/i18n.js";
 import {
   downloadJSON, downloadTextFile, copyTextToClipboard, generateMermaidGantt,
@@ -849,12 +850,7 @@ export default function App() {
           onRevealTask={revealTask} onDismiss={() => setSchedulingResult(null)} />
       )}
 
-      {levelWarnings.length > 0 && (
-        <div className="bg-amber-50 border-b border-amber-200 text-amber-800 text-xs px-4 py-1.5 flex items-center gap-2">
-          <AlertTriangle size={13} className="shrink-0" />
-          <span>{levelWarnings.map(w => formatLevelWarning(t, w)).join(" / ")}</span>
-        </div>
-      )}
+      <LevelWarningsBanner warnings={levelWarnings} />
 
       <div className="flex bg-white border-b border-slate-200 px-3">
         <Tab icon={Table2} label={t("tabs.gantt")} active={tab === "gantt"} onClick={() => setTab("gantt")} />

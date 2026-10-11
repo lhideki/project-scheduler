@@ -4423,6 +4423,7 @@ var ja_default = {
     tooltipLine: "{label}: {message}"
   },
   levelWarnings: {
+    regionLabel: "\u30EA\u30BD\u30FC\u30B9\u7A3C\u50CD\u4E0A\u9650\u306E\u8B66\u544A",
     limit: {
       daily: "\u65E5\u6B21{value}\u4EBA\u65E5",
       weekly: "\u9031\u6B21{value}\u4EBA\u65E5",
@@ -4997,6 +4998,7 @@ var en_default = {
     tooltipLine: "{label}: {message}"
   },
   levelWarnings: {
+    regionLabel: "Resource capacity warnings",
     limit: {
       daily: "{value, plural, one {# person-day} other {# person-days}} daily",
       weekly: "{value, plural, one {# person-day} other {# person-days}} weekly",

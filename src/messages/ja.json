@@ -152,6 +152,7 @@
     "tooltipLine": "{label}: {message}"
   },
   "levelWarnings": {
+    "regionLabel": "リソース稼働上限の警告",
     "limit": {
       "daily": "日次{value}人日",
       "weekly": "週次{value}人日",
