@@ -46,7 +46,7 @@ export function TaskDetailModal({ task, schedule, tasks, resources, sprints, idT
             e.target.blur();
           }
         }}>
-        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 sticky top-0 z-20 bg-white rounded-t-xl">
+        <div className={"flex items-center justify-between px-4 py-3 border-b border-slate-100 sticky top-0 bg-white rounded-t-xl" + (recurring ? " z-20" : "")}>
           <div className="flex items-center gap-2 text-xs text-slate-400 font-mono">
             <span>WBS {task.wbsNo}</span>
             {task.milestone && <Diamond size={11} className="text-amber-500" fill="#F59E0B" />}

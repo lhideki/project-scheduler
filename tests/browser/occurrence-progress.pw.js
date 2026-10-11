@@ -312,6 +312,8 @@ test("rule and finite-horizon edits preserve dormant overrides and recompute onl
   await expect(bars(page)).toHaveCount(2);
   await expect(cell(page, "series", "progress")).toHaveValue("75");
   expect(await overrides(page)).toEqual(data.tasks[0].occurrenceOverrides);
+  await saved(page);
+  await expect.poll(async () => (await series(page)).recurrence.calculationEndDate).toBe(DATES[1]);
   await page.reload();
   await expect(bars(page)).toHaveCount(2);
   await openDetail(page);
