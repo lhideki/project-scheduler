@@ -265,3 +265,13 @@ Playwrightは `scripts/serve-test.mjs` で `127.0.0.1:4173` のローカルサ�
 - サンプルデータ（`seedData()`）を開いた状態でスプリント矛盾アラート・スプリント期間重複警告・依存関係の矛盾が出ないこと（リソース平準化のON/OFFとも、日本語・英語とも）
 - タスク編集後、リロードしても内容が保持されること（localStorage永続化）
 - Live Demo の言語別ページに関わる変更をした場合は、`PAGES_BASE_URL=http://localhost:<port>/project-scheduler/ npm run build:pages` で生成した `_site/` を `/project-scheduler/` 配下で配信し、`ja/`・`en/` がブラウザの言語・保存済みの選択に関わらずその言語で開くこと、そのページで言語を切り替えると URL が切り替え先のページに変わること（Default では変わらないこと）
+
+
+## 繰り返しタスク（Issue #60）
+
+- `src/lib/recurrence.js` が暦日ベースの規則・安定した元日付ID・有限展開を管理する。保存値は1シリーズ1タスクで、`recurrence` と `occurrenceOverrides`（元の予定日がキー）を分離する。詳細は `docs/recurring-tasks.md`。
+- `runCPM` / `buildDisplaySchedule` / `levelResources` / 依存診断は raw tasks を受け取り、計算内部だけでシリーズ集約＋各回へ展開する。生成IDの`@recurrence:`接頭辞は保存用タスクIDに使えない。展開済み判定は非公開Symbolで行い、JSONの拡張フィールドから偽装しない。
+- 各回のstart/endは固定暦日。休日補正・スプリント・依存関係・平準化・自動書き戻しで変更しない。固定負荷を先に容量台帳へ登録し、矛盾は警告にする。
+- `schedule.get(seriesId).occurrences` と `recurrenceMetadata` をガント・リソース・CLIで参照する。viewportや本日を使って計算期間を変えない。特定回の依存は `{id:seriesId,occurrenceDate:originalISO,type,lag}`。元の日付キーを移動後の開始日に書き換えない。
+- 編集は規則/各回のローカル下書きを明示保存して1操作にする。取り消し・閉じる操作で保存しない。規則の変更・無効化で個別修正を削除/付け替えしない。グループ化・マイルストーン化では繰り返しの構造を壊さない。
+- テストは `recurrence.test.js` / `recurringScheduling.test.js`（または scheduling/dependency テスト）・CLI・JSON検証・`tests/browser/recurrence.pw.js` で日付/上書き/保存/反復操作を確認する。

@@ -10,11 +10,12 @@ import { migrateSprintIds, isGroupId, buildFlatList, ancestorChain } from "./lib
 import { runCPM, buildDisplaySchedule, deriveProjectStart, computeAutoSchedule } from "./lib/scheduling.js";
 import { applyScheduleStartDates } from "./lib/schedulingFeedback.js";
 import { SchedulingResult } from "./components/SchedulingResult.jsx";
+import { LevelWarningsBanner } from "./components/LevelWarningsBanner.jsx";
 import { detectSprintConflicts } from "./lib/sprints.js";
 import { detectDependencyIssues, groupDependencyIssuesByTask } from "./lib/dependencyIssues.js";
 import {
   LOCALES, formatDependencyIssueMessage, dependencyIssueLabel,
-  formatSprintConflictReason, formatSprintConflictSprintNames, formatLevelWarning, formatProjectIssue,
+  formatSprintConflictReason, formatSprintConflictSprintNames, formatProjectIssue,
 } from "./lib/i18n.js";
 import {
   downloadJSON, downloadTextFile, copyTextToClipboard, generateMermaidGantt,
@@ -109,8 +110,14 @@ export default function App() {
   const editTasks = useCallback((key, value) => dispatchTasks({ type: "edit", key, value }), []);
   const commitTaskEdit = useCallback(() => dispatchTasks({ type: "commit" }), []);
   const resetTasks = useCallback(value => dispatchTasks({ type: "reset", value }), []);
-  const undoTasks = useCallback(() => dispatchTasks({ type: "undo" }), []);
-  const redoTasks = useCallback(() => dispatchTasks({ type: "redo" }), []);
+  const undoTasks = useCallback(() => {
+    dispatchTasks({ type: "undo" });
+    setTaskContextRevision(revision => revision + 1);
+  }, []);
+  const redoTasks = useCallback(() => {
+    dispatchTasks({ type: "redo" });
+    setTaskContextRevision(revision => revision + 1);
+  }, []);
   // Undo/RedoのキーボードショートカットはWBS/ガント画面内の要素にフォーカスがある場合しか
   // 効かないとヘッダーの「自動スケジューリング実行」ボタン操作直後などに機能しないため、
   // window全体で受け付ける（IME変換中は無視する）。入力欄ではタスク編集用も含めて
@@ -843,12 +850,7 @@ export default function App() {
           onRevealTask={revealTask} onDismiss={() => setSchedulingResult(null)} />
       )}
 
-      {levelWarnings.length > 0 && (
-        <div className="bg-amber-50 border-b border-amber-200 text-amber-800 text-xs px-4 py-1.5 flex items-center gap-2">
-          <AlertTriangle size={13} className="shrink-0" />
-          <span>{levelWarnings.map(w => formatLevelWarning(t, w)).join(" / ")}</span>
-        </div>
-      )}
+      <LevelWarningsBanner warnings={levelWarnings} />
 
       <div className="flex bg-white border-b border-slate-200 px-3">
         <Tab icon={Table2} label={t("tabs.gantt")} active={tab === "gantt"} onClick={() => setTab("gantt")} />

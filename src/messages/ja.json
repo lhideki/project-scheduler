@@ -122,7 +122,10 @@
       "self-dependency": "循環参照（自己依存）",
       "predecessor-missing": "存在しない先行タスク",
       "dependency-violation": "開始日との矛盾",
-      "fixed-milestone-overrun": "固定期日の超過"
+      "fixed-milestone-overrun": "固定期日の超過",
+      "recurrence-truncated": "繰り返し計算の上限",
+      "invalid-recurrence": "繰り返し設定の不備",
+      "recurrence-empty": "期間内の発生なし"
     },
     "dialogTitle": "依存関係の矛盾（{count}件）",
     "dialogDescription": "日程は自動では修正されません。開始日との矛盾は「自動スケジューリング実行」で解消できます。循環参照・存在しない先行タスクは、先行タスク欄を修正してください。項目をクリックすると該当タスクを表示します。",
@@ -140,18 +143,24 @@
       "violationStart": "先行「{predName}」（{label}）の条件では {required, date, ymd} 以降に開始する必要がありますが、{actual, date, ymd} に開始しています",
       "violationFinish": "先行「{predName}」（{label}）の条件では {required, date, ymd} 以降に終了する必要がありますが、{actual, date, ymd} に終了しています",
       "overrunEarliest": "先行「{predName}」から求めた最早日（{earliest, date, ymd}）が固定期日（{fixedDate, date, ymd}）を超過しています",
-      "overrunDisplay": "表示中の日程（{actual, date, ymd}）が固定期日（{fixedDate, date, ymd}）を超過しています"
+      "overrunDisplay": "表示中の日程（{actual, date, ymd}）が固定期日（{fixedDate, date, ymd}）を超過しています",
+      "recurrenceTruncated": "繰り返し計算は{limit}回または3,660日で打ち切られました。{calculationEndDate, date, ymd}までに{occurrenceCount}回を生成しました。それ以降は含まれません。計算期間を短くしてください。",
+      "invalidRecurrence": "この繰り返しタスクの設定に不備があります。開始日・繰り返しルール・計算期間を確認してください。",
+      "occurrenceContext": "元の予定日 {occurrenceDate, date, short} の回: {reason}",
+      "recurrenceEmpty": "{origin, date, ymd}〜{calculationEndDate, date, ymd}の期間内に発生する回がありません。曜日・月内の日付・計算期間を確認してください。"
     },
     "tooltipLine": "{label}: {message}"
   },
   "levelWarnings": {
+    "regionLabel": "リソース稼働上限の警告",
     "limit": {
       "daily": "日次{value}人日",
       "weekly": "週次{value}人日",
       "monthly": "月次{value}人日"
     },
     "limitSeparator": "・",
-    "capacityExceeded": "「{taskName}」（担当者: {resourceName}、工数: {duration}人日）は、{limits}の稼働上限内で割り当てきれませんでした（探索上限: {searchWorkdays, number}稼働日）。開始日を{start, date, ymd}とし、連続する稼働日に配置していますが、稼働上限を超過しています。工数または稼働上限の見直しが必要です。"
+    "capacityExceeded": "「{taskName}」（担当者: {resourceName}、工数: {duration}人日）は、{limits}の稼働上限内で割り当てきれませんでした（探索上限: {searchWorkdays, number}稼働日）。開始日を{start, date, ymd}とし、連続する稼働日に配置していますが、稼働上限を超過しています。工数または稼働上限の見直しが必要です。",
+    "fixedOccurrenceCapacityExceeded": "「{taskName}」（担当者: {resourceName}、元の発生日: {occurrenceDate, date, ymd}）が稼働上限（日次{dailyCapacity}・週次{weeklyCapacity}・月次{monthlyCapacity}人日、0は上限なし）を超えています。固定日程の{start, date, ymd}〜{finish, date, ymd}は維持されました。この回の日程または稼働上限を調整してください。"
   },
   "taskDetail": {
     "groupBadge": "（グループ）",
@@ -410,7 +419,9 @@
     "milestone": "マイルストーン",
     "float": "フロート {days}日",
     "lagTitle": "ラグ（workday）",
-    "removeEdge": "依存関係を削除"
+    "removeEdge": "依存関係を削除",
+    "editDependency": "{from}から{to}への依存関係を編集：{label}",
+    "dependencyType": "依存関係の種類"
   },
   "save": {
     "pending": "未保存 · 保存待ち",
@@ -461,7 +472,10 @@
     "schemaVersion": "schemaVersion は {version} で指定してください",
     "dateTime": "{field} は有効な ISO 8601 日時で指定してください",
     "requiredArray": "必須の配列がありません",
-    "dependencySubject": "「{name}」: {reason}"
+    "dependencySubject": "「{name}」: {reason}",
+    "recurrence": "繰り返し条件が正しくありません: {field}。",
+    "recurrenceLeaf": "繰り返しは通常の末端タスクだけに設定できます。",
+    "recurrenceOverride": "個別の日程修正が正しくありません: {field}。"
   },
   "projectName": {
     "label": "プロジェクト名",
@@ -489,5 +503,71 @@
     "details": "対象タスクと理由を確認",
     "dismiss": "再計算結果を閉じる",
     "title": "再計算結果"
+  },
+  "recurrence": {
+    "title": "繰り返し",
+    "editRule": "繰り返しを編集",
+    "addRule": "繰り返しを追加",
+    "notRepeating": "このタスクは繰り返しません。",
+    "enabled": "このタスクを繰り返す",
+    "origin": "シリーズ開始日（必須）",
+    "frequency": "繰り返し単位",
+    "daily": "毎日",
+    "weekly": "毎週",
+    "monthly": "毎月",
+    "interval": "繰り返し間隔",
+    "end": "終了日（任意・当日を含む）",
+    "weekdays": "曜日",
+    "weekAnchor": "週は月曜日から始まります。シリーズ開始日以降の日付だけを含みます。",
+    "monthMode": "月内の日付",
+    "monthDay": "開始日と同じ日（存在しない場合は月末）",
+    "monthStart": "月初（1日）",
+    "monthEnd": "月末",
+    "horizon": "計算期間の終了日（当日を含む）",
+    "horizonNote": "終了日を指定しない場合、この保存済みの有限期間で計算します。既定は開始日から1年間です。スクロールやズームでは変わりません。",
+    "boundsNote": "開始日は必須です。任意の終了日はその日の発生を含みます。各回の工数と担当者はシリーズの設定を使います。",
+    "preserveOverrides": "個別変更は元の発生日に紐づきます。ルールの変更・解除後も保持され、新ルールに含まれない日付の変更は休止状態になります。",
+    "saveRule": "繰り返しを保存",
+    "summary": "{frequency}・{interval}単位ごと：{count}回",
+    "calculatedThrough": "計算期間の終了：{date}",
+    "fixedDatesNote": "各回の日付は土日・祝日も含むカレンダー日付に固定されます。依存関係や稼働上限の警告が出ても、日付は移動しません。",
+    "truncated": "計算は2,000回または3,660日で打ち切られました。それ以降は含まれません。全体を計算するには保存済み期間を短くしてください。",
+    "dormantOverrides": "現在のルールに含まれない個別変更が{count}件あります。元の発生日に紐づけて保持しています。",
+    "occurrences": "各回（元の発生日）",
+    "overridden": "個別変更あり",
+    "editOccurrence": "この回を編集",
+    "noOccurrences": "計算期間内に発生する回はありません。",
+    "occurrenceIdentity": "元の発生日：{date}",
+    "occurrenceNote": "この回だけを変更します。元の発生日は識別用に保持し、工数と担当者はシリーズから引き継ぎます。終了日は当日を含みます。移動は元の発生日から3,660日以内に限ります。",
+    "occurrenceStart": "この回の開始日",
+    "occurrenceEnd": "この回の終了日",
+    "occurrenceDeps": "この回の先行タスク",
+    "dependencyHelp": "特定の回は「WBS@YYYY-MM-DDFS+ラグ」で指定します（例：2@2026-10-12FS+1）。日付なしのWBS番号は有限期間のシリーズ全体を参照します。",
+    "resetOccurrence": "この回を元に戻す",
+    "saveOccurrence": "この回を保存",
+    "editOrigin": "シリーズ開始日は繰り返し設定で編集してください。",
+    "cannotConvert": "マイルストーンやグループに変換する前に繰り返しを解除してください。",
+    "cannotPaste": "繰り返しタスクの日付・種別は繰り返し設定で編集してください。貼り付けは適用しませんでした。",
+    "barLabel": "{name}：元の発生日 {date}、{start}から{finish}。{status}。開くとこの回を編集できます。",
+    "scheduled": "予定どおりの回",
+    "networkCount": "繰り返し：{count}回",
+    "resourceNote": "繰り返しタスクは、保存済み計算期間内の各回の負荷を土日・祝日も含めて集計します。",
+    "errors": {
+      "startRequired": "完全で有効なシリーズ開始日を入力してください。",
+      "intervalInvalid": "繰り返し間隔には1〜365の整数を入力してください。",
+      "weekdaysRequired": "曜日を1つ以上選んでください。",
+      "endInvalid": "終了日にはシリーズ開始日以降の有効な日付を入力してください。",
+      "horizonInvalid": "計算期間の終了日にはシリーズ開始日以降の有効な日付を入力してください。",
+      "occurrenceDatesInvalid": "完全な開始日・終了日を入力してください。終了日は開始日以降にしてください。",
+      "dependenciesInvalid": "先行タスクの日付・書式・WBS番号に誤りがあります。変更は保存されていません。",
+      "spanInvalid": "各回の期間は3,660日以内にしてください。工数または日付の範囲を短くしてください。",
+      "moveTooFar": "各回の開始日は元の発生日から3,660日以内にしてください。"
+    },
+    "safetyBounds": "安全上限：間隔1〜365、各回と計算期間は3,660日以内、1シリーズ2,000回まで。",
+    "inheritedDeps": "シリーズの先行タスクを引き継ぐ",
+    "customDeps": "この回だけの先行タスク",
+    "useSeriesDeps": "シリーズの先行タスクに戻す",
+    "baselineOccurrence": "比較元の回（元の発生日：{date}）",
+    "reservationName": "{name}（元の発生日：{date}）"
   }
 }

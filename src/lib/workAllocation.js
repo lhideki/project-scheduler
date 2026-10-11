@@ -19,7 +19,7 @@ export const ALLOCATION_SEARCH_WORKDAYS = 2000;
 
 /**
  * @typedef {Object} DailyAllocation
- * @property {string} date - 割当日（YYYY-MM-DD、稼働日）
+ * @property {string} date - 割当日（YYYY-MM-DD、通常は稼働日。固定の繰り返し予定では暦日）
  * @property {number} load - その日に割り当てた工数（人日）
  * @property {"daily"|"weekly"|"monthly"} [limitedBy] - 上限により1人日未満しか割り当てられなかった日の理由
  */
@@ -227,4 +227,12 @@ export function allocationProgressPoint(alloc, fraction) {
     cum += a.load;
   }
   return { date: alloc[alloc.length - 1].date, dayFraction: 1 };
+}
+
+/** Check committed fixed allocations against the complete ledger, without moving them. */
+export function allocationExceedsCapacity(ledger, resource, alloc) {
+  const u = usageOf(ledger, resource.id);
+  return alloc.some(({ date }) => (u.day.get(date) || 0) > toUnits(DAILY_CAPACITY)
+    || (u.week.get(weekKey(date)) || 0) > capUnits(resource.weeklyCapacity)
+    || (u.month.get(monthKey(date)) || 0) > capUnits(resource.monthlyCapacity));
 }

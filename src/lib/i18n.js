@@ -164,6 +164,13 @@ export function taskNameText(t, name) {
  * 循環以外は対象タスク自身の名前を含まない（WBS表の行ツールチップ・一覧ダイアログで行に並べて表示するため）。
  */
 export function formatDependencyIssueMessage(t, issue) {
+  const reason = dependencyIssueReason(t, issue);
+  return issue.params?.occurrenceDate
+    ? t("dependencyIssues.message.occurrenceContext", { occurrenceDate: dateArg(issue.params.occurrenceDate), reason })
+    : reason;
+}
+
+function dependencyIssueReason(t, issue) {
   const p = issue.params || {};
   const name = n => taskNameText(t, n);
   switch (issue.code) {
@@ -174,6 +181,12 @@ export function formatDependencyIssueMessage(t, issue) {
         ? t("dependencyIssues.message.cycleWithNotes", { route, notes: notes.join(t("common.listSeparator")) })
         : t("dependencyIssues.message.cycle", { route });
     }
+    case "recurrence-truncated":
+      return t("dependencyIssues.message.recurrenceTruncated", { calculationEndDate: dateArg(p.calculationEndDate), occurrenceCount: p.occurrenceCount, limit: p.limit });
+    case "recurrence-empty":
+      return t("dependencyIssues.message.recurrenceEmpty", { origin: dateArg(p.origin), calculationEndDate: dateArg(p.calculationEndDate) });
+    case "invalid-recurrence":
+      return t("dependencyIssues.message.invalidRecurrence");
     case "self-dependency":
       return t("dependencyIssues.message.self");
     case "predecessor-missing":
@@ -237,6 +250,11 @@ export function formatSprintConflictSprintNames(t, conflict) {
 /** リソース平準化の警告（src/lib/scheduling.js の levelResources の warnings の各要素）。 */
 export function formatLevelWarning(t, warning) {
   const p = warning.params || {};
+  if (warning.code === "fixed-occurrence-capacity-exceeded") return t("levelWarnings.fixedOccurrenceCapacityExceeded", {
+    taskName: p.taskName ?? "", resourceName: p.resourceName ?? "", occurrenceDate: dateArg(p.occurrenceDate),
+    start: dateArg(p.start), finish: dateArg(p.finish), dailyCapacity: p.dailyCapacity,
+    weeklyCapacity: p.weeklyCapacity, monthlyCapacity: p.monthlyCapacity,
+  });
   if (warning.code !== "capacity-exceeded") return warning.code;
   const limits = [t("levelWarnings.limit.daily", { value: p.dailyCapacity })];
   if (p.weeklyCapacity) limits.push(t("levelWarnings.limit.weekly", { value: p.weeklyCapacity }));

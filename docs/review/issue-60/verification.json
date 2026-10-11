@@ -1,0 +1,345 @@
+{
+  "runId": 38115321335,
+  "sourceCommit": "7b04ebbd7b2a1ae655f8fe74fa9dcbf625f612e4",
+  "artifact": {
+    "id": 11692484352,
+    "sha256": "ed51e186e75e73eed721ec939506392a5e7efc60df8506c104f7243235f62513"
+  },
+  "browserTestSummary": {
+    "total": 96,
+    "expected": 96,
+    "unexpected": 0,
+    "flaky": 0,
+    "skipped": 0,
+    "ok": true
+  },
+  "summary": {
+    "candidateHtmlSha256": "9bd2cdf568c4c210bb35a81cb775cd640eb5a4cfc6709b94d64f808fe38fa14c",
+    "comparisonCount": 24,
+    "nonAntialiasedChangedPixelsAcrossComparisons": 0,
+    "styleAndGeometryDifferencesAcrossComparisons": 0,
+    "browserErrorsAcrossComparisons": 0,
+    "rawPixelDifferences": {
+      "57-mobile-dependency-issues-dialog-comparison.json": 3,
+      "57-mobile-export-menu-comparison.json": 21
+    },
+    "rawPixelNote": "Any raw differences reported here are antialias-only; all 24 non-antialiased difference counts are zero."
+  },
+  "comparisons": [
+    {
+      "name": "60-desktop-task-detail-modal-comparison.json",
+      "candidateHtmlSha256": "9bd2cdf568c4c210bb35a81cb775cd640eb5a4cfc6709b94d64f808fe38fa14c",
+      "nonAA": 0,
+      "styleGeometryDifferences": 0,
+      "rawChangedPixels": 0,
+      "browserErrors": {
+        "before": [],
+        "after": []
+      }
+    },
+    {
+      "name": "60-mobile-task-detail-modal-comparison.json",
+      "candidateHtmlSha256": "9bd2cdf568c4c210bb35a81cb775cd640eb5a4cfc6709b94d64f808fe38fa14c",
+      "nonAA": 0,
+      "styleGeometryDifferences": 0,
+      "rawChangedPixels": 0,
+      "browserErrors": {
+        "before": [],
+        "after": []
+      }
+    },
+    {
+      "name": "57-mobile-dependency-issues-dialog-comparison.json",
+      "candidateHtmlSha256": "9bd2cdf568c4c210bb35a81cb775cd640eb5a4cfc6709b94d64f808fe38fa14c",
+      "nonAA": 0,
+      "styleGeometryDifferences": 0,
+      "rawChangedPixels": 3,
+      "browserErrors": {
+        "before": [],
+        "after": []
+      }
+    },
+    {
+      "name": "57-desktop-versions-comparison-comparison.json",
+      "candidateHtmlSha256": "9bd2cdf568c4c210bb35a81cb775cd640eb5a4cfc6709b94d64f808fe38fa14c",
+      "nonAA": 0,
+      "styleGeometryDifferences": 0,
+      "rawChangedPixels": 0,
+      "browserErrors": {
+        "before": [],
+        "after": []
+      }
+    },
+    {
+      "name": "57-desktop-japanese-export-menu-comparison.json",
+      "candidateHtmlSha256": "9bd2cdf568c4c210bb35a81cb775cd640eb5a4cfc6709b94d64f808fe38fa14c",
+      "nonAA": 0,
+      "styleGeometryDifferences": 0,
+      "rawChangedPixels": 0,
+      "browserErrors": {
+        "before": [],
+        "after": []
+      }
+    },
+    {
+      "name": "57-desktop-export-menu-comparison.json",
+      "candidateHtmlSha256": "9bd2cdf568c4c210bb35a81cb775cd640eb5a4cfc6709b94d64f808fe38fa14c",
+      "nonAA": 0,
+      "styleGeometryDifferences": 0,
+      "rawChangedPixels": 0,
+      "browserErrors": {
+        "before": [],
+        "after": []
+      }
+    },
+    {
+      "name": "57-desktop-rename-focused-comparison.json",
+      "candidateHtmlSha256": "9bd2cdf568c4c210bb35a81cb775cd640eb5a4cfc6709b94d64f808fe38fa14c",
+      "nonAA": 0,
+      "styleGeometryDifferences": 0,
+      "rawChangedPixels": 0,
+      "browserErrors": {
+        "before": [],
+        "after": []
+      }
+    },
+    {
+      "name": "57-mobile-versions-comparison-comparison.json",
+      "candidateHtmlSha256": "9bd2cdf568c4c210bb35a81cb775cd640eb5a4cfc6709b94d64f808fe38fa14c",
+      "nonAA": 0,
+      "styleGeometryDifferences": 0,
+      "rawChangedPixels": 0,
+      "browserErrors": {
+        "before": [],
+        "after": []
+      }
+    },
+    {
+      "name": "57-mobile-export-menu-comparison.json",
+      "candidateHtmlSha256": "9bd2cdf568c4c210bb35a81cb775cd640eb5a4cfc6709b94d64f808fe38fa14c",
+      "nonAA": 0,
+      "styleGeometryDifferences": 0,
+      "rawChangedPixels": 21,
+      "browserErrors": {
+        "before": [],
+        "after": []
+      }
+    },
+    {
+      "name": "57-mobile-rename-focused-comparison.json",
+      "candidateHtmlSha256": "9bd2cdf568c4c210bb35a81cb775cd640eb5a4cfc6709b94d64f808fe38fa14c",
+      "nonAA": 0,
+      "styleGeometryDifferences": 0,
+      "rawChangedPixels": 0,
+      "browserErrors": {
+        "before": [],
+        "after": []
+      }
+    },
+    {
+      "name": "57-desktop-dependency-issues-dialog-comparison.json",
+      "candidateHtmlSha256": "9bd2cdf568c4c210bb35a81cb775cd640eb5a4cfc6709b94d64f808fe38fa14c",
+      "nonAA": 0,
+      "styleGeometryDifferences": 0,
+      "rawChangedPixels": 0,
+      "browserErrors": {
+        "before": [],
+        "after": []
+      }
+    },
+    {
+      "name": "57-mobile-japanese-export-menu-comparison.json",
+      "candidateHtmlSha256": "9bd2cdf568c4c210bb35a81cb775cd640eb5a4cfc6709b94d64f808fe38fa14c",
+      "nonAA": 0,
+      "styleGeometryDifferences": 0,
+      "rawChangedPixels": 0,
+      "browserErrors": {
+        "before": [],
+        "after": []
+      }
+    },
+    {
+      "name": "57-mobile-confirmation-modal-comparison.json",
+      "candidateHtmlSha256": "9bd2cdf568c4c210bb35a81cb775cd640eb5a4cfc6709b94d64f808fe38fa14c",
+      "nonAA": 0,
+      "styleGeometryDifferences": 0,
+      "rawChangedPixels": 0,
+      "browserErrors": {
+        "before": [],
+        "after": []
+      }
+    },
+    {
+      "name": "57-desktop-confirmation-modal-comparison.json",
+      "candidateHtmlSha256": "9bd2cdf568c4c210bb35a81cb775cd640eb5a4cfc6709b94d64f808fe38fa14c",
+      "nonAA": 0,
+      "styleGeometryDifferences": 0,
+      "rawChangedPixels": 0,
+      "browserErrors": {
+        "before": [],
+        "after": []
+      }
+    },
+    {
+      "name": "57-desktop-calendar-comparison.json",
+      "candidateHtmlSha256": "9bd2cdf568c4c210bb35a81cb775cd640eb5a4cfc6709b94d64f808fe38fa14c",
+      "nonAA": 0,
+      "styleGeometryDifferences": 0,
+      "rawChangedPixels": 0,
+      "browserErrors": {
+        "before": [],
+        "after": []
+      }
+    },
+    {
+      "name": "57-desktop-network-comparison.json",
+      "candidateHtmlSha256": "9bd2cdf568c4c210bb35a81cb775cd640eb5a4cfc6709b94d64f808fe38fa14c",
+      "nonAA": 0,
+      "styleGeometryDifferences": 0,
+      "rawChangedPixels": 0,
+      "browserErrors": {
+        "before": [],
+        "after": []
+      }
+    },
+    {
+      "name": "57-desktop-resources-comparison.json",
+      "candidateHtmlSha256": "9bd2cdf568c4c210bb35a81cb775cd640eb5a4cfc6709b94d64f808fe38fa14c",
+      "nonAA": 0,
+      "styleGeometryDifferences": 0,
+      "rawChangedPixels": 0,
+      "browserErrors": {
+        "before": [],
+        "after": []
+      }
+    },
+    {
+      "name": "57-desktop-sprints-comparison.json",
+      "candidateHtmlSha256": "9bd2cdf568c4c210bb35a81cb775cd640eb5a4cfc6709b94d64f808fe38fa14c",
+      "nonAA": 0,
+      "styleGeometryDifferences": 0,
+      "rawChangedPixels": 0,
+      "browserErrors": {
+        "before": [],
+        "after": []
+      }
+    },
+    {
+      "name": "57-desktop-wbs-gantt-comparison.json",
+      "candidateHtmlSha256": "9bd2cdf568c4c210bb35a81cb775cd640eb5a4cfc6709b94d64f808fe38fa14c",
+      "nonAA": 0,
+      "styleGeometryDifferences": 0,
+      "rawChangedPixels": 0,
+      "browserErrors": {
+        "before": [],
+        "after": []
+      }
+    },
+    {
+      "name": "57-mobile-calendar-comparison.json",
+      "candidateHtmlSha256": "9bd2cdf568c4c210bb35a81cb775cd640eb5a4cfc6709b94d64f808fe38fa14c",
+      "nonAA": 0,
+      "styleGeometryDifferences": 0,
+      "rawChangedPixels": 0,
+      "browserErrors": {
+        "before": [],
+        "after": []
+      }
+    },
+    {
+      "name": "57-mobile-network-comparison.json",
+      "candidateHtmlSha256": "9bd2cdf568c4c210bb35a81cb775cd640eb5a4cfc6709b94d64f808fe38fa14c",
+      "nonAA": 0,
+      "styleGeometryDifferences": 0,
+      "rawChangedPixels": 0,
+      "browserErrors": {
+        "before": [],
+        "after": []
+      }
+    },
+    {
+      "name": "57-mobile-resources-comparison.json",
+      "candidateHtmlSha256": "9bd2cdf568c4c210bb35a81cb775cd640eb5a4cfc6709b94d64f808fe38fa14c",
+      "nonAA": 0,
+      "styleGeometryDifferences": 0,
+      "rawChangedPixels": 0,
+      "browserErrors": {
+        "before": [],
+        "after": []
+      }
+    },
+    {
+      "name": "57-mobile-sprints-comparison.json",
+      "candidateHtmlSha256": "9bd2cdf568c4c210bb35a81cb775cd640eb5a4cfc6709b94d64f808fe38fa14c",
+      "nonAA": 0,
+      "styleGeometryDifferences": 0,
+      "rawChangedPixels": 0,
+      "browserErrors": {
+        "before": [],
+        "after": []
+      }
+    },
+    {
+      "name": "57-mobile-wbs-gantt-comparison.json",
+      "candidateHtmlSha256": "9bd2cdf568c4c210bb35a81cb775cd640eb5a4cfc6709b94d64f808fe38fa14c",
+      "nonAA": 0,
+      "styleGeometryDifferences": 0,
+      "rawChangedPixels": 0,
+      "browserErrors": {
+        "before": [],
+        "after": []
+      }
+    }
+  ],
+  "screenshots": [
+    {
+      "fileName": "recurring-gantt.png",
+      "sha256": "c2a09c0bf2d7be892263a8dfad4db907d9b48bf676b0ed7f5fb4c7c482362638",
+      "width": 1600,
+      "height": 1000,
+      "visualInspection": "accepted"
+    },
+    {
+      "fileName": "recurrence-details-ja.png",
+      "sha256": "dce0c7d908d85655f457c9d549c53e4aedf431c315402d46af0cbdca26206534",
+      "width": 1000,
+      "height": 800,
+      "visualInspection": "accepted"
+    },
+    {
+      "fileName": "occurrence-dependencies.png",
+      "sha256": "13fc2a93ab294c11078414b56d7f635bf20644f7667d35f69d0d1bf5e98be9a5",
+      "width": 1600,
+      "height": 1000,
+      "visualInspection": "accepted"
+    },
+    {
+      "fileName": "edit-one-occurrence.png",
+      "sha256": "8d103aeb094ba64577c4f1591b4553273f3be0722a94330db485a8129e1a02fc",
+      "width": 1600,
+      "height": 1000,
+      "visualInspection": "accepted"
+    },
+    {
+      "fileName": "mobile-recurrence-editor.png",
+      "sha256": "076bfd0d99dd998fb0159fcf72369c9e946916a2b35205a334841436c94273fe",
+      "width": 390,
+      "height": 844,
+      "visualInspection": "accepted"
+    },
+    {
+      "fileName": "capacity-warnings-en.png",
+      "sha256": "0a8289c400165646a407c8be6f56beac6d906988d2de690bd55b020c3eea5b5e",
+      "width": 1600,
+      "height": 1000,
+      "visualInspection": "accepted"
+    },
+    {
+      "fileName": "capacity-warnings-ja.png",
+      "sha256": "02f0bc1df92808e5a5c78a68c15912f146f3cd1f39bf667475dc4e10a17cea68",
+      "width": 1600,
+      "height": 1000,
+      "visualInspection": "accepted"
+    }
+  ]
+}

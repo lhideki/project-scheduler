@@ -132,3 +132,30 @@ describe("atomic dependency paste", () => {
     }
   });
 });
+
+describe("protected recurrence paste", () => {
+  const recurring = () => task({ recurrence: { frequency: "daily", interval: 1, endDate: "2026-09-01" } });
+
+  it.each(["2026-08-27", "2026-08-26", "", "—", "not-a-date"])("rejects a protected start cell (%j) with a distinct error", text => {
+    expect(taskCellPatch(recurring(), "startDate", text, context)).toEqual({ ok: false, patch: {}, error: "protected-recurrence" });
+  });
+
+  it.each(["2026-08-27", "2026-08-26", "", "not-a-date"])("rejects the entire TSV row when its start cell is protected (%j)", startDate => {
+    const target = recurring();
+    const before = structuredClone(target);
+    const result = taskRowPatch(target, `Changed\t${startDate}\t8\t鈴木\tSprint 2\t100\t2FS`, context);
+    expect(result).toEqual({ patch: {}, errors: ["startDate"], error: "protected-recurrence" });
+    expect(target).toEqual(before);
+  });
+
+  it("still accepts a name-only row and ordinary editable cells on a recurring task", () => {
+    expect(taskRowPatch(recurring(), "Changed", context)).toEqual({ patch: { name: "Changed" }, errors: [] });
+    expect(taskCellPatch(recurring(), "duration", "8", context)).toEqual({ ok: true, patch: { duration: 8 } });
+  });
+
+  it("preserves ordinary row partial-paste behavior for a malformed date", () => {
+    expect(taskRowPatch(task(), "Changed\tnot-a-date\t8\t鈴木", context)).toEqual({
+      patch: { name: "Changed", duration: 8, assigneeId: "r2" }, errors: ["startDate"],
+    });
+  });
+});

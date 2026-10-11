@@ -289,3 +289,62 @@ describe("strict incoming imports with retained local editing snapshots", () => 
     expect(data.versions).toEqual([{ ...incoming, hasFullSnapshot: false }]);
   });
 });
+
+describe("recurrence storage contract", () => {
+  const series = (extra = {}) => task({ startDate: "2024-02-29", duration: 1, recurrence: { frequency: "monthly", interval: 1, monthDay: "end", endDate: "2024-04-30" }, ...extra });
+  it("round-trips rules, overrides, occurrence dependencies and dormant overrides", () => {
+    const tasks = [series({ occurrenceOverrides: {
+      "2024-03-31": { startDate: "2024-04-02", endDate: "2024-04-03", predecessors: [] },
+      "2023-01-01": { startDate: "2023-01-05" },
+    } }), task({ id: "after", order: 1, predecessors: [{ id: "t1", occurrenceDate: "2024-03-31", type: "FS", lag: 0 }] })];
+    const data = buildProjectExport(tasks, [], [], [], true);
+    const result = normalizeImportedProject(data);
+    expect(result.tasks).toEqual(tasks);
+    expect(result.tasks).not.toBe(tasks);
+    expect(result.tasks[0].occurrenceOverrides).not.toBe(tasks[0].occurrenceOverrides);
+    expect(checkFieldShapes(result)).toEqual([]);
+  });
+  it.each([
+    { startDate: "" }, { startDate: undefined }, { milestone: true },
+    { recurrence: null }, { recurrence: [] },
+    ...[0, -1, 1.5, 366, Infinity, "2"].map(interval => ({ recurrence: { frequency: "daily", interval } })),
+    { recurrence: { frequency: "yearly", interval: 1 } },
+    ...[[], [1,1], [7], [-1], [1.5], "Monday"].map(weekdays => ({ recurrence: { frequency: "weekly", interval: 2, weekdays } })),
+    { recurrence: { frequency: "monthly", interval: 2, monthDay: "lastBusinessDay" } },
+    { recurrence: { frequency: "daily", interval: 1, endDate: "2024-02-28" } },
+    { recurrence: { frequency: "daily", interval: 1, calculationEndDate: "2024-02-30" } },
+    { occurrenceOverrides: null }, { occurrenceOverrides: [] },
+    { occurrenceOverrides: { "2024-02-30": { startDate: "2024-03-01" } } },
+    { occurrenceOverrides: { "2024-03-31": { startDate: "2024-03-10", endDate: "2024-03-09" } } },
+    { occurrenceOverrides: { "2024-03-31": { predecessors: [{ id: "t1", type: "FS", lag: 0, occurrenceDate: "2023-02-29" }] } } },
+  ])("rejects invalid recurrence and override data: %j", patch => {
+    const data = project({ tasks: [series(patch)], sprints: [] });
+    expect(validateProjectData(data).some(isBlockingProjectIssue)).toBe(true);
+    expect(() => normalizeImportedProject(data)).toThrow("invalid_project_json");
+  });
+  it("rejects a recurring group, including inside version snapshots", () => {
+    const rawTasks = [series(), task({ id: "child", parentId: "t1" })];
+    expect(analyzeIntegrity({ tasks: rawTasks }).some(i => i.code === "recurrence-leaf-required")).toBe(true);
+    const data = project({ tasks: [], versions: [snapshot({ rawTasks })] });
+    expect(validateProjectData(data).some(i => i.code === "recurrence-leaf-required" && i.path.startsWith("versions[0]"))).toBe(true);
+  });
+  it("preserves malformed dormant override dependencies as validation errors", () => {
+    const data = project({ tasks: [series({ occurrenceOverrides: { "2020-01-01": { predecessors: null } } })] });
+    expect(checkFieldShapes(data).some(i => i.path === "tasks[0].occurrenceOverrides.2020-01-01.predecessors")).toBe(true);
+  });
+});
+
+it("rejects malformed saved occurrence comparison rows", () => {
+  const data = project({ versions: [version({ tasks: [{ id: "series", name: "Series", occurrences: "wrong" }] })] });
+  expect(validateProjectData(data).some(i => i.path === "versions[0].tasks[0].occurrences" && isBlockingProjectIssue(i))).toBe(true);
+});
+
+it("retains missing occurrence references after a rule change as repairable diagnostics", () => {
+  const data = project({ tasks: [
+    task({ startDate: "2024-01-01", recurrence: { frequency: "daily", interval: 2, endDate: "2024-01-03" } }),
+    task({ id: "next", order: 1, predecessors: [{ id: "t1", occurrenceDate: "2024-01-02", type: "FS", lag: 0 }] }),
+  ] });
+  const issues = validateProjectData(data);
+  expect(issues.some(i => i.code === "predecessor-missing" && i.blocking === false)).toBe(true);
+  expect(normalizeImportedProject(data).tasks[1].predecessors).toEqual(data.tasks[1].predecessors);
+});

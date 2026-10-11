@@ -52,23 +52,48 @@ export const PROJECT_JSON_SCHEMA = Object.freeze({
       additionalProperties: false,
       required: ["id", "type", "lag"],
       properties: {
-        id: { type: "string", description: "先行タスクID" },
+        id: { type: "string", description: "先行タスクID。繰り返しシリーズの場合、occurrenceDate未指定は有限の計算対象期間全体への依存です。" },
+        occurrenceDate: { type: "string", format: "date", description: "特定回の元の日付（YYYY-MM-DD）。日程修正後もこの識別子を変更しません。" },
         type: { type: "string", enum: ["FS", "SS", "FF", "SF"], description: "依存関係の種類" },
         lag: { type: "number", description: "リード/ラグ日数" },
+      },
+    },
+    recurrence: {
+      type: "object", additionalProperties: false, required: ["frequency", "interval"],
+      description: "通常の末端タスクに設定する繰り返し規則。task.startDateが必須の起点。各回は暦日で固定し、自動スケジューリング・休日補正の対象外です。",
+      properties: {
+        frequency: { type: "string", enum: ["daily", "weekly", "monthly"], description: "日・週・月単位" },
+        interval: { type: "integer", minimum: 1, maximum: 365, description: "間隔。1=毎回、2=隔日・隔週・隔月" },
+        weekdays: { type: "array", uniqueItems: true, minItems: 1, items: { type: "integer", minimum: 0, maximum: 6 }, description: "週単位の対象曜日（0=日、1=月…6=土）。省略時は開始日の曜日。週の起点は開始日を含む月曜日です。" },
+        monthDay: { type: "string", enum: ["day", "start", "end"], description: "月単位の日付。day=開始日と同じ日（存在しない月は月末）、start=暦月初、end=暦月末。開始日より前は生成しません。" },
+        endDate: { type: "string", format: "date", description: "繰り返し終了日（その日を含む）。開始日以上で任意。元の予定日を基準に判定します。" },
+        calculationEndDate: { type: "string", format: "date", description: "終了日なしの有限計算期間。省略時は開始日の1周年の前日。現在日付・表示範囲には依存しません。開始日から最大3,660暦日・1シリーズ最大2,000回で打ち切りを警告します。" },
+      },
+    },
+    occurrenceOverride: {
+      type: "object", additionalProperties: false,
+      description: "元の予定日をキーとする個別修正。規則変更で対象外になった修正は保持し、別の回へ付け替えません。",
+      properties: {
+        startDate: { type: "string", format: "date", description: "この回のみの固定開始日" },
+        endDate: { type: "string", format: "date", description: "この回のみの固定終了日（開始日以上、両端を含む、最大3,660暦日）" },
+        predecessors: { type: "array", items: { $ref: "#/$defs/dependency" }, description: "この回の先行タスク。省略時はシリーズ共通、指定時は共通設定を置き換えます。空配列は依存なし。" },
       },
     },
     task: {
       type: "object",
       description: "WBS上のタスクです。階層は parentId で表現します。",
+      allOf: [{ if: { required: ["recurrence"] }, then: { required: ["startDate"], properties: { milestone: { const: false }, duration: { maximum: 3660 } } } }],
       additionalProperties: true,
       required: ["id", "name", "parentId", "order"],
       properties: {
-        id: { type: "string", description: "タスクID" },
+        id: { type: "string", not: { pattern: "^@recurrence:" }, description: "タスクID。内部生成用の@recurrence:接頭辞は使用できません。" },
         name: { type: "string", description: "タスク名" },
         parentId: { type: ["string", "null"], description: "親タスクID。ルート直下は null" },
         order: { type: "number", description: "同じ親配下での表示順" },
         startDate: { type: "string", format: "date", description: "開始日（YYYY-MM-DD）" },
-        duration: { type: "number", description: "工数。マイルストーンは通常 0" },
+        duration: { type: "number", description: "工数。マイルストーンは通常0。繰り返しでは各回の工数で、既定期間は切り上げ日数の暦日（最大3,660日）です。" },
+        recurrence: { $ref: "#/$defs/recurrence", description: "繰り返し規則（任意）。通常の末端タスクのみ。" },
+        occurrenceOverrides: { type: "object", propertyNames: { format: "date" }, additionalProperties: { $ref: "#/$defs/occurrenceOverride" }, description: "各回の元の予定日をキーとする修正情報。日程を変えてもキーは不変です。" },
         assigneeId: { type: ["string", "null"], description: "担当者ID" },
         sprintIds: { type: "array", description: "紐付けるスプリントID一覧", items: { type: "string" } },
         predecessors: { type: "array", description: "先行タスク一覧", items: { $ref: "#/$defs/dependency" } },
@@ -108,6 +133,14 @@ export const PROJECT_JSON_SCHEMA = Object.freeze({
         order: { type: "number", description: "表示順" },
       },
     },
+    occurrenceSnapshot: {
+      type: "object", required: ["occurrenceDate", "schedStart", "schedFinish"],
+      properties: {
+        occurrenceDate: { type: "string", format: "date", description: "識別用の元の予定日" },
+        schedStart: { type: "string", format: "date", description: "保存時点の開始日" },
+        schedFinish: { type: "string", format: "date", description: "保存時点の終了日" },
+      },
+    },
     versionTask: {
       type: "object",
       description: "バージョン比較表示用のタスクスナップショットです。",
@@ -119,6 +152,7 @@ export const PROJECT_JSON_SCHEMA = Object.freeze({
         level: { type: "number", description: "WBS階層レベル" },
         wbsNo: { type: "string", description: "WBS番号" },
         hasChildren: { type: "boolean", description: "子タスクの有無" },
+        occurrences: { type: "array", items: { $ref: "#/$defs/occurrenceSnapshot" }, description: "繰り返し各回の比較表示用日程（任意）" },
         schedStart: { type: "string", format: "date", description: "計算後開始日（YYYY-MM-DD）" },
         schedFinish: { type: "string", format: "date", description: "計算後終了日（YYYY-MM-DD）" },
         critical: { type: "boolean", description: "クリティカルかどうか" },
@@ -305,7 +339,7 @@ export function generateMermaidGantt(tasks, schedule, labels = {}) {
   const title = labels.title ?? DEFAULT_MERMAID_LABELS.title;
   const untitled = labels.untitled ?? DEFAULT_MERMAID_LABELS.untitled;
   const flatAll = buildFlatList(tasks, new Set());
-  const lines = ["gantt", `    title ${escapeMermaidText(title, untitled)}`, "    dateFormat YYYY-MM-DD", "    excludes weekends"];
+  const lines = ["gantt", `    title ${escapeMermaidText(title, untitled)}`, "    dateFormat YYYY-MM-DD", ...(tasks.some(t => t.recurrence) ? [] : ["    excludes weekends"])];
   const usedIds = new Set();
   flatAll.forEach(t => {
     if (t.hasChildren) {
@@ -314,22 +348,24 @@ export function generateMermaidGantt(tasks, schedule, labels = {}) {
     }
     const s = schedule.get(t.id);
     if (!s || !s.schedStart || !s.schedFinish) return;
-    let id = toMermaidId(`t${t.wbsNo || t.id}`);
-    if (usedIds.has(id)) {
-      let i = 2;
-      while (usedIds.has(`${id}_${i}`)) i++;
-      id = `${id}_${i}`;
-    }
-    usedIds.add(id);
-    const tags = [];
-    if (t.milestone) tags.push("milestone");
-    if (s.critical) tags.push("crit");
-    if ((t.progress || 0) >= 100) tags.push("done");
-    else if ((t.progress || 0) > 0) tags.push("active");
-    const tagStr = tags.length ? `${tags.join(", ")}, ` : "";
-    const name = escapeMermaidText(t.name, untitled);
-    const endField = t.milestone ? "0d" : s.schedFinish;
-    lines.push(`    ${name} :${tagStr}${id}, ${s.schedStart}, ${endField}`);
+    (s.occurrences || [s]).forEach(occurrence => {
+      let id = toMermaidId(`t${t.wbsNo || t.id}${occurrence.occurrenceDate ? "_" + occurrence.occurrenceDate : ""}`);
+      if (usedIds.has(id)) {
+        let i = 2;
+        while (usedIds.has(`${id}_${i}`)) i++;
+        id = `${id}_${i}`;
+      }
+      usedIds.add(id);
+      const tags = [];
+      if (t.milestone) tags.push("milestone");
+      if (occurrence.critical) tags.push("crit");
+      if ((t.progress || 0) >= 100) tags.push("done");
+      else if ((t.progress || 0) > 0) tags.push("active");
+      const tagStr = tags.length ? `${tags.join(", ")}, ` : "";
+      const name = escapeMermaidText(`${t.name || untitled}${occurrence.occurrenceDate ? " [" + occurrence.occurrenceDate + "]" : ""}`, untitled);
+      const endField = t.milestone ? "0d" : occurrence.schedFinish;
+      lines.push(`    ${name} :${tagStr}${id}, ${occurrence.schedStart}, ${endField}`);
+    });
   });
   return lines.join("\n");
 }

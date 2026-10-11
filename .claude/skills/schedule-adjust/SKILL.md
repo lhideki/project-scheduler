@@ -218,3 +218,10 @@ node <CLI> explain  <file> --task <taskId> [--leveling on|off|auto]
 - `proposed` をそのまま保存すること（`versions[]` スナップショットや `exportedAt` を削らない）。
 - 大きな構造変更（タスクの大量追加・階層再編）を伴う場合は、先に `validate` で
   `edited.json` の整合性を確認してから `plan` する。
+
+
+## 繰り返しタスク
+
+繰り返し対応の仕様は `docs/recurring-tasks.md` を参照する。タスク1件がシリーズで、`recurrence` と `occurrenceOverrides` を分離して保持する。各回は元の予定日を識別子とし、日程変更後も元の日付キーを変更しない。自動調整でシリーズ開始日や各回の固定日程を変更しない。特定回への依存は `{id: seriesId, occurrenceDate: originalDate, type, lag}`。対象外になった修正や依存は削除・他の回へ付け替えず、警告として確認する。
+
+`explain <file> --task <seriesId> --occurrence YYYY-MM-DD` は対象期間内の1回の日程・先行条件を説明する。`--occurrence` は元の予定日で指定し、省略するとシリーズ全体と各回一覧を返す。`recalc` はシリーズ行に `occurrences` と `recurrenceMetadata` を含める。`plan` は集約された開始・終了が変わらない各回の変更も `scheduleChanges[].occurrences` へ出す。上限打ち切り・生成回なし・特定回の参照欠落を成功扱いせず利用者に伝える。

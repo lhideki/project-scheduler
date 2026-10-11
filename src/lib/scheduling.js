@@ -1,9 +1,25 @@
 import { toISO } from "./calendar.js";
+import { expandRecurringTasks, isRecurringTask, isOccurrenceTask, isRecurringSummaryTask, occurrenceLoads } from "./recurrence.js";
+
 import { isGroupId, buildFlatList, effectivePredecessors } from "./taskTree.js";
 import {
   dailyLoads, createCapacityLedger, allocateWork, commitAllocation,
-  DAILY_CAPACITY, ALLOCATION_SEARCH_WORKDAYS,
+  DAILY_CAPACITY, ALLOCATION_SEARCH_WORKDAYS, allocationExceedsCapacity,
 } from "./workAllocation.js";
+
+// Recurrence expansion can produce thousands of leaves. Index group membership once
+// per pass rather than running isGroupId's linear scan for each synthetic occurrence.
+function indexScheduleTree(tasks) {
+  const summaryIds = new Set(), childrenById = new Map();
+  for (const task of tasks) {
+    if (isRecurringSummaryTask(task)) summaryIds.add(task.id);
+    if (task.parentId == null) continue;
+    summaryIds.add(task.parentId);
+    if (!childrenById.has(task.parentId)) childrenById.set(task.parentId, []);
+    childrenById.get(task.parentId).push(task);
+  }
+  return { summaryIds, childrenById };
+}
 
 // 工数の連続配分は workAllocation.js が正。従来どおり scheduling.js からも参照できるよう再エクスポートする。
 export { dailyLoads };
@@ -34,6 +50,8 @@ export { dailyLoads };
  * @property {string} schedFinish - 表示用の終了日
  * @property {number} progress - 進捗率（グループは配下の単純平均）
  * @property {boolean} [isSummary] - グループ（サマリー行）のロールアップ結果かどうか
+ * @property {Array<Object>} [occurrences] - Fixed synthetic instances on a recurring-series summary.
+ * @property {Object} [recurrenceMetadata] - Actual/requested horizon and explicit truncation/invalid-input flags.
  * @property {import("./workAllocation.js").TaskAllocation} [allocation] - 日別割当（buildDisplaySchedule がリーフに付与。
  *   ガント・リソース負荷・進捗表示はこれだけを参照する）
  */
@@ -53,11 +71,11 @@ export function candidateFromDep(cal, dep, predDates, succDuration) {
   if (type === "SS") return { start: cal.shift(predDates.start, lag) };
   if (type === "FF") {
     const f = cal.shift(predDates.finish, lag);
-    return { start: succDuration <= 0 ? f : cal.startFromEnd(f, succDuration) };
+    return { start: succDuration <= 0 ? cal.snapForward(f) : cal.startFromEnd(cal.snapForward(f), succDuration) };
   }
   // SF
   const f = cal.shift(predDates.start, lag);
-  return { start: succDuration <= 0 ? f : cal.startFromEnd(f, succDuration) };
+  return { start: succDuration <= 0 ? cal.snapForward(f) : cal.startFromEnd(cal.snapForward(f), succDuration) };
 }
 
 /**
@@ -74,12 +92,12 @@ export function candidateForPredFromSucc(cal, dep, succLateDates, predDuration) 
   if (type === "FS") return { finish: cal.shift(succLateDates.start, -(1 + lag)) };
   if (type === "SS") {
     const s = cal.shift(succLateDates.start, -lag);
-    return { finish: predDuration <= 0 ? s : cal.endFromStart(s, predDuration) };
+    return { finish: predDuration <= 0 ? s : cal.endFromStart(cal.snapBackward(s), predDuration) };
   }
   if (type === "FF") return { finish: cal.shift(succLateDates.finish, -lag) };
   // SF
   const s = cal.shift(succLateDates.finish, -lag);
-  return { finish: predDuration <= 0 ? s : cal.endFromStart(s, predDuration) };
+  return { finish: predDuration <= 0 ? s : cal.endFromStart(cal.snapBackward(s), predDuration) };
 }
 
 export function topoOrder(ids, edgesByTo) {
@@ -170,8 +188,10 @@ export function earliestSprintFloor(sprintIds, sprintById, cal) {
  * @returns {{result: Map<string, ScheduleEntry>, projectEnd: string}}
  */
 export function runCPM(tasks, cal, projectStart, sprints, opts = {}) {
+  tasks = expandRecurringTasks(tasks);
+  const { summaryIds, childrenById } = indexScheduleTree(tasks);
   const respectManualPins = opts.respectManualPins !== false;
-  const leaves = tasks.filter(t => !isGroupId(tasks, t.id));
+  const leaves = tasks.filter(t => !summaryIds.has(t.id));
   const leafIds = leaves.map(t => t.id);
   const byId = {}; tasks.forEach(t => (byId[t.id] = t));
   const sprintById = {}; (sprints || []).forEach(s => (sprintById[s.id] = s));
@@ -183,10 +203,10 @@ export function runCPM(tasks, cal, projectStart, sprints, opts = {}) {
   function computeGroupRollup(leafDates) {
     const rolled = new Map();
     function rec(id) {
-      const children = tasks.filter(t => t.parentId === id);
+      const children = childrenById.get(id) || [];
       let min = null, max = null;
       children.forEach(c => {
-        const r = isGroupId(tasks, c.id) ? rec(c.id) : leafDates.get(c.id);
+        const r = summaryIds.has(c.id) ? rec(c.id) : leafDates.get(c.id);
         if (!r || !r.start) return;
         if (min === null || r.start < min) min = r.start;
         if (max === null || r.finish > max) max = r.finish;
@@ -195,7 +215,7 @@ export function runCPM(tasks, cal, projectStart, sprints, opts = {}) {
       rolled.set(id, r);
       return r;
     }
-    tasks.filter(t => isGroupId(tasks, t.id)).forEach(t => { if (!rolled.has(t.id)) rec(t.id); });
+    tasks.filter(t => summaryIds.has(t.id)).forEach(t => { if (!rolled.has(t.id)) rec(t.id); });
     return rolled;
   }
 
@@ -209,7 +229,7 @@ export function runCPM(tasks, cal, projectStart, sprints, opts = {}) {
         if (predsOf[dep.id]) {
           predsOf[t.id].push({ from: dep.id, type: dep.type, lag: dep.lag });
           succsOf[dep.id].push({ to: t.id, type: dep.type, lag: dep.lag });
-        } else if (groupRollup && isGroupId(tasks, dep.id) && groupRollup.get(dep.id)?.start) {
+        } else if (groupRollup && summaryIds.has(dep.id) && groupRollup.get(dep.id)?.start) {
           predsOf[t.id].push({ from: dep.id, type: dep.type, lag: dep.lag, groupDates: groupRollup.get(dep.id) });
         }
         // 未解決のグループ参照・存在しない参照は無視
@@ -223,6 +243,7 @@ export function runCPM(tasks, cal, projectStart, sprints, opts = {}) {
     order.forEach(id => {
       const t = byId[id];
       const preds = predsOf[id];
+      if (isOccurrenceTask(t)) { ES[id] = t.startDate; EF[id] = t.endDate; return; }
       let best = null;
       preds.forEach(dep => {
         const predDates = dep.groupDates || { start: ES[dep.from], finish: EF[dep.from] };
@@ -245,6 +266,7 @@ export function runCPM(tasks, cal, projectStart, sprints, opts = {}) {
       // （後ろ倒しのみ・前倒しはしない）。バックワードパス（LS/LF、固定マイルストーンの逆算）には一切関与しない。
       // 複数スプリントが紐付いている場合は、そのうち最も早い開始日を下限として使う
       // （タスクは最も早く割り当てられたスプリントの開始と同時に着手できる、という扱い）。
+      start = cal.snapForward(start);
       const sprintFloor = earliestSprintFloor(t.sprintIds, sprintById, cal);
       if (sprintFloor && sprintFloor > start) start = sprintFloor;
       ES[id] = start;
@@ -269,12 +291,15 @@ export function runCPM(tasks, cal, projectStart, sprints, opts = {}) {
   }
   const { ES, EF, order, predsOf, succsOf } = passResult;
 
-  const projectEnd = leafIds.reduce((mx, id) => (EF[id] > mx ? EF[id] : mx), projectStart);
+  // Occurrence overrides may place every actual leaf before the stored series origin.
+  // Only an empty schedule falls back to projectStart; it is not a finish-date floor.
+  const projectEnd = leafIds.reduce((mx, id) => (EF[id] && (!mx || EF[id] > mx) ? EF[id] : mx), null) ?? projectStart;
 
   const LS = {}, LF = {};
   [...order].reverse().forEach(id => {
     const t = byId[id];
     const succs = succsOf[id];
+    if (isOccurrenceTask(t)) { LS[id] = t.startDate; LF[id] = t.endDate; return; }
     let finish;
     if (succs.length === 0) {
       finish = t.milestone && t.milestoneMode === "fixed" && t.fixedDate ? t.fixedDate : projectEnd;
@@ -307,6 +332,7 @@ export function runCPM(tasks, cal, projectStart, sprints, opts = {}) {
       schedStart: useBackward ? LS[id] : ES[id],
       schedFinish: useBackward ? LF[id] : EF[id],
       progress: typeof t.progress === "number" ? t.progress : 0,
+      ...(isOccurrenceTask(t) ? { id: t.id, seriesId: t.seriesId, occurrenceDate: t.occurrenceDate, isOccurrence: true, startDate: t.startDate, endDate: t.endDate } : {}),
     });
   });
 
@@ -325,12 +351,15 @@ export function runCPM(tasks, cal, projectStart, sprints, opts = {}) {
  * @returns {Map<string, ScheduleEntry>} 引数の result と同一の参照
  */
 export function rollupSummaries(tasks, result) {
-  const summaries = tasks.filter(t => isGroupId(tasks, t.id));
+  tasks = expandRecurringTasks(tasks);
+  const { summaryIds, childrenById } = indexScheduleTree(tasks);
+  const byId = new Map(tasks.map(t => [t.id, t]));
+  const summaries = tasks.filter(t => summaryIds.has(t.id));
   function rollup(id) {
-    const children = tasks.filter(t => t.parentId === id);
+    const children = childrenById.get(id) || [];
     let min = null, max = null, anyCritical = false, progressSum = 0, progressCount = 0;
     children.forEach(c => {
-      const r = isGroupId(tasks, c.id) ? rollup(c.id) : result.get(c.id);
+      const r = summaryIds.has(c.id) ? rollup(c.id) : result.get(c.id);
       if (!r) return;
       if (min === null || r.schedStart < min) min = r.schedStart;
       if (max === null || r.schedFinish > max) max = r.schedFinish;
@@ -339,13 +368,29 @@ export function rollupSummaries(tasks, result) {
     });
     const progress = progressCount ? Math.round(progressSum / progressCount) : 0;
     const r = { ES: min, EF: max, LS: min, LF: max, float: 0, critical: anyCritical, governed: false, schedStart: min, schedFinish: max, isSummary: true, progress };
+    const task = byId.get(id);
+    if (isRecurringSummaryTask(task)) {
+      r.occurrences = children.filter(t => isOccurrenceTask(t)).map(t => ({ ...t, ...result.get(t.id) }));
+      r.recurrenceMetadata = task.recurrenceMetadata;
+    }
     result.set(id, r);
     return r;
   }
   // 深い階層でも正しく処理できるようルートのサマリーから再帰
-  tasks.filter(t => !t.parentId).forEach(t => { if (isGroupId(tasks, t.id)) rollup(t.id); });
+  tasks.filter(t => !t.parentId).forEach(t => { if (summaryIds.has(t.id)) rollup(t.id); });
   summaries.forEach(t => { if (!result.has(t.id)) rollup(t.id); });
   return result;
+}
+
+
+function fixedCapacityWarning(task, resource) {
+  return {
+    code: "fixed-occurrence-capacity-exceeded", taskId: task.seriesId,
+    params: { taskName: task.name, resourceName: resource.name, duration: task.duration,
+      occurrenceId: task.id, occurrenceDate: task.occurrenceDate, seriesId: task.seriesId,
+      dailyCapacity: DAILY_CAPACITY, weeklyCapacity: resource.weeklyCapacity || 0,
+      monthlyCapacity: resource.monthlyCapacity || 0, start: task.startDate, finish: task.endDate },
+  };
 }
 
 /** リソース稼働上限を考慮した平準化（優先度付き Serial SGS）。
@@ -375,7 +420,9 @@ export function rollupSummaries(tasks, result) {
  *   allocations: 工数が正のリーフの日別割当（担当者の稼働上限を見ないタスクは連続配分）
  */
 export function levelResources(tasks, cpmResult, resources, cal, sprints) {
-  const leaves = tasks.filter(t => !isGroupId(tasks, t.id));
+  tasks = expandRecurringTasks(tasks);
+  const { summaryIds, childrenById } = indexScheduleTree(tasks);
+  const leaves = tasks.filter(t => !summaryIds.has(t.id));
   const byId = {}; tasks.forEach(t => (byId[t.id] = t));
   const leafIdSet = new Set(leaves.map(t => t.id));
   const sprintById = {}; (sprints || []).forEach(s => (sprintById[s.id] = s));
@@ -387,7 +434,7 @@ export function levelResources(tasks, cpmResult, resources, cal, sprints) {
   leaves.forEach(t => {
     const eff = effectivePredecessors(byId, t);
     leafPredsOf[t.id] = eff.filter(d => leafIdSet.has(d.id)).map(d => ({ from: d.id, type: d.type, lag: d.lag }));
-    groupPredsOf[t.id] = eff.filter(d => isGroupId(tasks, d.id)).map(d => ({ from: d.id, type: d.type, lag: d.lag }));
+    groupPredsOf[t.id] = eff.filter(d => summaryIds.has(d.id)).map(d => ({ from: d.id, type: d.type, lag: d.lag }));
   });
 
   const groupLeavesCache = {};
@@ -397,8 +444,7 @@ export function levelResources(tasks, cpmResult, resources, cal, sprints) {
     const stack = [groupId];
     while (stack.length) {
       const id = stack.pop();
-      tasks.forEach(t => {
-        if (t.parentId !== id) return;
+      (childrenById.get(id) || []).forEach(t => {
         if (leafIdSet.has(t.id)) out.push(t.id); else stack.push(t.id);
       });
     }
@@ -418,6 +464,23 @@ export function levelResources(tasks, cpmResult, resources, cal, sprints) {
   const allocations = {};
   const remaining = new Set(leaves.map(t => t.id));
   const warnings = [];
+  // Fixed calendar occurrences reserve their full load before movable work, regardless
+  // of WBS order, float, progress, dependencies, sprints or the workday calendar.
+  const fixed = leaves.filter(t => isOccurrenceTask(t));
+  fixed.forEach(task => {
+    placed[task.id] = { start: task.startDate, finish: task.endDate };
+    const alloc = occurrenceLoads(task);
+    if (task.duration > 0) allocations[task.id] = { alloc, idle: [] };
+    if (task.assigneeId && resById[task.assigneeId]) commitAllocation(ledger, task.assigneeId, task.id, alloc);
+    remaining.delete(task.id);
+  });
+  fixed.forEach(task => {
+    const resource = resById[task.assigneeId];
+    const allocation = allocations[task.id];
+    if (!resource || !allocation || !allocationExceedsCapacity(ledger, resource, allocation.alloc)) return;
+    allocation.overCapacity = true;
+    warnings.push(fixedCapacityWarning(task, resource));
+  });
 
   function isReady(id) {
     if (!leafPredsOf[id].every(d => placed[d.from])) return false;
@@ -538,7 +601,7 @@ export function levelResources(tasks, cpmResult, resources, cal, sprints) {
 /**
  * @typedef {Object} LevelWarning
  * リソース平準化の警告（稼働上限内での割当不成立）。
- * @property {"capacity-exceeded"} code
+ * @property {"capacity-exceeded"|"fixed-occurrence-capacity-exceeded"} code
  * @property {string} taskId
  * @property {{taskName: string, resourceName: string, duration: number, dailyCapacity: number,
  *   weeklyCapacity: number, monthlyCapacity: number, searchWorkdays: number, start: string}} params
@@ -560,14 +623,30 @@ export function levelResources(tasks, cpmResult, resources, cal, sprints) {
  * @returns {{schedule: Map<string, ScheduleEntry>, levelWarnings: LevelWarning[]}}
  */
 export function buildDisplaySchedule(tasks, cpmResult, resources, cal, sprints, opts = {}) {
+  tasks = expandRecurringTasks(tasks);
   const schedule = new Map(cpmResult);
   if (!opts.leveling) {
     tasks.forEach(t => {
       const s = schedule.get(t.id);
       if (!s || s.isSummary || !s.schedStart || !(t.duration > 0)) return;
-      schedule.set(t.id, { ...s, allocation: { alloc: dailyLoads(cal, s.schedStart, t.duration), idle: [] } });
+      schedule.set(t.id, { ...s, allocation: { alloc: isOccurrenceTask(t) ? occurrenceLoads(t) : dailyLoads(cal, s.schedStart, t.duration), idle: [] } });
     });
-    return { schedule, levelWarnings: [] };
+    // Diagnose capacity conflicts for immovable occurrences even when leveling is off.
+    const ledger = createCapacityLedger();
+    const resourceById = new Map((resources || []).map(r => [r.id, r]));
+    tasks.forEach(t => {
+      const alloc = schedule.get(t.id)?.allocation?.alloc;
+      if (alloc && resourceById.has(t.assigneeId)) commitAllocation(ledger, t.assigneeId, t.id, alloc);
+    });
+    const levelWarnings = [];
+    tasks.filter(t => isOccurrenceTask(t)).forEach(t => {
+      const resource = resourceById.get(t.assigneeId), s = schedule.get(t.id);
+      if (!resource || !s?.allocation || !allocationExceedsCapacity(ledger, resource, s.allocation.alloc)) return;
+      schedule.set(t.id, { ...s, allocation: { ...s.allocation, overCapacity: true } });
+      levelWarnings.push(fixedCapacityWarning(t, resource));
+    });
+    rollupSummaries(tasks, schedule);
+    return { schedule, levelWarnings };
   }
   const { placed, warnings, allocations } = levelResources(tasks, cpmResult, resources || [], cal, sprints);
   for (const [id, dates] of Object.entries(placed)) {
@@ -638,7 +717,7 @@ export function computeAutoSchedule(tasks, cal, projectStart, sprints, resources
   const auto = runCPM(tasks, cal, projectStart, sprints, { respectManualPins: false });
   const out = new Map();
   tasks.forEach(t => {
-    if (isGroupId(tasks, t.id)) return;
+    if (isRecurringTask(t) || isOccurrenceTask(t) || isGroupId(tasks, t.id)) return;
     const s = auto.result.get(t.id);
     if (s && s.schedStart && !s.isSummary) out.set(t.id, s.schedStart);
   });
@@ -648,6 +727,7 @@ export function computeAutoSchedule(tasks, cal, projectStart, sprints, resources
   const byId = {}; tasks.forEach(t => (byId[t.id] = t));
   Object.entries(placed).forEach(([id, dates]) => {
     const t = byId[id];
+    if (!t || isRecurringTask(t) || isOccurrenceTask(t)) return;
     if (!opts.leveling && t && t.milestone && t.milestoneMode === "fixed") return;
     if (dates && dates.start) out.set(id, dates.start);
   });

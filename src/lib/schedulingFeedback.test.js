@@ -47,3 +47,10 @@ describe("scheduling feedback", () => {
     expect(schedulingFeedbackStatus(false, [{}], [{}], [{}])).toEqual({ status: "notConverged", issueCount: 3 });
   });
 });
+
+it("does not write auto-scheduled dates into recurring series", () => {
+  const task = { id: "series", startDate: "2024-01-31", recurrence: { frequency: "monthly", interval: 1 } };
+  const result = applyScheduleStartDates([task], new Map([["series", "2024-02-01"]]));
+  expect(result.tasks[0]).toBe(task);
+  expect(result.changedIds.size).toBe(0);
+});

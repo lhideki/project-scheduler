@@ -64,6 +64,7 @@ export function taskCellPatch(task, column, rawText, context) {
     case "name":
       return { ok: true, patch: { name: text } };
     case "startDate":
+      if (task.recurrence) return { ok: false, patch: {}, error: "protected-recurrence" };
       if (hasChildren || (!emptyMark(text) && !validISODate(text))) return { ok: false, patch: {} };
       return task.milestone
         ? { ok: true, patch: { fixedDate: emptyMark(text) ? "" : text, startDate: emptyMark(text) ? "" : text } }
@@ -119,18 +120,22 @@ export function taskRowText(task, context) {
   return WBS_EDITABLE_COLUMNS.map(column => taskCellText(task, column, context)).join("\t");
 }
 
-/** TSVの1行を対象タスクへ貼り付ける。互換性のないセルがあればerrorsへ列名を返す。 */
+/** TSVの1行を対象タスクへ貼り付ける。互換性のない列はerrors、保護された繰り返し日付は行全体を拒否する。 */
 export function taskRowPatch(task, text, context) {
   const values = String(text ?? "").replace(/\r/g, "").split("\n")[0].split("\t");
   const patch = {};
   const errors = [];
+  let error;
   WBS_EDITABLE_COLUMNS.forEach((column, index) => {
     if (index >= values.length) return;
     const parsed = taskCellPatch(task, column, values[index], context);
     if (parsed.ok) Object.assign(patch, parsed.patch);
-    else errors.push(column);
+    else {
+      errors.push(column);
+      if (parsed.error) error = parsed.error;
+    }
   });
-  return { patch, errors };
+  return error ? { patch: {}, errors, error } : { patch, errors };
 }
 
 /** アプリ内の行コピーでは型を保ったまま貼り付け、ID・階層・行順などの構造情報は変更しない。 */

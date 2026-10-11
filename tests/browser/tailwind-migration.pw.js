@@ -9,14 +9,22 @@ import { PNG } from "pngjs";
 // before/after/diff PNGs, computed reports and failure context instead.
 test.use({ trace: "off", actionTimeout: 10_000 });
 
-// A live rendering of the immutable v3 build avoids OS/font-dependent golden
-// screenshots and cannot accidentally bless the candidate via --update-snapshots.
+// Live rendering of immutable HTML references avoids OS/font-dependent golden
+// screenshots and cannot bless the candidate via --update-snapshots. The detail
+// reference explicitly includes Issue #60; all other states keep the v3 reference.
 const BASELINE_COMMIT = "e029cc66e2e806e01c040780ebc7e70c5b360384";
 const BASELINE_SHA256 = "da7be2493ba179390844ecfce414b46b6587a901b2d7400d7014c64944bbbe7c";
 const NOW = "2026-10-08T12:00:00.000Z";
 const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
 const baselineBytes = gunzipSync(await readFile(new URL("./fixtures/tailwind-v3-e029cc66.html.gz", import.meta.url)));
 if (sha256(baselineBytes) !== BASELINE_SHA256) throw new Error("The immutable Tailwind v3 baseline checksum does not match");
+const DETAIL_SHA256 = "36bdda084a4192aa7d7e5541626a018d4764ce1b9c45dd0a1e2d4e3f7ddcca98";
+const detailBytes = gunzipSync(await readFile(new URL("./fixtures/recurrence-detail-issue60.html.gz", import.meta.url)));
+if (sha256(detailBytes) !== DETAIL_SHA256) throw new Error("The immutable recurring-task detail reference checksum does not match");
+const references = {
+  migration: { bytes: baselineBytes, commit: BASELINE_COMMIT, sha256: BASELINE_SHA256, source: "Tailwind v3 migration baseline", testTitle: "Tailwind v3 to v4", prefix: "57" },
+  detail: { bytes: detailBytes, commit: null, sha256: DETAIL_SHA256, source: "Issue #60 intentional recurring-task detail layout; see fixtures/recurrence-detail-issue60.md", testTitle: "Recurring-task detail visual regression", prefix: "60" },
+};
 
 function projectFixture() {
   const tasks = [
@@ -81,6 +89,7 @@ const scenarios = [
   },
   {
     name: "task-detail-modal",
+    reference: "detail",
     async open(page) {
       // The toolbar entry works without scrolling the WBS action column into view.
       await page.locator('[data-wbs-cell="design:name"]').click();
@@ -263,12 +272,25 @@ async function computedEvidence(page) {
       }
       return colorCache.get(color);
     }
+    // SVG titles/descriptions are accessibility metadata, not rendered labels.
+    // Ignore only those text nodes in diagnostic element identities (including
+    // ancestor divs); keep all measured styles, rectangles and pixels unchanged.
+    function visualTextKey(element) {
+      if (element.value != null) return element.value;
+      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, {
+        acceptNode: node => node.parentElement?.closest("svg title, svg desc")
+          ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+      });
+      let text = "";
+      while (walker.nextNode()) text += walker.currentNode.nodeValue;
+      return text;
+    }
     const selectors = ".ps-app-root, .ps-app-root > div, .w-7.h-7, button, input, select, textarea, table, thead, th, td, h3, [role=menu], [data-wbs-cell], .fixed, .fixed > div, svg";
     const elements = [...document.querySelectorAll(selectors)].filter(isRendered).map((element, index) => {
       const style = getComputedStyle(element);
       const verticalSpaceChild = spacingClasses(element.parentElement).length > 0;
       return {
-        key: `${index}:${element.tagName.toLowerCase()}:${element.getAttribute("data-wbs-cell") || element.getAttribute("data-testid") || element.getAttribute("aria-label") || element.getAttribute("role") || (element.value ?? element.textContent).trim().slice(0, 70)}`,
+        key: `${index}:${element.tagName.toLowerCase()}:${element.getAttribute("data-wbs-cell") || element.getAttribute("data-testid") || element.getAttribute("aria-label") || element.getAttribute("role") || visualTextKey(element).trim().slice(0, 70)}`,
         rect: rectOf(element),
         // v3 puts space-y on the following child's top; v4 puts it on the
         // preceding child's bottom. Compare the resulting gaps below, while
@@ -409,7 +431,8 @@ const withoutDiagnostics = evidence => ({
 
 for (const [device, viewport] of [["desktop", { width: 1600, height: 1000 }], ["mobile", { width: 390, height: 844 }]]) {
   for (const scenario of scenarios) {
-    test(`Tailwind v3 to v4: ${device} ${scenario.name}`, async ({ browser }, testInfo) => {
+    const reference = references[scenario.reference || "migration"];
+    test(`${reference.testTitle}: ${device} ${scenario.name}`, async ({ browser }, testInfo) => {
       test.setTimeout(60_000);
       const contextOptions = { viewport, deviceScaleFactor: 1, locale: "en-US", timezoneId: "UTC", colorScheme: "light", reducedMotion: "reduce", serviceWorkers: "block", isMobile: device === "mobile", hasTouch: device === "mobile" };
       const beforeContext = await browser.newContext(contextOptions);
@@ -417,13 +440,13 @@ for (const [device, viewport] of [["desktop", { width: 1600, height: 1000 }], ["
       const contexts = [beforeContext, afterContext];
       const pages = {};
       const captured = new Set();
-      const prefix = `57-${device}-${scenario.name}`;
+      const prefix = `${reference.prefix}-${device}-${scenario.name}`;
       const browserErrors = { before: [], after: [] };
       const blockedRequests = { before: [], after: [] };
       const project = scenario.prepareProject ? scenario.prepareProject(projectFixture()) : projectFixture();
       let primaryError;
       try {
-        pages.before = await boot(beforeContext, baselineBytes, browserErrors.before, blockedRequests.before, project);
+        pages.before = await boot(beforeContext, reference.bytes, browserErrors.before, blockedRequests.before, project);
         pages.after = await boot(afterContext, await readFile("project_scheduler.html"), browserErrors.after, blockedRequests.after, project);
         const screenshots = {};
         const evidence = {};
@@ -438,7 +461,7 @@ for (const [device, viewport] of [["desktop", { width: 1600, height: 1000 }], ["
         const { diffPng: nonAADiff, ...antialiasComparison } = antialiasEvidence(screenshots.before, screenshots.after);
         const styleAndGeometryDifferences = differences(withoutDiagnostics(evidence.before), withoutDiagnostics(evidence.after));
         const report = {
-          baselineCommit: BASELINE_COMMIT, baselineHtmlSha256: BASELINE_SHA256,
+          baselineCommit: reference.commit, baselineHtmlSha256: reference.sha256, baselineSource: reference.source,
           candidateHtmlSha256: sha256(await readFile("project_scheduler.html")),
           chromium: browser.version(), device, scenario: scenario.name, viewport, fixedTime: NOW,
           pixelPolicy: "Pixelmatch threshold=0, includeAA=false; zero non-antialiased changed pixels allowed. Exact raw RGBA counts/diffs are retained separately. No masks, color-distance tolerance, or changed-pixel budget.",
@@ -451,18 +474,18 @@ for (const [device, viewport] of [["desktop", { width: 1600, height: 1000 }], ["
         await writeFile(reportPath, JSON.stringify(report, null, 2));
         await testInfo.attach(`${prefix}-comparison.json`, { path: reportPath, contentType: "application/json" });
         if (pixels.changedPixels > 0) {
-          // Diagnose raster variance with a genuinely independent v3 rendering.
+          // Diagnose raster variance with an independent rendering of this exact reference.
           // This is evidence only: it never changes the candidate's zero-non-AA gate.
           const controlReport = {
-            baselineCommit: BASELINE_COMMIT, baselineHtmlSha256: BASELINE_SHA256,
+            baselineCommit: reference.commit, baselineHtmlSha256: reference.sha256, baselineSource: reference.source,
             chromium: browser.version(), device, scenario: scenario.name, viewport, fixedTime: NOW,
-            purpose: "Independent immutable-v3 versus immutable-v3 rendering control; does not relax candidate assertions",
+            purpose: "Independent selected-reference versus selected-reference rendering control; does not relax candidate assertions",
             browserErrors: [], blockedRequests: [],
           };
           try {
             const controlContext = await browser.newContext(contextOptions);
             contexts.push(controlContext);
-            pages.control = await boot(controlContext, baselineBytes, controlReport.browserErrors, controlReport.blockedRequests, project);
+            pages.control = await boot(controlContext, reference.bytes, controlReport.browserErrors, controlReport.blockedRequests, project);
             await scenario.open(pages.control);
             const controlScreenshot = await stableScreenshot(pages.control);
             await testInfo.attach(`${prefix}-baseline-control.png`, { body: controlScreenshot, contentType: "image/png" });

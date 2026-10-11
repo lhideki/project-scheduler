@@ -9,7 +9,7 @@
      node cli.mjs validate <file> [--leveling on|off|auto]
      node cli.mjs recalc   <file> [--leveling on|off|auto]
      node cli.mjs plan     <original.json> <edited.json> [--leveling on|off|auto]
-     node cli.mjs explain  <file> --task <taskId> [--leveling on|off|auto]
+     node cli.mjs explain  <file> --task <taskId> [--occurrence YYYY-MM-DD] [--leveling on|off|auto]
 
    出力は常に構造化JSON（stdout）。エージェントが日本語サマリーへ整形して提示する。
    ロジックの正は src/lib/。このファイルとバンドル成果物 cli.mjs には計算ロジックを書かない。
@@ -20,6 +20,7 @@ import { pathToFileURL } from "node:url";
 
 import {
   toISO, buildHolidayMap, makeCalendar,
+  expandRecurringTasks, occurrenceId, isOccurrenceTask,
   runCPM, buildDisplaySchedule, deriveProjectStart,
   candidateFromDep, earliestSprintFloor, computeAutoSchedule,
   idleSegments,
@@ -174,6 +175,13 @@ export function scheduleRows(data, schedule) {
       critical: !!s.critical,
       float: typeof s.float === "number" ? s.float : null,
       governed: !!s.governed,
+      ...(s.occurrences ? {
+        occurrences: s.occurrences.map(occurrence => ({
+          id: occurrence.id, occurrenceDate: occurrence.occurrenceDate,
+          schedStart: occurrence.schedStart, schedFinish: occurrence.schedFinish,
+        })),
+        recurrenceMetadata: s.recurrenceMetadata,
+      } : {}),
     };
   });
 }
@@ -219,7 +227,7 @@ export function applyAutoSchedule(data, projectStart, cal, opts = {}) {
   );
   const changed = [];
   const tasks = data.tasks.map(t => {
-    if (isGroupId(data.tasks, t.id) || !startDates.has(t.id)) return t;
+    if (t.recurrence || isGroupId(data.tasks, t.id) || !startDates.has(t.id)) return t;
     const to = startDates.get(t.id);
     if (t.startDate !== to) changed.push({ id: t.id, from: t.startDate ?? null, to });
     return { ...t, startDate: to };
@@ -429,7 +437,8 @@ function cmdPlan(positional, opts) {
     const startChanged = b.schedStart !== a.schedStart;
     const finishChanged = b.schedFinish !== a.schedFinish;
     const critChanged = b.critical !== a.critical;
-    if (!startChanged && !finishChanged && !critChanged) continue;
+    const occurrencesChanged = JSON.stringify(b.occurrences) !== JSON.stringify(a.occurrences);
+    if (!startChanged && !finishChanged && !critChanged && !occurrencesChanged) continue;
     let shiftWorkdays;
     if (startChanged && b.schedStart && a.schedStart) {
       shiftWorkdays = after.cal.workdaysBetween(b.schedStart, a.schedStart);
@@ -439,6 +448,7 @@ function cmdPlan(positional, opts) {
       ...(startChanged ? { schedStart: { from: b.schedStart, to: a.schedStart } } : {}),
       ...(finishChanged ? { schedFinish: { from: b.schedFinish, to: a.schedFinish } } : {}),
       ...(critChanged ? { critical: { from: b.critical, to: a.critical } } : {}),
+      ...(occurrencesChanged ? { occurrences: { from: b.occurrences || [], to: a.occurrences || [] } } : {}),
       ...(shiftWorkdays !== undefined ? { shiftWorkdays } : {}),
     });
   }
@@ -484,10 +494,14 @@ function cmdPlan(positional, opts) {
 function cmdExplain(positional, opts) {
   const [path] = positional;
   const taskId = opts.task;
-  if (!path || !taskId) fail("使い方: explain <file> --task <taskId> [--leveling on|off|auto]");
+  if (!path || !taskId) fail("使い方: explain <file> --task <taskId> [--occurrence YYYY-MM-DD] [--leveling on|off|auto]");
   const data = normalizeOrFail(readProjectFile(path), path);
-  const task = data.tasks.find(t => t.id === taskId);
-  if (!task) fail(`タスクが見つかりません: ${taskId}`);
+  const storedTask = data.tasks.find(t => t.id === taskId);
+  if (!storedTask) fail(`タスクが見つかりません: ${taskId}`);
+  const expandedTasks = expandRecurringTasks(data.tasks);
+  const selectedId = opts.occurrence ? occurrenceId(taskId, opts.occurrence) : taskId;
+  const task = expandedTasks.find(t => t.id === selectedId);
+  if (!task) fail(`対象期間内の回が見つかりません: ${taskId} @ ${opts.occurrence}`);
 
   const leveling = resolveLeveling(opts.leveling, data);
   const computed = tryComputeSchedule(data, { respectManualPins: true, leveling });
@@ -495,24 +509,38 @@ function cmdExplain(positional, opts) {
     return emit({ command: "explain", file: path, computeFailed: true, error: computed.error, integrityIssues: analyzeIntegrity(data).map(formatIssue) });
   }
   const r = computed.result;
-  const s = r.schedule.get(taskId) || {};
+  const s = r.schedule.get(selectedId) || {};
 
   const byId = {};
-  data.tasks.forEach(t => (byId[t.id] = t));
+  expandedTasks.forEach(t => (byId[t.id] = t));
+  const nameOf = id => {
+    const value = byId[id];
+    const name = value?.name || id;
+    return isOccurrenceTask(value) ? `${name} [${value.occurrenceDate}]` : name;
+  };
   const sprintById = {};
   (data.sprints || []).forEach(sp => (sprintById[sp.id] = sp));
 
   let predecessors = [];
-  if (!isGroupId(data.tasks, taskId)) {
+  if (!isGroupId(expandedTasks, selectedId)) {
     predecessors = effectivePredecessors(byId, task).map(dep => {
       const ps = r.schedule.get(dep.id) || {};
-      let candidate = null;
+      let candidate = null, requiredDate = null;
+      const side = dep.type === "FF" || dep.type === "SF" ? "finish" : "start";
       if (ps.schedStart && ps.schedFinish) {
-        candidate = candidateFromDep(r.cal, dep, { start: ps.schedStart, finish: ps.schedFinish }, task.duration || 0).start;
+        const dates = { start: ps.schedStart, finish: ps.schedFinish };
+        // Finish constraints keep their actual endpoint, including fixed weekends.
+        // candidateFromDep computes a movable start and snaps FF/SF to a workday.
+        requiredDate = side === "finish"
+          ? r.cal.shift(dep.type === "FF" ? dates.finish : dates.start, dep.lag)
+          : candidateFromDep(r.cal, dep, dates, 0).start;
+        candidate = isOccurrenceTask(task) && side === "finish" ? null : candidateFromDep(r.cal, dep, dates, task.duration || 0).start;
       }
       return {
-        id: dep.id,
-        name: nameOf(data.tasks, dep.id),
+        id: dep.occurrenceSeriesId || dep.id,
+        ...(dep.occurrenceDate ? { occurrenceDate: dep.occurrenceDate } : {}),
+        name: nameOf(dep.id),
+        requiredSide: side, requiredDate,
         type: dep.type,
         lag: dep.lag,
         predFinish: ps.schedFinish ?? null,
@@ -539,7 +567,9 @@ function cmdExplain(positional, opts) {
     command: "explain",
     file: path,
     task: {
-      id: task.id,
+      id: taskId,
+      ...(isOccurrenceTask(task) ? { occurrenceDate: task.occurrenceDate } : {}),
+      ...(storedTask.recurrence ? { recurrence: storedTask.recurrence } : {}),
       name: task.name,
       duration: task.duration ?? null,
       startDate: task.startDate ?? null,
@@ -556,13 +586,14 @@ function cmdExplain(positional, opts) {
       float: typeof s.float === "number" ? s.float : null,
       critical: !!s.critical,
       governed: !!s.governed,
+      ...(s.occurrences ? { occurrences: s.occurrences.map(o => ({ occurrenceDate: o.occurrenceDate, schedStart: o.schedStart, schedFinish: o.schedFinish })), recurrenceMetadata: s.recurrenceMetadata } : {}),
     },
     drivers: {
       pinned: isPinned,
-      pinnedReason: (task.progress || 0) > 0
+      pinnedReason: storedTask.recurrence ? "繰り返しの各回は固定暦日（自動スケジューリングでも移動しない）" : (task.progress || 0) > 0
         ? "進捗率が入力済み（着手済み）のため開始日に固定"
         : (task.startDate ? "開始日が手入力されているため通常表示では固定（自動スケジューリング実行では無視）" : null),
-      bindingPredecessor: bindingPred ? { id: bindingPred.id, name: bindingPred.name, impliedStart: bindingPred.impliedStart } : null,
+      bindingPredecessor: bindingPred ? { id: bindingPred.id, ...(bindingPred.occurrenceDate ? { occurrenceDate: bindingPred.occurrenceDate } : {}), name: bindingPred.name, impliedStart: bindingPred.impliedStart } : null,
       sprintFloor,
       sprintFloorApplied,
       fixedMilestoneBackward: !!(task.milestone && task.milestoneMode === "fixed"),
@@ -575,7 +606,7 @@ function cmdExplain(positional, opts) {
       days: s.allocation.alloc,
       idleSegments: idleSegments(s.allocation.idle, s.allocation.alloc).map(seg => ({
         ...seg,
-        taskNames: seg.taskIds.map(id => nameOf(data.tasks, id)),
+        taskNames: seg.taskIds.map(id => nameOf(id)),
       })),
       overCapacity: !!s.allocation.overCapacity,
     } : null,
@@ -605,7 +636,7 @@ function main() {
         "  validate <file> [--leveling on|off|auto]",
         "  recalc   <file> [--leveling on|off|auto]",
         "  plan     <original.json> <edited.json> [--reschedule] [--leveling on|off|auto]",
-        "  explain  <file> --task <taskId> [--leveling on|off|auto]",
+        "  explain  <file> --task <taskId> [--occurrence YYYY-MM-DD] [--leveling on|off|auto]",
         "",
         "出力は構造化JSON。このCLIはJSONファイルを書き換えません。",
         "",

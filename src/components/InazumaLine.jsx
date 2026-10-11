@@ -31,6 +31,9 @@ export function InazumaLine({ flat, schedule, xOf, dayWidth, cal, baseDateISO, r
   flat.forEach((t, i) => {
     const s = schedule.get(t.id);
     if (!s || !s.schedStart || !s.schedFinish) return;
+    // A recurring row has separate fixed bars. Its envelope includes gaps and cannot
+    // represent one cumulative progress point; each bar still shows shared progress.
+    if (s.occurrences) return;
     // 展開中のグループ行はスキップ（次の行が自分の配下なら展開されている）
     const expandedGroup = t.hasChildren && flat[i + 1] && flat[i + 1].level > t.level;
     if (expandedGroup) return;

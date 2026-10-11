@@ -9,10 +9,13 @@ export function buildVersionSnapshot(data, schedule, name) {
     const result = schedule.get(task.id) || {};
     return {
       id: task.id, name: task.name, level: task.level, wbsNo: task.wbsNo, hasChildren: task.hasChildren,
-      schedStart: result.schedStart, schedFinish: result.schedFinish, critical: !!result.critical,
+      schedStart: result.schedStart || undefined, schedFinish: result.schedFinish || undefined, critical: !!result.critical,
       milestone: !!task.milestone, duration: typeof task.duration === "number" ? task.duration : null,
       assigneeId: task.assigneeId || null,
       progress: typeof result.progress === "number" ? result.progress : 0,
+      ...(result.occurrences ? { occurrences: result.occurrences.map(occurrence => ({
+        occurrenceDate: occurrence.occurrenceDate, schedStart: occurrence.schedStart, schedFinish: occurrence.schedFinish,
+      })) } : {}),
     };
   });
   return {

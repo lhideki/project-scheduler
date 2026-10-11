@@ -34,3 +34,5 @@ export {
   checkFieldShapes, analyzeIntegrity, findParentCycles, validateProjectData,
   projectDependencyIssue, isBlockingProjectIssue,
 } from "../lib/projectValidation.js";
+
+export { expandRecurringTasks, occurrenceId, isOccurrenceTask } from "../lib/recurrence.js";
