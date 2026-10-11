@@ -115,6 +115,8 @@ export function generateOccurrences(task) {
       ...base, id: occurrenceId(task.id, date), seriesId: task.id, occurrenceDate: date,
       parentId: task.id, order: result.occurrences.length, isOccurrence: true, isRecurringSummary: false, [INTERNAL_KIND]: "occurrence",
       startDate, endDate, milestone: false, milestoneMode: undefined, fixedDate: undefined,
+      progress: typeof override.progress === "number" ? override.progress : (task.progress || 0),
+      skipped: override.skipped === true,
       predecessors: (Array.isArray(override.predecessors) ? override.predecessors : task.predecessors || []).map(d => ({ ...d })),
     });
     return true;
@@ -147,9 +149,10 @@ export function generateOccurrences(task) {
   return result;
 }
 
-/** Uniform effort over the complete fixed calendar span, including non-working days. */
+/** Uniform effort over the complete fixed calendar span, including non-working days.
+ * Skipped occurrences retain their span but consume no capacity. */
 export function occurrenceLoads(task) {
-  if (!(task.duration > 0) || !isISODate(task.startDate) || !isISODate(task.endDate)) return [];
+  if (task.skipped || !(task.duration > 0) || !isISODate(task.startDate) || !isISODate(task.endDate)) return [];
   const days = Math.round((Date.parse(task.endDate) - Date.parse(task.startDate)) / DAY_MS) + 1;
   if (days <= 0 || days > MAX_RECURRENCE_SPAN_DAYS) return [];
   // Distribute the ledger's micro-day units as evenly as possible, preserving total
@@ -174,7 +177,11 @@ export function expandRecurringTasks(tasks = []) {
       metadata.invalidReason = "occurrence-id-collision";
       occurrences = [];
     }
-    expanded.push({ ...task, isRecurringSummary: true, isOccurrence: false, [INTERNAL_KIND]: "series", recurrencePredecessors: task.predecessors || [], predecessors: [], recurrenceMetadata: { ...metadata, occurrenceCount: occurrences.length } });
+    const skippedOccurrenceCount = occurrences.filter(occurrence => occurrence.skipped).length;
+    expanded.push({ ...task, isRecurringSummary: true, isOccurrence: false, [INTERNAL_KIND]: "series", recurrencePredecessors: task.predecessors || [], predecessors: [], recurrenceMetadata: {
+      ...metadata, occurrenceCount: occurrences.length, skippedOccurrenceCount,
+      activeOccurrenceCount: occurrences.length - skippedOccurrenceCount,
+    } });
     expanded.push(...occurrences);
   }
   // Keep original IDs on dependency metadata for diagnostics, even when a referenced

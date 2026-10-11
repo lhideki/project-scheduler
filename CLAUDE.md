@@ -121,7 +121,7 @@ bee（`@nulab/bee` 1.1 以上、Backlog公式CLI）経由で保存JSONと Backlo
 
 ### データモデル（すべてトップレベルReact state、`window.storage` に永続化）
 
-- `tasks`: フラット配列。`parentId` によりWBS階層（グループ／リーフタスク）を表現。グループ専用のエンティティは存在せず、共通ヘルパー `isGroupId(tasks, id)` で判定する。
+- `tasks`: フラット配列。`parentId` によりWBS階層（グループ／リーフタスク）を表現。グループ専用のエンティティは存在せず、共通ヘルパー `isGroupId(tasks, id)` で判定する。繰り返しのraw `task.progress`は個別進捗がない回の継承基準値として保持し、計算したシリーズ平均では上書きしない。各回の進捗・スキップは `occurrenceOverrides[元の日付].progress/skipped` に保存する。
 - `projectName`: 表示用の名前（文字列、既定 `""`）。`src/lib/projectName.js` で前後の空白を除き、未設定・空白のみは翻訳可能な既定名を表示する（既定表示名を保存しない）。全読み込み経路・自動保存・JSON・共有HTML・CLI提案で保持する。ID・保存先・既存ファイル名・`schedule`関連付けとは独立。新規ダウンロードの既定名には`exportFilename.js`で安全化したコピーを使う。同名可。タスクUndo・日程バージョンのスナップショット/復元には含めず、復元で現在の名前を巻き戻さない。
 - `resources`: 担当者（週次・月次の稼働上限を持つ。上限値 `0`・未設定は「その上限を適用しない」。日次の上限は1人日固定）。
 - `sprints`: `{id, name, theme, startDate, endDate, order}`。タスク側は `sprintIds`（配列）で複数参照できる（1タスク=複数スプリント可、グループには持たせない）。旧形式の単一 `sprintId` で保存されたデータは `migrateSprintIds()` で自動変換する（適用しているのは localStorage からの読み込み・共有用HTML（embedded）の初期化・バージョン復元。JSONの「読み込み」と linked の読み込みでは変換しない）。
@@ -267,11 +267,14 @@ Playwrightは `scripts/serve-test.mjs` で `127.0.0.1:4173` のローカルサ�
 - Live Demo の言語別ページに関わる変更をした場合は、`PAGES_BASE_URL=http://localhost:<port>/project-scheduler/ npm run build:pages` で生成した `_site/` を `/project-scheduler/` 配下で配信し、`ja/`・`en/` がブラウザの言語・保存済みの選択に関わらずその言語で開くこと、そのページで言語を切り替えると URL が切り替え先のページに変わること（Default では変わらないこと）
 
 
-## 繰り返しタスク（Issue #60）
+## 繰り返しタスク（Issue #60・#64）
 
 - `src/lib/recurrence.js` が暦日ベースの規則・安定した元日付ID・有限展開を管理する。保存値は1シリーズ1タスクで、`recurrence` と `occurrenceOverrides`（元の予定日がキー）を分離する。詳細は `docs/recurring-tasks.md`。
 - `runCPM` / `buildDisplaySchedule` / `levelResources` / 依存診断は raw tasks を受け取り、計算内部だけでシリーズ集約＋各回へ展開する。生成IDの`@recurrence:`接頭辞は保存用タスクIDに使えない。展開済み判定は非公開Symbolで行い、JSONの拡張フィールドから偽装しない。
 - 各回のstart/endは固定暦日。休日補正・スプリント・依存関係・平準化・自動書き戻しで変更しない。固定負荷を先に容量台帳へ登録し、矛盾は警告にする。
 - `schedule.get(seriesId).occurrences` と `recurrenceMetadata` をガント・リソース・CLIで参照する。viewportや本日を使って計算期間を変えない。特定回の依存は `{id:seriesId,occurrenceDate:originalISO,type,lag}`。元の日付キーを移動後の開始日に書き換えない。
-- 編集は規則/各回のローカル下書きを明示保存して1操作にする。取り消し・閉じる操作で保存しない。規則の変更・無効化で個別修正を削除/付け替えしない。グループ化・マイルストーン化では繰り返しの構造を壊さない。
+- 規則・各回の日程/依存のローカル下書きは明示保存して1操作にする。取り消し・閉じる操作で保存しない。各回一覧の進捗はEnter/blurで確定・Escapeで取消し、完了/スキップ/復帰も1操作にする。規則の変更・無効化で個別修正を削除/付け替えしない。グループ化・マイルストーン化では繰り返しの構造を壊さない。
+- 各回の実効進捗は個別 `progress`（有限数0〜100）を優先し、省略時はraw `task.progress`を引き継ぐ。`skipped`は任意booleanでtrueだけがスキップ。スキップは日程・依存・保存済み進捗を保持し、復帰でその進捗へ戻る。日程/依存の修正解除でも進捗・スキップ・拡張項目を削除しない。
+- シリーズ進捗は有限の計算対象期間内のスキップ以外の回の単純平均。全回スキップは内部0・画面は集計対象なし。`recurrenceMetadata.activeOccurrenceCount/skippedOccurrenceCount`を併記する。スキップした回は工数・リソース負荷から除外し、完了扱いにしない。スキップした特定回またはスキップした回を含むシリーズ全体への直接依存は`predecessor-occurrence-skipped`で警告し、参照・日程境界を保持する。
+- JSONはschemaVersion 1の任意項目のまま。比較用の各回スナップショット・CLI・Mermaidは実効進捗/スキップを表示し、rawTasksは基準進捗と個別修正をそのまま保存・復元する。
 - テストは `recurrence.test.js` / `recurringScheduling.test.js`（または scheduling/dependency テスト）・CLI・JSON検証・`tests/browser/recurrence.pw.js` で日付/上書き/保存/反復操作を確認する。

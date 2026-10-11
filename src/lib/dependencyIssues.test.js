@@ -346,6 +346,36 @@ describe("自動スケジューリング実行後の開始日との矛盾", () =
 
 describe("recurring occurrence diagnostics", () => {
   const recurring = (changes = {}) => task({ id: "R", name: "Review", startDate: "2024-01-13", duration: 1, recurrence: { frequency: "weekly", interval: 1, endDate: "2024-01-20" }, ...changes });
+  it.each(["FS", "SS", "FF", "SF"])("reports a skipped %s predecessor even when dates and successor progress otherwise satisfy it", type => {
+    const tasks = [recurring({ progress: 100, occurrenceOverrides: { "2024-01-13": { skipped: true } } }), task({ id: "A", startDate: "2024-02-01", progress: 100, predecessors: [{ id: "R", occurrenceDate: "2024-01-13", type, lag: 0 }] })];
+    for (const issues of [detectDependencyIssues(tasks), detect(tasks)]) {
+      expect(issues).toContainEqual(expect.objectContaining({ code: "predecessor-occurrence-skipped", severity: "warning", blocking: false, ids: ["A"], predecessorId: "R", params: expect.objectContaining({ predName: "Review [2024-01-13]", predecessorOccurrenceDate: "2024-01-13", predecessorSeriesId: "R" }) }));
+    }
+    const restored = [{ ...tasks[0], occurrenceOverrides: { "2024-01-13": { skipped: false } } }, tasks[1]];
+    expect(detect(restored).filter(issue => issue.code === "predecessor-occurrence-skipped")).toEqual([]);
+    expect(tasks[1].predecessors).toEqual([{ id: "R", occurrenceDate: "2024-01-13", type, lag: 0 }]);
+  });
+
+  it("keeps skipped occurrence edges in cycle detection and maps override diagnostics to original identities", () => {
+    const tasks = [recurring({ occurrenceOverrides: {
+      "2024-01-13": { skipped: true, startDate: "2024-02-01", predecessors: [{ ...fs("R"), occurrenceDate: "2024-01-20" }] },
+      "2024-01-20": { predecessors: [{ ...fs("R"), occurrenceDate: "2024-01-13" }] },
+    } })];
+    const issues = detect(tasks);
+    expect(issues).toContainEqual(expect.objectContaining({ code: "dependency-cycle", ids: ["R"] }));
+    expect(issues).toContainEqual(expect.objectContaining({ code: "predecessor-occurrence-skipped", ids: ["R"], params: expect.objectContaining({ occurrenceDate: "2024-01-20", predecessorOccurrenceDate: "2024-01-13" }) }));
+  });
+
+  it.each([false, true])("warns when a whole-series dependency contains skipped occurrences (all skipped: %s)", allSkipped => {
+    const overrides = { "2024-01-13": { skipped: true }, ...(allSkipped ? { "2024-01-20": { skipped: true } } : {}) };
+    const tasks = [recurring({ progress: 100, occurrenceOverrides: overrides }), task({ id: "A", startDate: "2024-02-01", progress: 100, predecessors: [fs("R")] })];
+    for (const issues of [detectDependencyIssues(tasks), detect(tasks)]) {
+      expect(issues).toContainEqual(expect.objectContaining({ code: "predecessor-occurrence-skipped", severity: "warning", blocking: false, ids: ["A"], predecessorId: "R", params: { predName: "Review", skippedOccurrenceCount: allSkipped ? 2 : 1 } }));
+    }
+    expect(displaySchedule(tasks).get("R")).toMatchObject({ schedStart: "2024-01-13", schedFinish: "2024-01-20", progress: allSkipped ? 0 : 100 });
+    const restored = [{ ...tasks[0], occurrenceOverrides: {} }, tasks[1]];
+    expect(detect(restored).filter(issue => issue.code === "predecessor-occurrence-skipped")).toEqual([]);
+  });
   it("maps fixed-date dependency conflicts to the stored series, even with progress", () => {
     const tasks = [task({ id: "P", startDate: "2024-01-15", duration: 1 }), recurring({ progress: 50, predecessors: [fs("P")] })];
     const issues = detect(tasks).filter(i => i.code === "dependency-violation");

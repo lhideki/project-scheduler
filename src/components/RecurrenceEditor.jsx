@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { defaultCalculationEndDate, generateOccurrences, isRecurringTask, isISODate, MAX_RECURRENCE_SPAN_DAYS } from "../lib/recurrence.js";
 import { useI18n } from "./I18nProvider.jsx";
+import { OccurrenceProgressRow } from "./OccurrenceProgressRow.jsx";
 import { OccurrenceEditor } from "./OccurrenceEditor.jsx";
 
 const inputClass = "w-full min-w-0 border border-slate-200 rounded-md px-2.5 py-1.5 text-xs outline-hidden focus:border-indigo-400";
@@ -13,6 +14,7 @@ export function RecurrenceEditor({ task, schedule, idToNo, noToId, onUpdate, ini
   const [draft, setDraft] = useState(null);
   const [error, setError] = useState(null);
   const [selectedDate, setSelectedDate] = useState(initialOccurrenceDate || null);
+  const [scrollToEditor, setScrollToEditor] = useState(false);
   const recurring = isRecurringTask(task);
   const generated = recurring ? generateOccurrences(task) : null;
   const occurrences = generated?.occurrences || [];
@@ -83,11 +85,15 @@ export function RecurrenceEditor({ task, schedule, idToNo, noToId, onUpdate, ini
         <p className="text-[11px] text-amber-700">{t("recurrence.fixedDatesNote")}</p>
         {generated.truncated && <p role="alert" className="text-xs text-red-700">{t("recurrence.truncated")}</p>}
         {dormantCount > 0 && <p className="text-[11px] text-amber-700">{t("recurrence.dormantOverrides", { count: dormantCount })}</p>}
-        <div className="max-h-44 overflow-auto border border-slate-200 rounded-md divide-y divide-slate-100" aria-label={t("recurrence.occurrences")}>
-          {occurrences.map(o => <button key={o.id} type="button" className="flex w-full justify-between gap-2 text-left px-2 py-2 text-xs hover:bg-indigo-50 focus-visible:bg-indigo-50" onClick={() => setSelectedDate(o.occurrenceDate)}><span className="font-mono">{o.occurrenceDate}</span><span className="text-slate-500">{task.occurrenceOverrides?.[o.occurrenceDate] ? t("recurrence.overridden") : t("recurrence.editOccurrence")}</span></button>)}
+        <h4 className="text-sm font-semibold text-slate-700">{t("recurrence.occurrenceProgress")}</h4>
+        {selectedOccurrence && <p className="rounded-md border border-indigo-100 bg-indigo-50 px-3 py-2 text-xs text-indigo-700">{t("recurrence.selectedOccurrence", { date: fmtDate(selectedOccurrence.startDate) })}</p>}
+        <div className="max-h-80 overflow-auto border border-slate-200 rounded-md divide-y divide-slate-100" aria-label={t("recurrence.occurrences")}>
+          <div className="hidden sm:grid grid-cols-[minmax(0,1fr)_6rem_13rem] gap-3 px-3 py-2 bg-slate-50 text-[11px] text-slate-500 sticky top-0 z-10"><span>{t("recurrence.dateColumn")}</span><span>{t("taskDetail.progress")}</span><span className="text-right">{t("recurrence.actionsColumn")}</span></div>
+          {occurrences.map(o => <OccurrenceProgressRow key={o.id} task={task} occurrence={o} selected={selectedDate === o.occurrenceDate} onSelect={() => { setSelectedDate(o.occurrenceDate); setScrollToEditor(true); }} onUpdate={onUpdate} />)}
           {!occurrences.length && <p className="p-2 text-xs text-slate-500">{t("recurrence.noOccurrences")}</p>}
         </div>
-        {selectedOccurrence && <OccurrenceEditor key={`${task.id}:${selectedDate}`} task={task} occurrence={selectedOccurrence} idToNo={idToNo} noToId={noToId} onUpdate={onUpdate} onClose={() => setSelectedDate(null)} />}
+        <p className="text-[11px] text-slate-500">{t("recurrence.skipNote")}</p>
+        {selectedOccurrence && <OccurrenceEditor key={`${task.id}:${selectedDate}`} autoScroll={scrollToEditor} task={task} occurrence={selectedOccurrence} idToNo={idToNo} noToId={noToId} onUpdate={onUpdate} onClose={() => setSelectedDate(null)} />}
       </>}
     </section>
   );

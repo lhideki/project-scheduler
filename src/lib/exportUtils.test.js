@@ -243,3 +243,56 @@ it("exports individual recurring dates to Mermaid without excluding fixed weeken
   expect(output).toContain("2026-10-20, 2026-10-21");
   expect(output).not.toContain("excludes weekends");
 });
+
+
+describe("per-occurrence progress export", () => {
+  it("keeps schema-v1 progress and skip fields optional, bounded and extension-friendly", () => {
+    const override = PROJECT_JSON_SCHEMA.$defs.occurrenceOverride;
+    expect(PROJECT_SCHEMA_VERSION).toBe(1);
+    expect(override.properties.progress).toMatchObject({ type: "number", minimum: 0, maximum: 100 });
+    expect(override.properties.skipped.type).toBe("boolean");
+    expect(override.required || []).not.toContain("progress");
+    expect(override.required || []).not.toContain("skipped");
+    expect(override.additionalProperties).toBe(true);
+    const snapshot = PROJECT_JSON_SCHEMA.$defs.occurrenceSnapshot;
+    expect(snapshot.properties.progress).toMatchObject({ type: "number", minimum: 0, maximum: 100 });
+    expect(snapshot.properties.skipped.type).toBe("boolean");
+    expect(snapshot.required).not.toContain("progress");
+    expect(snapshot.required).not.toContain("skipped");
+  });
+
+  it("round-trips explicit zero, false, skipped progress and dormant extension fields without rewriting the baseline", () => {
+    const tasks = [{ id: "r", name: "Review", parentId: null, order: 0, startDate: "2026-10-11", duration: 1, progress: 40,
+      recurrence: { frequency: "daily", interval: 1, endDate: "2026-10-13" },
+      occurrenceOverrides: {
+        "2026-10-11": { progress: 0, skipped: false },
+        "2026-10-12": { progress: 75, skipped: true, extension: { keep: ["value"] } },
+        "2025-10-11": { progress: 100, skipped: true },
+      }, extension: { keep: true },
+    }];
+    const exported = buildProjectExport(tasks, [], [], []);
+    const imported = normalizeImportedProject(JSON.parse(JSON.stringify(exported)));
+    expect(imported.tasks).toEqual(tasks);
+    expect(imported.tasks[0].progress).toBe(40);
+    expect(imported.tasks[0].occurrenceOverrides).not.toBe(tasks[0].occurrenceOverrides);
+    expect(buildProjectExport(imported.tasks, [], [], []).tasks).toEqual(tasks);
+  });
+
+  it.each(["Skipped", "スキップ"])("uses each occurrence's effective progress and an explicit %s label", skippedLabel => {
+    const tasks = [{ id: "r", name: "Review", parentId: null, order: 0, progress: 90, recurrence: {} }];
+    const occurrences = [0, 45, 100, 100].map((progress, i) => ({
+      occurrenceDate: `2026-10-${11 + i}`, schedStart: `2026-10-${11 + i}`, schedFinish: `2026-10-${11 + i}`,
+      progress, skipped: i === 3,
+    }));
+    const before = structuredClone(occurrences);
+    const schedule = new Map([["r", { schedStart: "2026-10-11", schedFinish: "2026-10-14", occurrences }]]);
+    const lines = generateMermaidGantt(tasks, schedule, { skippedLabel }).split("\n");
+    expect(lines.find(line => line.includes("[2026-10-11]"))).not.toMatch(/:(?:active|done)/);
+    expect(lines.find(line => line.includes("[2026-10-12]"))).toContain(":active,");
+    expect(lines.find(line => line.includes("[2026-10-13]"))).toContain(":done,");
+    const skipped = lines.find(line => line.includes("[2026-10-14]"));
+    expect(skipped).toContain(`[${skippedLabel}]`);
+    expect(skipped).not.toMatch(/:(?:active|done)/);
+    expect(occurrences).toEqual(before);
+  });
+});

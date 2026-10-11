@@ -179,6 +179,7 @@ export function scheduleRows(data, schedule) {
         occurrences: s.occurrences.map(occurrence => ({
           id: occurrence.id, occurrenceDate: occurrence.occurrenceDate,
           schedStart: occurrence.schedStart, schedFinish: occurrence.schedFinish,
+          progress: typeof occurrence.progress === "number" ? occurrence.progress : (t.progress || 0), skipped: occurrence.skipped === true,
         })),
         recurrenceMetadata: s.recurrenceMetadata,
       } : {}),
@@ -437,8 +438,9 @@ function cmdPlan(positional, opts) {
     const startChanged = b.schedStart !== a.schedStart;
     const finishChanged = b.schedFinish !== a.schedFinish;
     const critChanged = b.critical !== a.critical;
+    const progressChanged = b.progress !== a.progress;
     const occurrencesChanged = JSON.stringify(b.occurrences) !== JSON.stringify(a.occurrences);
-    if (!startChanged && !finishChanged && !critChanged && !occurrencesChanged) continue;
+    if (!startChanged && !finishChanged && !critChanged && !progressChanged && !occurrencesChanged) continue;
     let shiftWorkdays;
     if (startChanged && b.schedStart && a.schedStart) {
       shiftWorkdays = after.cal.workdaysBetween(b.schedStart, a.schedStart);
@@ -448,6 +450,7 @@ function cmdPlan(positional, opts) {
       ...(startChanged ? { schedStart: { from: b.schedStart, to: a.schedStart } } : {}),
       ...(finishChanged ? { schedFinish: { from: b.schedFinish, to: a.schedFinish } } : {}),
       ...(critChanged ? { critical: { from: b.critical, to: a.critical } } : {}),
+      ...(progressChanged ? { progress: { from: b.progress, to: a.progress } } : {}),
       ...(occurrencesChanged ? { occurrences: { from: b.occurrences || [], to: a.occurrences || [] } } : {}),
       ...(shiftWorkdays !== undefined ? { shiftWorkdays } : {}),
     });
@@ -568,7 +571,7 @@ function cmdExplain(positional, opts) {
     file: path,
     task: {
       id: taskId,
-      ...(isOccurrenceTask(task) ? { occurrenceDate: task.occurrenceDate } : {}),
+      ...(isOccurrenceTask(task) ? { occurrenceDate: task.occurrenceDate, skipped: task.skipped === true } : {}),
       ...(storedTask.recurrence ? { recurrence: storedTask.recurrence } : {}),
       name: task.name,
       duration: task.duration ?? null,
@@ -584,9 +587,11 @@ function cmdExplain(positional, opts) {
       ES: s.ES ?? null, EF: s.EF ?? null, LS: s.LS ?? null, LF: s.LF ?? null,
       schedStart: s.schedStart ?? null, schedFinish: s.schedFinish ?? null,
       float: typeof s.float === "number" ? s.float : null,
+      progress: typeof s.progress === "number" ? s.progress : (task.progress || 0),
+      ...(isOccurrenceTask(task) ? { skipped: task.skipped === true } : {}),
       critical: !!s.critical,
       governed: !!s.governed,
-      ...(s.occurrences ? { occurrences: s.occurrences.map(o => ({ occurrenceDate: o.occurrenceDate, schedStart: o.schedStart, schedFinish: o.schedFinish })), recurrenceMetadata: s.recurrenceMetadata } : {}),
+      ...(s.occurrences ? { occurrences: s.occurrences.map(o => ({ occurrenceDate: o.occurrenceDate, schedStart: o.schedStart, schedFinish: o.schedFinish, progress: typeof o.progress === "number" ? o.progress : (storedTask.progress || 0), skipped: o.skipped === true })), recurrenceMetadata: s.recurrenceMetadata } : {}),
     },
     drivers: {
       pinned: isPinned,

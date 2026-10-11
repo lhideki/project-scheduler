@@ -604,6 +604,63 @@ describe("deriveProjectStart", () => {
 describe("fixed calendar recurring tasks", () => {
   const recurring = (changes = {}) => ({ id: "R", name: "Review", parentId: null, order: 10, duration: 2, startDate: "2024-01-13", predecessors: [], assigneeId: "r", recurrence: { frequency: "weekly", interval: 1, endDate: "2024-01-20" }, ...changes });
   const resource = { id: "r", name: "Reviewer", weeklyCapacity: 5, monthlyCapacity: 20 };
+  it("averages active occurrences and keeps the parent mean while preserving the raw baseline", () => {
+    const tasks = [
+      { id: "G", parentId: null, order: 0 },
+      recurring({ parentId: "G", progress: 20, occurrenceOverrides: { "2024-01-13": { progress: 100 }, "2024-01-20": { progress: 50, skipped: true } } }),
+      { id: "A", parentId: "G", order: 1, duration: 1, startDate: "2024-01-09", progress: 40 },
+    ];
+    const before = structuredClone(tasks);
+    const cpm = runCPM(tasks, cal, "2024-01-09", []);
+    for (const leveling of [false, true]) {
+      const { schedule } = buildDisplaySchedule(tasks, cpm.result, [resource], cal, [], { leveling });
+      expect(schedule.get("R")).toMatchObject({ progress: 100, schedStart: "2024-01-13", schedFinish: "2024-01-21", recurrenceMetadata: { activeOccurrenceCount: 1, skippedOccurrenceCount: 1 } });
+      expect(schedule.get("R").occurrences.map(o => [o.progress, o.skipped])).toEqual([[100, false], [50, true]]);
+      expect(schedule.get("G").progress).toBe(70);
+    }
+    expect(tasks).toEqual(before);
+  });
+
+  it("uses 0 internally for all-skipped series with explicit counts, retaining boundaries", () => {
+    const tasks = [recurring({ progress: 80, occurrenceOverrides: { "2024-01-13": { skipped: true }, "2024-01-20": { skipped: true } } })];
+    const { result } = runCPM(tasks, cal, "2024-01-09", []);
+    expect(result.get("R")).toMatchObject({ progress: 0, schedStart: "2024-01-13", schedFinish: "2024-01-21", recurrenceMetadata: { occurrenceCount: 2, activeOccurrenceCount: 0, skippedOccurrenceCount: 2 } });
+    expect(result.get("R").occurrences.map(o => o.progress)).toEqual([80, 80]);
+  });
+
+  it("adds horizon extensions at the unchanged inherited baseline and revives dormant status", () => {
+    const original = recurring({ progress: 0, recurrence: { frequency: "weekly", interval: 1, endDate: "2024-01-13" }, occurrenceOverrides: { "2024-01-13": { progress: 100 }, "2024-01-27": { progress: 70, skipped: true } } });
+    expect(runCPM([original], cal, "2024-01-09", []).result.get("R").progress).toBe(100);
+    const expanded = { ...original, recurrence: { ...original.recurrence, endDate: "2024-01-27" } };
+    const summary = runCPM([expanded], cal, "2024-01-09", []).result.get("R");
+    expect(summary.progress).toBe(50);
+    expect(summary.occurrences.map(o => [o.progress, o.skipped])).toEqual([[100, false], [0, false], [70, true]]);
+    expect(original.progress).toBe(0);
+    expect(original.occurrenceOverrides["2024-01-27"]).toEqual({ progress: 70, skipped: true });
+  });
+
+  it("skipped occurrences release capacity without removing their dates or dependency constraints", () => {
+    const tasks = [
+      recurring({ startDate: "2024-01-09", duration: 2, recurrence: { frequency: "daily", interval: 1, endDate: "2024-01-09" }, occurrenceOverrides: { "2024-01-09": { skipped: true, progress: 60, endDate: "2024-01-09" } } }),
+      { id: "A", parentId: null, order: 0, duration: 1, startDate: "2024-01-09", assigneeId: "r" },
+      { id: "successor", parentId: null, duration: 1, predecessors: [{ id: "R", occurrenceDate: "2024-01-09", type: "FS", lag: 0 }] },
+    ];
+    const cpm = runCPM(tasks, cal, "2024-01-09", []);
+    for (const leveling of [false, true]) {
+      const { schedule, levelWarnings } = buildDisplaySchedule(tasks, cpm.result, [resource], cal, [], { leveling });
+      expect(schedule.get("A").schedStart).toBe("2024-01-09");
+      expect(schedule.get("successor").schedStart).toBe("2024-01-10");
+      expect(schedule.get("R").occurrences[0]).toMatchObject({ schedStart: "2024-01-09", schedFinish: "2024-01-09", progress: 60, skipped: true, allocation: { alloc: [] } });
+      expect(levelWarnings).toEqual([]);
+    }
+    const restored = [{ ...tasks[0], occurrenceOverrides: { "2024-01-09": { ...tasks[0].occurrenceOverrides["2024-01-09"], skipped: false } } }, ...tasks.slice(1)];
+    const restoredCPM = runCPM(restored, cal, "2024-01-09", []);
+    const { schedule, levelWarnings } = buildDisplaySchedule(restored, restoredCPM.result, [resource], cal, [], { leveling: true });
+    expect(schedule.get("R").occurrences[0].progress).toBe(60);
+    expect(schedule.get("R").occurrences[0].allocation.alloc).toEqual([{ date: "2024-01-09", load: 2 }]);
+    expect(schedule.get("A").schedStart).toBe("2024-01-10");
+    expect(levelWarnings.map(w => w.code)).toEqual(["fixed-occurrence-capacity-exceeded"]);
+  });
   it("preserves weekend/holiday dates under CPM, sprints, progress and leveling", () => {
     const tasks = [recurring({ progress: 50, sprintIds: ["future"], predecessors: [{ id: "P", type: "FS", lag: 0 }] }), { id: "P", parentId: null, order: 0, duration: 5, startDate: "2024-02-01" }];
     const sprints = [{ id: "future", startDate: "2024-03-01" }];

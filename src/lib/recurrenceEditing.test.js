@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { generateOccurrences } from "./recurrence.js";
-import { buildOccurrenceOverridePatch } from "./recurrenceEditing.js";
+import { buildOccurrenceOverridePatch, buildOccurrenceProgressPatch, buildOccurrenceScheduleResetPatch } from "./recurrenceEditing.js";
+import { createTaskHistory, taskHistoryReducer } from "./history.js";
 
 const task = {
   id: "series", startDate: "2026-10-13", duration: 2, predecessors: [],
@@ -75,5 +76,88 @@ describe("buildOccurrenceOverridePatch", () => {
     const patch = buildOccurrenceOverridePatch(existing, instance(existing), { ...dates(instance(existing)), endDate: "2026-10-16" });
     expect(patch.occurrenceOverrides["2026-10-13"]).toEqual({ predecessors: unresolved, startDate: "2026-10-13", endDate: "2026-10-16" });
     expect(patch.occurrenceOverrides["2026-10-13"].predecessors).toBe(unresolved);
+  });
+});
+
+describe("occurrence progress and skip edits", () => {
+  it("undoes and redoes independent progress, skip and schedule-reset operations losslessly", () => {
+    const initial = { ...task, progress: 20, occurrenceOverrides: { "2026-10-13": { startDate: "2026-10-18", predecessors: deps, extension: { keep: true } } } };
+    let history = createTaskHistory([initial]);
+    const states = [history.present];
+    for (const edit of [
+      current => buildOccurrenceProgressPatch(current, "2026-10-13", { progress: 80 }),
+      current => buildOccurrenceProgressPatch(current, "2026-10-13", { skipped: true }),
+      current => buildOccurrenceScheduleResetPatch(current, "2026-10-13"),
+    ]) {
+      history = taskHistoryReducer(history, { type: "set", value: tasks => tasks.map(current => ({ ...current, ...edit(current) })) });
+      states.push(history.present);
+    }
+    expect(history.past).toHaveLength(3);
+    expect(history.present[0].occurrenceOverrides["2026-10-13"]).toEqual({ progress: 80, skipped: true, extension: { keep: true } });
+    for (let i = 2; i >= 0; i--) {
+      history = taskHistoryReducer(history, { type: "undo" });
+      expect(history.present).toEqual(states[i]);
+    }
+    for (let i = 1; i <= 3; i++) {
+      history = taskHistoryReducer(history, { type: "redo" });
+      expect(history.present).toEqual(states[i]);
+    }
+    expect(initial.progress).toBe(20);
+    expect(initial.occurrenceOverrides["2026-10-13"]).not.toHaveProperty("progress");
+  });
+  it("changes only the selected original date and preserves scheduling and extension fields", () => {
+    const original = { startDate: "2026-10-18", endDate: "2026-10-20", predecessors: deps, futureField: { keep: true } };
+    const existing = { ...task, progress: 25, occurrenceOverrides: { "2026-10-13": original, "2027-01-01": { progress: 70, skipped: true } } };
+    const before = structuredClone(existing);
+    const patch = buildOccurrenceProgressPatch(existing, "2026-10-13", { progress: 100 });
+    expect(patch.occurrenceOverrides).toEqual({ "2026-10-13": { ...original, progress: 100 }, "2027-01-01": { progress: 70, skipped: true } });
+    expect(instance({ ...existing, ...patch })).toMatchObject({ occurrenceDate: "2026-10-13", startDate: "2026-10-18", progress: 100, skipped: false });
+    expect(existing).toEqual(before);
+  });
+
+  it.each([0, 35, 100])("skips and restores inherited progress %s without changing it", progress => {
+    const existing = { ...task, progress };
+    const skipped = { ...existing, ...buildOccurrenceProgressPatch(existing, "2026-10-13", { skipped: true }) };
+    expect(skipped.occurrenceOverrides["2026-10-13"]).toEqual({ skipped: true });
+    expect(instance(skipped)).toMatchObject({ progress, skipped: true });
+    const restored = { ...skipped, ...buildOccurrenceProgressPatch(skipped, "2026-10-13", { skipped: false }) };
+    expect(instance(restored)).toMatchObject({ progress, skipped: false });
+    expect(restored.progress).toBe(progress);
+  });
+
+  it("restores individually edited progress without borrowing the series baseline", () => {
+    const existing = { ...task, progress: 10, occurrenceOverrides: { "2026-10-13": { progress: 65 } } };
+    const skipped = { ...existing, ...buildOccurrenceProgressPatch(existing, "2026-10-13", { skipped: true }) };
+    const restored = { ...skipped, ...buildOccurrenceProgressPatch(skipped, "2026-10-13", { skipped: false }) };
+    expect(instance(restored)).toMatchObject({ progress: 65, skipped: false });
+    expect(restored.progress).toBe(10);
+  });
+
+  it("treats unchanged and invalid progress drafts as no-ops", () => {
+    const existing = { ...task, progress: 25 };
+    for (const edits of [{}, { progress: 25 }, { skipped: false }, { progress: -1 }, { progress: 101 }, { progress: NaN }, { progress: Infinity }, { progress: "50" }, { skipped: "true" }]) {
+      expect(buildOccurrenceProgressPatch(existing, "2026-10-13", edits)).toBeNull();
+    }
+    expect(buildOccurrenceProgressPatch(existing, "2026-10-13", { progress: 37.5 })).toEqual({ occurrenceOverrides: { "2026-10-13": { progress: 37.5 } } });
+  });
+
+  it("resets only dates and dependencies, retaining progress, skip and unknown fields", () => {
+    const preserved = { progress: 65, skipped: true, futureField: { keep: true } };
+    const existing = { ...task, occurrenceOverrides: { "2026-10-13": { ...preserved, startDate: "2026-10-18", endDate: "2026-10-20", predecessors: deps }, "2027-01-01": { skipped: true } } };
+    const patch = buildOccurrenceScheduleResetPatch(existing, "2026-10-13");
+    expect(patch).toEqual({ occurrenceOverrides: { "2026-10-13": preserved, "2027-01-01": { skipped: true } } });
+    const reset = { ...existing, ...patch };
+    expect(instance(reset)).toMatchObject({ startDate: "2026-10-13", endDate: "2026-10-14", predecessors: [], progress: 65, skipped: true });
+    expect(buildOccurrenceScheduleResetPatch(reset, "2026-10-13")).toBeNull();
+  });
+
+  it("removes a schedule-only override and keeps progress when editing dates/dependencies", () => {
+    const existing = { ...task, occurrenceOverrides: { "2026-10-13": { startDate: "2026-10-18", predecessors: deps } } };
+    expect(buildOccurrenceScheduleResetPatch(existing, "2026-10-13")).toEqual({ occurrenceOverrides: {} });
+    expect(buildOccurrenceScheduleResetPatch(task, "2026-10-13")).toBeNull();
+    const withProgress = { ...task, occurrenceOverrides: { "2026-10-13": { progress: 30, skipped: true, extension: 1, predecessors: deps } } };
+    expect(buildOccurrenceOverridePatch(withProgress, instance(withProgress), { endDate: "2026-10-17", predecessors: undefined })).toEqual({ occurrenceOverrides: {
+      "2026-10-13": { progress: 30, skipped: true, extension: 1, startDate: "2026-10-13", endDate: "2026-10-17" },
+    } });
   });
 });

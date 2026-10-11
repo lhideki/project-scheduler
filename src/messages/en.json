@@ -104,7 +104,8 @@
   },
   "mermaid": {
     "title": "Project schedule",
-    "untitled": "(untitled)"
+    "untitled": "(untitled)",
+    "skippedLabel": "Skipped"
   },
   "sprintConflicts": {
     "title": "Sprint conflicts ({count})",
@@ -125,7 +126,8 @@
       "fixed-milestone-overrun": "Fixed date overrun",
       "recurrence-truncated": "Recurrence calculation limit",
       "invalid-recurrence": "Invalid recurrence",
-      "recurrence-empty": "No occurrences in period"
+      "recurrence-empty": "No occurrences in period",
+      "predecessor-occurrence-skipped": "Skipped predecessor"
     },
     "dialogTitle": "Dependency issues ({count})",
     "dialogDescription": "Dates are not corrected automatically. Start date conflicts can be resolved with \"Run auto-scheduling\". For circular dependencies and missing predecessors, fix the predecessors field. Click an item to show the task.",
@@ -147,7 +149,8 @@
       "recurrenceTruncated": "Recurrence calculation was capped at {limit} occurrences or 3,660 calendar days. {occurrenceCount} occurrences were generated through {calculationEndDate, date, ymd}. Later occurrences are excluded; shorten the calculation period.",
       "invalidRecurrence": "This recurring task has invalid settings. Review the start date, repeat rule and calculation period.",
       "occurrenceContext": "Occurrence originally on {occurrenceDate, date, short}: {reason}",
-      "recurrenceEmpty": "The recurrence rule produces no occurrences from {origin, date, ymd} through {calculationEndDate, date, ymd}. Review the weekdays, month mode or calculation period."
+      "recurrenceEmpty": "The recurrence rule produces no occurrences from {origin, date, ymd} through {calculationEndDate, date, ymd}. Review the weekdays, month mode or calculation period.",
+      "predecessorSkipped": "Predecessor “{predName}” is skipped or includes skipped occurrences; this dependency remains unmet."
     },
     "tooltipLine": "{label}: {message}"
   },
@@ -551,7 +554,7 @@
     "barLabel": "{name}: original occurrence {date}, {start} to {finish}. {status}. Open to edit this occurrence.",
     "scheduled": "Scheduled occurrence",
     "networkCount": "Recurring: {count} occurrences",
-    "resourceNote": "Recurring tasks include the load of every occurrence in their saved calculation period, including calendar holidays.",
+    "resourceNote": "Recurring tasks include the load of non-skipped occurrences in their saved calculation period, including calendar holidays.",
     "errors": {
       "startRequired": "Enter a complete, valid series start date.",
       "intervalInvalid": "The interval must be a whole number from 1 to 365.",
@@ -561,13 +564,32 @@
       "occurrenceDatesInvalid": "Enter complete start and end dates. The end must be on or after the start.",
       "dependenciesInvalid": "Predecessors contain an invalid date, format or WBS number. No changes were saved.",
       "spanInvalid": "Each occurrence must span no more than 3,660 calendar days. Reduce its effort or date range.",
-      "moveTooFar": "Move an occurrence no more than 3,660 days from its original date."
+      "moveTooFar": "Move an occurrence no more than 3,660 days from its original date.",
+      "progressInvalid": "Enter 0–100."
     },
     "safetyBounds": "Safety limits: intervals 1–365; each occurrence and calculation period at most 3,660 calendar days; at most 2,000 occurrences per series.",
     "inheritedDeps": "Inherits series predecessors",
     "customDeps": "Predecessors for this occurrence only",
     "useSeriesDeps": "Use series predecessors",
     "baselineOccurrence": "Baseline occurrence originally on {date}",
-    "reservationName": "{name} (original occurrence {date})"
+    "reservationName": "{name} (original occurrence {date})",
+    "occurrenceProgress": "Progress by occurrence",
+    "selected": "Selected",
+    "selectedOccurrence": "Selected occurrence: {date}",
+    "editDates": "Edit dates",
+    "originalDate": "Original date: {date}",
+    "dateColumn": "Date",
+    "actionsColumn": "Actions",
+    "progressFor": "Progress for {date}",
+    "skipped": "Skipped",
+    "skip": "Skip",
+    "restore": "Restore",
+    "markComplete": "Mark complete",
+    "completed": "Complete",
+    "skipNote": "Skipped occurrences stay saved. Restore brings back the previous progress. Dates and dependencies stay in place; resource load is excluded.",
+    "aggregateProgress": "Average in calculation period (excluding skipped)",
+    "aggregateNote": "The average includes all non-skipped occurrences in the saved calculation period. Extending the period may change it. No active occurrences is shown as —, not complete.",
+    "progressStatus": "Progress {progress}%",
+    "skippedTooltip": "Skipped: progress is not counted and no resource load is reserved. Dates and dependencies remain."
   }
 }

@@ -48,7 +48,8 @@ export { dailyLoads };
  * @property {boolean} [governed] - 固定マイルストーンの逆算（LS/LF）を表示スケジュールに使っているか
  * @property {string} schedStart - 表示用の開始日
  * @property {string} schedFinish - 表示用の終了日
- * @property {number} progress - 進捗率（グループは配下の単純平均）
+ * @property {number} progress - 進捗率（グループは配下の単純平均、シリーズは計算期間内の非スキップ回の単純平均）
+ * @property {boolean} [skipped] - スキップした各回。日程・依存関係は保持し、負荷とシリーズ進捗平均から除外する
  * @property {boolean} [isSummary] - グループ（サマリー行）のロールアップ結果かどうか
  * @property {Array<Object>} [occurrences] - Fixed synthetic instances on a recurring-series summary.
  * @property {Object} [recurrenceMetadata] - Actual/requested horizon and explicit truncation/invalid-input flags.
@@ -332,7 +333,7 @@ export function runCPM(tasks, cal, projectStart, sprints, opts = {}) {
       schedStart: useBackward ? LS[id] : ES[id],
       schedFinish: useBackward ? LF[id] : EF[id],
       progress: typeof t.progress === "number" ? t.progress : 0,
-      ...(isOccurrenceTask(t) ? { id: t.id, seriesId: t.seriesId, occurrenceDate: t.occurrenceDate, isOccurrence: true, startDate: t.startDate, endDate: t.endDate } : {}),
+      ...(isOccurrenceTask(t) ? { id: t.id, seriesId: t.seriesId, occurrenceDate: t.occurrenceDate, isOccurrence: true, startDate: t.startDate, endDate: t.endDate, skipped: t.skipped } : {}),
     });
   });
 
@@ -357,6 +358,8 @@ export function rollupSummaries(tasks, result) {
   const summaries = tasks.filter(t => summaryIds.has(t.id));
   function rollup(id) {
     const children = childrenById.get(id) || [];
+    const task = byId.get(id);
+    const recurring = isRecurringSummaryTask(task);
     let min = null, max = null, anyCritical = false, progressSum = 0, progressCount = 0;
     children.forEach(c => {
       const r = summaryIds.has(c.id) ? rollup(c.id) : result.get(c.id);
@@ -364,12 +367,11 @@ export function rollupSummaries(tasks, result) {
       if (min === null || r.schedStart < min) min = r.schedStart;
       if (max === null || r.schedFinish > max) max = r.schedFinish;
       if (r.critical) anyCritical = true;
-      if (typeof r.progress === "number") { progressSum += r.progress; progressCount++; }
+      if (typeof r.progress === "number" && !(recurring && c.skipped)) { progressSum += r.progress; progressCount++; }
     });
     const progress = progressCount ? Math.round(progressSum / progressCount) : 0;
     const r = { ES: min, EF: max, LS: min, LF: max, float: 0, critical: anyCritical, governed: false, schedStart: min, schedFinish: max, isSummary: true, progress };
-    const task = byId.get(id);
-    if (isRecurringSummaryTask(task)) {
+    if (recurring) {
       r.occurrences = children.filter(t => isOccurrenceTask(t)).map(t => ({ ...t, ...result.get(t.id) }));
       r.recurrenceMetadata = task.recurrenceMetadata;
     }

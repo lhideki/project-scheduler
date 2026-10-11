@@ -144,13 +144,25 @@ describe("protected recurrence paste", () => {
     const target = recurring();
     const before = structuredClone(target);
     const result = taskRowPatch(target, `Changed\t${startDate}\t8\t鈴木\tSprint 2\t100\t2FS`, context);
-    expect(result).toEqual({ patch: {}, errors: ["startDate"], error: "protected-recurrence" });
+    expect(result).toEqual({ patch: {}, errors: ["startDate", "progress"], error: "protected-recurrence" });
     expect(target).toEqual(before);
   });
 
   it("still accepts a name-only row and ordinary editable cells on a recurring task", () => {
     expect(taskRowPatch(recurring(), "Changed", context)).toEqual({ patch: { name: "Changed" }, errors: [] });
     expect(taskCellPatch(recurring(), "duration", "8", context)).toEqual({ ok: true, patch: { duration: 8 } });
+  });
+
+  it.each(["0", "50", "100", "", "—"])("protects derived series progress from paste (%j)", progress => {
+    expect(taskCellPatch(recurring(), "progress", progress, context)).toEqual({ ok: false, patch: {}, error: "protected-recurrence" });
+    expect(copiedTaskRowPatch(task({ progress: 100 }), recurring(), false)).not.toHaveProperty("progress");
+  });
+
+  it("copies the finite series aggregate and shows no aggregate when all occurrences are skipped", () => {
+    const target = recurring();
+    expect(taskCellText(target, "progress", { ...context, schedule: new Map([[target.id, { progress: 67, recurrenceMetadata: { activeOccurrenceCount: 3 } }]]) })).toBe("67");
+    expect(taskCellText(target, "progress", { ...context, schedule: new Map([[target.id, { progress: 0, recurrenceMetadata: { activeOccurrenceCount: 0 } }]]) })).toBe("—");
+    expect(target.progress).toBe(25);
   });
 
   it("preserves ordinary row partial-paste behavior for a malformed date", () => {

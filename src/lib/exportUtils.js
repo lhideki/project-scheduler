@@ -71,9 +71,11 @@ export const PROJECT_JSON_SCHEMA = Object.freeze({
       },
     },
     occurrenceOverride: {
-      type: "object", additionalProperties: false,
+      type: "object", additionalProperties: true,
       description: "元の予定日をキーとする個別修正。規則変更で対象外になった修正は保持し、別の回へ付け替えません。",
       properties: {
+        progress: { type: "number", minimum: 0, maximum: 100, description: "この回のみの進捗率（0〜100）。省略時は保存済みtask.progressを引き継ぎます。" },
+        skipped: { type: "boolean", description: "trueならこの回をスキップし、工数・進捗集計から除外します。進捗・日程・依存関係は保持します。省略時はfalse。" },
         startDate: { type: "string", format: "date", description: "この回のみの固定開始日" },
         endDate: { type: "string", format: "date", description: "この回のみの固定終了日（開始日以上、両端を含む、最大3,660暦日）" },
         predecessors: { type: "array", items: { $ref: "#/$defs/dependency" }, description: "この回の先行タスク。省略時はシリーズ共通、指定時は共通設定を置き換えます。空配列は依存なし。" },
@@ -97,7 +99,7 @@ export const PROJECT_JSON_SCHEMA = Object.freeze({
         assigneeId: { type: ["string", "null"], description: "担当者ID" },
         sprintIds: { type: "array", description: "紐付けるスプリントID一覧", items: { type: "string" } },
         predecessors: { type: "array", description: "先行タスク一覧", items: { $ref: "#/$defs/dependency" } },
-        progress: { type: "number", description: "進捗率（0〜100）" },
+        progress: { type: "number", minimum: 0, maximum: 100, description: "進捗率（0〜100）。繰り返しでは個別進捗がない既存・新規の回の基準値。画面のシリーズ集計値では上書きしません。" },
         milestone: { type: "boolean", description: "マイルストーンかどうか" },
         milestoneMode: { type: "string", enum: ["flexible", "fixed"], description: "柔軟/固定モード" },
         fixedDate: { type: "string", format: "date", description: "固定マイルストーンの日付（YYYY-MM-DD）" },
@@ -139,6 +141,8 @@ export const PROJECT_JSON_SCHEMA = Object.freeze({
         occurrenceDate: { type: "string", format: "date", description: "識別用の元の予定日" },
         schedStart: { type: "string", format: "date", description: "保存時点の開始日" },
         schedFinish: { type: "string", format: "date", description: "保存時点の終了日" },
+        progress: { type: "number", minimum: 0, maximum: 100, description: "保存時点の各回の実効進捗率。旧スナップショットでは省略可。" },
+        skipped: { type: "boolean", description: "保存時点のスキップ状態。旧スナップショットでは省略可。" },
       },
     },
     versionTask: {
@@ -333,11 +337,12 @@ export function toMermaidId(str) {
  * Mermaid 自身の依存解決（after）は使わず、schedStart/schedFinish をそのまま開始日・終了日として
  * 書き出すことで、このツールの計算結果を厳密に反映する。グループはセクション（section）として出力する。
  * labels にはタイトルと名前が空のタスクの表記を、表示中の言語の文言で渡す（省略時は日本語）。
- * @param {{title?: string, untitled?: string}} [labels]
+ * @param {{title?: string, untitled?: string, skippedLabel?: string}} [labels]
  */
 export function generateMermaidGantt(tasks, schedule, labels = {}) {
   const title = labels.title ?? DEFAULT_MERMAID_LABELS.title;
   const untitled = labels.untitled ?? DEFAULT_MERMAID_LABELS.untitled;
+  const skippedLabel = labels.skippedLabel ?? DEFAULT_MERMAID_LABELS.skippedLabel;
   const flatAll = buildFlatList(tasks, new Set());
   const lines = ["gantt", `    title ${escapeMermaidText(title, untitled)}`, "    dateFormat YYYY-MM-DD", ...(tasks.some(t => t.recurrence) ? [] : ["    excludes weekends"])];
   const usedIds = new Set();
@@ -359,10 +364,11 @@ export function generateMermaidGantt(tasks, schedule, labels = {}) {
       const tags = [];
       if (t.milestone) tags.push("milestone");
       if (occurrence.critical) tags.push("crit");
-      if ((t.progress || 0) >= 100) tags.push("done");
-      else if ((t.progress || 0) > 0) tags.push("active");
+      const progress = typeof occurrence.progress === "number" ? occurrence.progress : (t.progress || 0);
+      if (!occurrence.skipped && progress >= 100) tags.push("done");
+      else if (!occurrence.skipped && progress > 0) tags.push("active");
       const tagStr = tags.length ? `${tags.join(", ")}, ` : "";
-      const name = escapeMermaidText(`${t.name || untitled}${occurrence.occurrenceDate ? " [" + occurrence.occurrenceDate + "]" : ""}`, untitled);
+      const name = escapeMermaidText(`${t.name || untitled}${occurrence.occurrenceDate ? " [" + occurrence.occurrenceDate + "]" : ""}${occurrence.skipped ? " [" + skippedLabel + "]" : ""}`, untitled);
       const endField = t.milestone ? "0d" : occurrence.schedFinish;
       lines.push(`    ${name} :${tagStr}${id}, ${occurrence.schedStart}, ${endField}`);
     });

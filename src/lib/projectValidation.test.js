@@ -348,3 +348,43 @@ it("retains missing occurrence references after a rule change as repairable diag
   expect(issues.some(i => i.code === "predecessor-missing" && i.blocking === false)).toBe(true);
   expect(normalizeImportedProject(data).tasks[1].predecessors).toEqual(data.tasks[1].predecessors);
 });
+
+
+describe("occurrence progress and skip validation", () => {
+  const invalidValues = [
+    ...[-1, 101, NaN, Infinity, -Infinity, "50", null, true, [], {}].map(value => ["progress", value]),
+    ...[0, 1, "false", null, [], {}].map(value => ["skipped", value]),
+  ];
+  it.each(invalidValues)("rejects invalid override %s=%j with the shared override issue and exact path", (field, value) => {
+    const rawTasks = [task({ startDate: "2026-10-11", recurrence: { frequency: "daily", interval: 1, endDate: "2026-10-13" },
+      occurrenceOverrides: { "2026-10-12": { [field]: value } } })];
+    const data = project({ tasks: rawTasks, versions: [snapshot({ rawTasks })] });
+    const issues = validateProjectData(data);
+    for (const base of ["tasks[0]", "versions[0].rawTasks[0]"]) {
+      expect(issues).toContainEqual(expect.objectContaining({
+        code: "task-recurrenceOverride-invalid", severity: "error", path: `${base}.occurrenceOverrides.2026-10-12.${field}`,
+        messageKey: "projectValidation.recurrenceOverride",
+      }));
+    }
+    expect(() => normalizeImportedProject(data)).toThrow("invalid_project_json");
+  });
+
+  it.each(invalidValues)("rejects invalid snapshot occurrence %s=%j without breaking legacy omissions", (field, value) => {
+    const occurrence = { occurrenceDate: "2026-10-12", schedStart: "2026-10-12", schedFinish: "2026-10-12" };
+    const data = project({ versions: [version({ tasks: [{ id: "series", name: "Series", occurrences: [occurrence] }] })] });
+    expect(() => normalizeImportedProject(data)).not.toThrow();
+    occurrence[field] = value;
+    expect(validateProjectData(data)).toContainEqual(expect.objectContaining({
+      code: `version-occurrence-${field}-invalid`, severity: "error", path: `versions[0].tasks[0].occurrences[0].${field}`,
+    }));
+    expect(() => normalizeImportedProject(data)).toThrow("invalid_project_json");
+  });
+
+  it.each([0, 37.5, 100])("accepts finite progress %s with either skip value and dormant overrides", progress => {
+    for (const skipped of [false, true]) {
+      const data = project({ tasks: [task({ occurrenceOverrides: { "2020-01-01": { progress, skipped, extension: true } } })] });
+      expect(validateProjectData(data)).toEqual([]);
+      expect(normalizeImportedProject(data).tasks).toEqual(data.tasks);
+    }
+  });
+});
