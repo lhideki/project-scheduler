@@ -979,6 +979,15 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
       headerMarkup: buildHeaderSvgMarkup(),
       chartWidth,
       headerHeight: GANTT_HEADER_H,
+      rows: flat.map(task => ({
+        ...task,
+        name: task.name || tr("common.untitledTask"),
+        collapsed: collapsed.has(task.id),
+        baselineName: compareOn ? (baselineByWbsNo.has(task.wbsNo) ? baselineVersion.name : tr("wbs.compare.notInBaseline")) : undefined,
+      })),
+      rowStride,
+      rowHeight: ROW_H,
+      taskHeader: tr("wbs.columns.name"),
     }),
   }));
 
