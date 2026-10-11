@@ -4,13 +4,15 @@ import { formatDepLabel, dependencyKey } from "../lib/deps.js";
 import { IconBtn } from "./IconBtn.jsx";
 import { useI18n } from "./I18nProvider.jsx";
 import { RecurrenceEditor } from "./RecurrenceEditor.jsx";
-import { isRecurringTask, MAX_RECURRENCE_SPAN_DAYS } from "../lib/recurrence.js";
+import { isRecurringTask, generateOccurrences, MAX_RECURRENCE_SPAN_DAYS } from "../lib/recurrence.js";
 import { DepInput } from "./DepInput.jsx";
+import { useVisualViewport } from "./useVisualViewport.js";
 
 /** タスク／マイルストーンの詳細パネル。テーブルの1行に収まらない情報（メモ、後続タスク、
  *  スケジュール計算結果など）をまとめて確認・編集できるモーダル。 */
 export function TaskDetailModal({ task, schedule, tasks, resources, sprints, idToNo, noToId, onUpdate, onEdit, onCommitEdit, onToggleMilestone, onClose, autoScheduleHighlightIds, taskContextRevision, initialOccurrenceDate }) {
   const { t, fmtDate, fmtMonthDay } = useI18n();
+  const viewportStyle = useVisualViewport();
   useEffect(() => {
     function onKey(e) { if (e.key === "Escape" && !e.isComposing && e.keyCode !== 229) onClose(); }
     window.addEventListener("keydown", onKey);
@@ -23,18 +25,20 @@ export function TaskDetailModal({ task, schedule, tasks, resources, sprints, idT
   const recurring = isRecurringTask(task);
 
   const successors = tasks.flatMap(x => {
+    const activeDates = new Set(isRecurringTask(x) ? generateOccurrences(x).occurrences.map(o => o.occurrenceDate) : []);
     const refs = [
       ...(x.predecessors || []).map(dep => ({ dep, targetDate: null })),
-      ...Object.entries(x.occurrenceOverrides || {}).flatMap(([targetDate, override]) => (override.predecessors || []).map(dep => ({ dep, targetDate }))),
+      ...Object.entries(x.occurrenceOverrides || {}).flatMap(([targetDate, override]) => activeDates.has(targetDate)
+        ? (override.predecessors || []).map(dep => ({ dep, targetDate })) : []),
     ];
     return refs.filter(({ dep }) => dep.id === task.id).map(({ dep, targetDate }) => ({
-      id: JSON.stringify([x.id, targetDate, dependencyKey(dep)]), name: x.name, wbsNo: idToNo[x.id] || "",
+      id: JSON.stringify([x.id, targetDate, dependencyKey(dep)]), taskId: x.id, occurrenceDate: targetDate, name: x.name, wbsNo: idToNo[x.id] || "",
       label: `${dep.occurrenceDate ? `@${dep.occurrenceDate} ` : ""}${formatDepLabel(dep)}${targetDate ? ` → @${targetDate}` : ""}`,
     }));
   });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-backdrop p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-backdrop p-4" style={viewportStyle} onClick={onClose}>
       <div role="dialog" aria-modal="true" aria-label={task.name} className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-full overflow-y-auto" onClick={e => e.stopPropagation()}
         onKeyDown={e => {
           if (e.key === "Enter" && e.target.tagName === "INPUT" && !e.nativeEvent.isComposing && e.keyCode !== 229) {
@@ -97,7 +101,7 @@ export function TaskDetailModal({ task, schedule, tasks, resources, sprints, idT
               </div>
               <div>
                 <label className="block text-[11px] text-slate-500 mb-1">{t("taskDetail.duration")}</label>
-                <input type="number" min={0} max={recurring ? MAX_RECURRENCE_SPAN_DAYS : undefined} step={0.5} value={task.duration}
+                <input type="number" aria-label={t("taskDetail.duration")} min={0} max={recurring ? MAX_RECURRENCE_SPAN_DAYS : undefined} step={0.5} value={task.duration}
                   onChange={e => onEdit("duration", { duration: Math.max(0, Math.round(parseFloat(e.target.value || "0") * 100) / 100) })}
                   className="w-full border border-slate-200 rounded-md px-2.5 py-1.5 text-sm font-mono outline-hidden focus:border-indigo-400" />
               </div>
@@ -191,7 +195,7 @@ export function TaskDetailModal({ task, schedule, tasks, resources, sprints, idT
               <label className="block text-[11px] text-slate-500 mb-1">{t("taskDetail.successors")}</label>
               <div className="border border-slate-100 rounded-md divide-y divide-slate-100">
                 {successors.map(s => (
-                  <div key={s.id} className="flex items-center justify-between px-2.5 py-1.5 text-xs">
+                  <div key={s.id} data-successor-task={s.taskId} data-successor-occurrence={s.occurrenceDate || undefined} className="flex items-center justify-between px-2.5 py-1.5 text-xs">
                     <span className="text-slate-600 truncate">{s.wbsNo} {s.name}</span>
                     <span className="font-mono text-slate-400">{s.label}</span>
                   </div>

@@ -34,9 +34,10 @@ async function openDetail(page) {
   await dialog(page).waitFor();
 }
 async function closeDetail(page) { await dialog(page).getByRole("button", { name: "Close", exact: true }).last().click(); }
-async function evidence(page, testInfo, name) {
+async function evidence(page, testInfo, name, fullPage = true) {
+  await expect(page.getByTestId("save-status")).toHaveText(/^(Saved in this browser|このブラウザに保存済み)$/);
   const path = testInfo.outputPath(name);
-  await page.screenshot({ path, fullPage: true });
+  await page.screenshot({ path, fullPage });
   await testInfo.attach(name, { path, contentType: "image/png" });
 }
 async function exportJSON(page) {
@@ -74,6 +75,8 @@ test("recurrence rule drafts cancel safely, validate, and save as one undoable e
   await expect(bars(page)).toHaveCount(0);
   await page.getByRole("button", { name: "Redo", exact: true }).click();
   await expect(bars(page)).toHaveCount(3);
+  await expect.poll(async () => (await series(page)).recurrence).toEqual({ frequency: "daily", interval: 1, endDate: "2026-10-14" });
+  await expect(page.getByTestId("save-status")).toHaveText("Saved in this browser");
   await evidence(page, testInfo, "60-recurring-bars-en.png");
   await page.reload();
   await expect(bars(page)).toHaveCount(3);
@@ -106,7 +109,7 @@ test("single-occurrence changes keep original identity through cancel, reset, ex
   await cell(page, "delivery", "predecessors").blur();
   await expect.poll(async () => (await stored(page)).tasks[1].predecessors).toEqual([{ id: "series", occurrenceDate: "2026-10-13", type: "FS", lag: 1 }]);
   const exported = await exportJSON(page);
-  await page.getByLabel("Import", { exact: true }).setInputFiles({ name: "recurrence-roundtrip.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(exported)) });
+  await page.locator('input[type="file"][aria-label="Import"]').setInputFiles({ name: "recurrence-roundtrip.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(exported)) });
   await page.getByRole("button", { name: "Import", exact: true }).last().click();
   await expect.poll(async () => (await stored(page)).tasks.find(task => task.id === "series").occurrenceOverrides).toEqual(exported.tasks.find(task => task.id === "series").occurrenceOverrides);
   await expect(bars(page)).toHaveCount(3);
@@ -292,4 +295,158 @@ test("a dependency between two occurrences in one series remains selectable", as
   await edge.click();
   await page.locator("[data-network-edge-editor]").getByRole("button", { name: "Remove dependency", exact: true }).click();
   await expect.poll(async () => (await series(page)).occurrenceOverrides["2026-10-14"].predecessors).toEqual([]);
+});
+
+test("dependency-only saves keep inherited dates and existing one-sided date overrides", async ({ page }) => {
+  const data = fixture(true);
+  data.tasks[0].duration = 2;
+  data.tasks[0].occurrenceOverrides = {
+    "2026-10-13": { startDate: "2026-10-17" },
+    "2026-10-14": { endDate: "2026-10-18" },
+  };
+  await boot(page, data);
+  async function openDate(date) {
+    await page.locator(`[data-series-id="series"][data-occurrence-date="${date}"]`).focus();
+    await page.keyboard.press("Enter");
+    await occurrence(page).waitFor();
+  }
+  await openDate("2026-10-12");
+  await occurrence(page).getByRole("button", { name: "Save occurrence", exact: true }).click();
+  await closeDetail(page);
+  expect((await series(page)).occurrenceOverrides).toEqual(data.tasks[0].occurrenceOverrides);
+  await expect(page.getByRole("button", { name: "Undo", exact: true })).toBeDisabled();
+
+  for (const [date, text, type] of [["2026-10-12", "2FS", "FS"], ["2026-10-13", "2SS", "SS"], ["2026-10-14", "2FF", "FF"]]) {
+    await openDate(date);
+    await occurrence(page).getByLabel("This occurrence’s predecessors", { exact: true }).fill(text);
+    if (date === "2026-10-12") {
+      // Updating effort in the same open modal regenerates the untouched date inputs.
+      await dialog(page).getByRole("spinbutton", { name: "Effort (person-days)", exact: true }).fill("3");
+      await dialog(page).getByRole("spinbutton", { name: "Effort (person-days)", exact: true }).blur();
+      await expect(occurrence(page).getByLabel("Occurrence end", { exact: true })).toHaveValue("2026-10-14");
+    }
+    await occurrence(page).getByRole("button", { name: "Save occurrence", exact: true }).click();
+    await expect.poll(async () => (await series(page)).occurrenceOverrides[date]).toEqual({
+      ...(data.tasks[0].occurrenceOverrides[date] || {}), predecessors: [{ id: "delivery", type, lag: 0 }],
+    });
+    await closeDetail(page);
+  }
+  await cell(page, "series", "duration").fill("4");
+  await cell(page, "series", "duration").blur();
+  await expect.poll(async () => (await series(page)).duration).toBe(4);
+  for (const [date, start, end] of [
+    ["2026-10-12", "2026-10-12", "2026-10-15"],
+    ["2026-10-13", "2026-10-17", "2026-10-20"],
+    ["2026-10-14", "2026-10-14", "2026-10-18"],
+  ]) {
+    await openDate(date);
+    await expect(occurrence(page).getByLabel("Occurrence start", { exact: true })).toHaveValue(start);
+    await expect(occurrence(page).getByLabel("Occurrence end", { exact: true })).toHaveValue(end);
+    await occurrence(page).getByRole("button", { name: "Cancel", exact: true }).click();
+    await closeDetail(page);
+  }
+  await expect(page.getByTestId("save-status")).toHaveText("Saved in this browser");
+  await page.reload();
+  await expect(bars(page)).toHaveCount(3);
+  const saved = (await series(page)).occurrenceOverrides;
+  expect(saved["2026-10-12"]).not.toHaveProperty("startDate");
+  expect(saved["2026-10-12"]).not.toHaveProperty("endDate");
+  expect(saved["2026-10-13"]).not.toHaveProperty("endDate");
+  expect(saved["2026-10-14"]).not.toHaveProperty("startDate");
+});
+
+test("successor details hide dormant overrides after rule changes and disabling recurrence", async ({ page }) => {
+  const data = fixture(true);
+  data.tasks[0].occurrenceOverrides = {
+    "2026-10-13": { startDate: "2026-10-17", predecessors: [{ id: "delivery", type: "FS", lag: 0 }] },
+    "2026-11-01": { predecessors: [{ id: "delivery", type: "FS", lag: 0 }] },
+  };
+  await boot(page, data);
+  async function checkSuccessors(active) {
+    await cell(page, "delivery", "name").click();
+    await page.getByRole("button", { name: "Details", exact: true }).click();
+    const owner = page.getByRole("dialog", { name: "Delivery", exact: true });
+    const successors = owner.locator('[data-successor-task="series"]');
+    await expect(successors).toHaveCount(active ? 1 : 0);
+    if (active) await expect(successors).toHaveAttribute("data-successor-occurrence", "2026-10-13");
+    await owner.getByRole("button", { name: "Close", exact: true }).last().click();
+  }
+  await checkSuccessors(true);
+  await openDetail(page);
+  await dialog(page).getByRole("button", { name: "Edit recurrence", exact: true }).click();
+  await rule(page).getByLabel("Frequency", { exact: true }).selectOption("weekly");
+  await rule(page).getByRole("button", { name: "Save recurrence", exact: true }).click();
+  await closeDetail(page);
+  await checkSuccessors(false);
+  await openDetail(page);
+  await dialog(page).getByRole("button", { name: "Edit recurrence", exact: true }).click();
+  await rule(page).getByLabel("Frequency", { exact: true }).selectOption("daily");
+  await rule(page).getByRole("button", { name: "Save recurrence", exact: true }).click();
+  await closeDetail(page);
+  await checkSuccessors(true);
+  await openDetail(page);
+  await dialog(page).getByRole("button", { name: "Edit recurrence", exact: true }).click();
+  await rule(page).getByLabel("Repeat this task", { exact: true }).uncheck();
+  await rule(page).getByRole("button", { name: "Save recurrence", exact: true }).click();
+  await closeDetail(page);
+  await expect.poll(async () => (await series(page)).recurrence).toBeUndefined();
+  await checkSuccessors(false);
+  expect((await series(page)).occurrenceOverrides).toEqual(data.tasks[0].occurrenceOverrides);
+});
+
+
+test("changing one occurrence date saves the complete displayed range", async ({ page }) => {
+  const data = fixture(true);
+  data.tasks[0].duration = 2;
+  await boot(page, data);
+  const middle = page.locator('[data-series-id="series"][data-occurrence-date="2026-10-13"]');
+  await middle.focus(); await page.keyboard.press("Enter");
+  await expect(occurrence(page).getByLabel("Occurrence start", { exact: true })).toHaveValue("2026-10-13");
+  await expect(occurrence(page).getByLabel("Occurrence end", { exact: true })).toHaveValue("2026-10-14");
+  await occurrence(page).getByLabel("Occurrence start", { exact: true }).fill("2026-10-12");
+  await occurrence(page).getByRole("button", { name: "Save occurrence", exact: true }).click();
+  await expect.poll(async () => (await series(page)).occurrenceOverrides["2026-10-13"]).toEqual({ startDate: "2026-10-12", endDate: "2026-10-14" });
+  await closeDetail(page);
+  await cell(page, "series", "duration").fill("4");
+  await cell(page, "series", "duration").blur();
+  await expect.poll(async () => (await series(page)).duration).toBe(4);
+  await middle.focus(); await page.keyboard.press("Enter");
+  await expect(occurrence(page).getByLabel("Occurrence start", { exact: true })).toHaveValue("2026-10-12");
+  await expect(occurrence(page).getByLabel("Occurrence end", { exact: true })).toHaveValue("2026-10-14");
+});
+
+test.describe("narrow mobile visual viewport", () => {
+  test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  test("recurrence controls, scrolling and close stay in the visible viewport", async ({ page }, testInfo) => {
+    await boot(page, fixture(true));
+    await openDetail(page);
+    const panel = dialog(page);
+    async function expectContained() {
+      const bounds = await panel.boundingBox();
+      const visible = await page.evaluate(() => ({
+        left: visualViewport.offsetLeft, top: visualViewport.offsetTop,
+        width: visualViewport.width, height: visualViewport.height,
+      }));
+      expect(bounds.x).toBeGreaterThanOrEqual(visible.left);
+      expect(bounds.y).toBeGreaterThanOrEqual(visible.top);
+      expect(bounds.x + bounds.width).toBeLessThanOrEqual(visible.left + visible.width + 1);
+      expect(bounds.y + bounds.height).toBeLessThanOrEqual(visible.top + visible.height + 1);
+    }
+    await expectContained();
+    await panel.getByRole("button", { name: "Edit recurrence", exact: true }).click();
+    await rule(page).getByLabel("Frequency", { exact: true }).selectOption("monthly");
+    await rule(page).getByLabel("Repeat every", { exact: true }).fill("2");
+    await expectContained();
+    await evidence(page, testInfo, "60-mobile-recurrence-editor-en.png", false);
+    await rule(page).getByRole("button", { name: "Cancel", exact: true }).click();
+    // The sticky header close remains reachable even after scrolling to controls.
+    const close = panel.getByRole("button", { name: "Close", exact: true }).first();
+    await close.click();
+    await expect(panel).toHaveCount(0);
+    await openDetail(page);
+    await expectContained();
+    await page.keyboard.press("Escape");
+    await expect(panel).toHaveCount(0);
+    expect((await series(page)).recurrence.frequency).toBe("daily");
+  });
 });

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { buildOccurrenceOverridePatch } from "../lib/recurrenceEditing.js";
 import { formatDeps, parseDepInput } from "../lib/deps.js";
 import { isISODate, MAX_RECURRENCE_SPAN_DAYS, MAX_RECURRENCE_MOVE_DAYS } from "../lib/recurrence.js";
 import { useI18n } from "./I18nProvider.jsx";
@@ -7,8 +8,16 @@ import { useI18n } from "./I18nProvider.jsx";
 export function OccurrenceEditor({ task, occurrence, idToNo, noToId, onUpdate, onClose }) {
   const { t } = useI18n();
   const editorRef = useRef(null);
-  const [startDate, setStartDate] = useState(occurrence.startDate);
-  const [endDate, setEndDate] = useState(occurrence.endDate);
+  // Until the user edits a date, follow regenerated props (for example when
+  // series effort changes elsewhere in the same detail dialog). A date edit
+  // captures the complete visible range, so saving cannot silently shorten it.
+  const [dateDraft, setDateDraft] = useState(null);
+  const startDate = dateDraft ? dateDraft.startDate : occurrence.startDate;
+  const endDate = dateDraft ? dateDraft.endDate : occurrence.endDate;
+  function editDate(field, value) {
+    setDateDraft(previous => ({ ...(previous || { startDate: occurrence.startDate, endDate: occurrence.endDate }), [field]: value }));
+    setError(null);
+  }
   const [deps, setDeps] = useState(formatDeps(occurrence.predecessors || task.predecessors, idToNo));
   const [error, setError] = useState(null);
   const originalOverride = task.occurrenceOverrides?.[occurrence.occurrenceDate] || {};
@@ -21,18 +30,18 @@ export function OccurrenceEditor({ task, occurrence, idToNo, noToId, onUpdate, o
     if (!isISODate(startDate) || !isISODate(endDate) || endDate < startDate) { setError("occurrenceDatesInvalid"); return; }
     if (Math.abs(Date.parse(startDate) - Date.parse(originalDate)) / 86400000 > MAX_RECURRENCE_MOVE_DAYS) { setError("moveTooFar"); return; }
     if ((Date.parse(endDate) - Date.parse(startDate)) / 86400000 + 1 > MAX_RECURRENCE_SPAN_DAYS) { setError("spanInvalid"); return; }
-    const override = { startDate, endDate };
-    if (!dependenciesDirty) {
-      // Formatting can omit an unresolved WBS ID. A date-only edit must preserve
-      // the untouched original dependency array, including unresolved references.
-      if (Object.hasOwn(originalOverride, "predecessors")) override.predecessors = originalOverride.predecessors;
-    } else if (!inheritDeps) {
+    const edits = dateDraft ? { startDate, endDate } : {};
+    // Leave untouched dependency arrays out of the edit, including unresolved
+    // references that cannot be represented by the current WBS text formatter.
+    if (dependenciesDirty && inheritDeps) edits.predecessors = undefined;
+    else if (dependenciesDirty) {
       const parsed = parseDepInput(deps, noToId);
       if (parsed.errors.length) { setError("dependenciesInvalid"); return; }
       const inheritedUnchanged = !Object.hasOwn(originalOverride, "predecessors") && formatDeps(parsed.deps, idToNo) === formatDeps(task.predecessors, idToNo);
-      if (!inheritedUnchanged) override.predecessors = parsed.deps;
+      if (!inheritedUnchanged) edits.predecessors = parsed.deps;
     }
-    onUpdate({ occurrenceOverrides: { ...(task.occurrenceOverrides || {}), [originalDate]: override } });
+    const patch = buildOccurrenceOverridePatch(task, occurrence, edits);
+    if (patch) onUpdate(patch);
     onClose();
   }
   function reset() {
@@ -45,8 +54,8 @@ export function OccurrenceEditor({ task, occurrence, idToNo, noToId, onUpdate, o
     <h4 className="font-semibold text-xs text-slate-700">{t("recurrence.occurrenceIdentity", { date: originalDate })}</h4>
     <p className="text-[11px] text-slate-500">{t("recurrence.occurrenceNote")}</p>
     <div className="grid grid-cols-2 gap-2">
-      <label className="text-xs text-slate-600">{t("recurrence.occurrenceStart")}<input type="date" className={inputClass} aria-label={t("recurrence.occurrenceStart")} value={startDate} onChange={e => { setStartDate(e.target.value); setError(null); }} /></label>
-      <label className="text-xs text-slate-600">{t("recurrence.occurrenceEnd")}<input type="date" className={inputClass} aria-label={t("recurrence.occurrenceEnd")} value={endDate} onChange={e => { setEndDate(e.target.value); setError(null); }} /></label>
+      <label className="text-xs text-slate-600">{t("recurrence.occurrenceStart")}<input type="date" className={inputClass} aria-label={t("recurrence.occurrenceStart")} value={startDate} onChange={e => editDate("startDate", e.target.value)} /></label>
+      <label className="text-xs text-slate-600">{t("recurrence.occurrenceEnd")}<input type="date" className={inputClass} aria-label={t("recurrence.occurrenceEnd")} value={endDate} onChange={e => editDate("endDate", e.target.value)} /></label>
     </div>
     <label className="block text-xs text-slate-600">{t("taskDetail.predecessors")}<input className={inputClass} aria-label={t("recurrence.occurrenceDeps")} value={deps} onChange={e => { setDeps(e.target.value); setDependenciesDirty(true); setInheritDeps(false); setError(null); }} /></label>
     <div className="flex items-center justify-between gap-2 text-[11px] text-slate-500"><span>{t(inheritDeps ? "recurrence.inheritedDeps" : "recurrence.customDeps")}</span>{!inheritDeps && <button type="button" className="text-indigo-600 hover:underline" onClick={() => { setDeps(formatDeps(task.predecessors, idToNo)); setDependenciesDirty(true); setInheritDeps(true); }}>{t("recurrence.useSeriesDeps")}</button>}</div>

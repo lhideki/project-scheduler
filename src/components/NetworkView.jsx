@@ -273,13 +273,18 @@ export function NetworkView({ tasks, setTasks, schedule, selectedId, setSelected
           if (!p) return null;
           return <rect x={p.x} y={p.y} width={nodeW} height={nodeH} rx={8} fill="#EEF2FF" stroke="#4F46E5" strokeWidth={1.5} strokeDasharray="3,2" />;
         })()}
-        {edgeLayout.map(({ task: t, dep, targetDate, key, label, labelWidth, lx, ly, d, parallel }) => {
+        {/* Draw every connector before every label, so later parallel paths never
+            cross an earlier label's text or intercept its edit target. */}
+        {edgeLayout.map(({ task: t, dep, key, d }) => {
+          const critical = schedule.get(dep.id)?.critical && schedule.get(t.id)?.critical;
+          return <path key={key} d={d} data-network-edge-path={key} stroke={critical ? "#EF4444" : "#94A3B8"} strokeWidth={critical ? 1.8 : 1.3} fill="none" markerEnd={critical ? "url(#arrow2c)" : "url(#arrow2)"} />;
+        })}
+        {edgeLayout.map(({ task: t, dep, targetDate, key, label, labelWidth, lx, ly, parallel }) => {
           const critical = schedule.get(dep.id)?.critical && schedule.get(t.id)?.critical;
           const editLabel = tr("network.editDependency", { from: byId[dep.id]?.name || dep.id, to: t.name, label });
           const openEditor = () => setEdgeEdit({ from: dep.id, to: t.id, key: dependencyKey(dep), targetDate, type: dep.type, lag: dep.lag, x: lx, y: ly });
           return (
             <g key={key}>
-              <path d={d} data-network-edge-path={key} stroke={critical ? "#EF4444" : "#94A3B8"} strokeWidth={critical ? 1.8 : 1.3} fill="none" markerEnd={critical ? "url(#arrow2c)" : "url(#arrow2)"} />
               <g data-network-edge={key} data-network-from={dep.id} data-network-to={t.id}
                 data-source-occurrence={dep.occurrenceDate} data-target-occurrence={targetDate || undefined} data-parallel-edge={parallel || undefined}
                 role="button" tabIndex={0} aria-label={editLabel} className="focus-visible:outline-2 focus-visible:outline-indigo-600" style={{ cursor: "pointer" }}

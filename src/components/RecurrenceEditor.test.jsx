@@ -131,6 +131,7 @@ it("keeps parallel shared and individual network labels distinct, deterministic 
     }
     const paths = [...html.matchAll(/<path d="([^"]+)" data-network-edge-path=/g)].map(match => match[1]);
     expect(new Set(paths).size).toBe(4);
+    expect(html.lastIndexOf("data-network-edge-path=")).toBeLessThan(html.indexOf("data-network-edge="));
     const reordered = renderNetwork([task, { ...parallelTarget, predecessors: [...parallelTarget.predecessors].reverse() }], locale);
     expect(reordered).toBe(html);
   }
@@ -170,4 +171,35 @@ it("keeps a single dependency between occurrences of the same series outside its
   expect(labels[0][0]).toContain('data-target-occurrence="2026-10-14"');
   expect(Number(labels[0][0].match(/<rect x="([^"]+)"/)[1])).toBeGreaterThan(198);
   expect(labels[0][0]).toContain('role="button"');
+});
+
+it("lists only active occurrence successors after rule changes or recurrence removal", () => {
+  const owner = { ...target, id: "owner", name: "Dependency owner", predecessors: [] };
+  const dependent = {
+    ...task, id: "dependent", name: "Repeating dependent", predecessors: [],
+    occurrenceOverrides: {
+      "2026-10-13": { startDate: "2026-10-17", predecessors: [{ id: "owner", type: "FS", lag: 0 }] },
+      "2026-11-01": { predecessors: [{ id: "owner", type: "FS", lag: 0 }] },
+    },
+  };
+  const renderSuccessors = (next, locale) => render(<TaskDetailModal task={owner} tasks={[owner, next]} schedule={new Map()}
+    resources={[]} sprints={[]} idToNo={{ owner: "1", dependent: "2" }} noToId={{ 1: "owner", 2: "dependent" }}
+    onUpdate={noop} onEdit={noop} onCommitEdit={noop} onToggleMilestone={noop} onClose={noop}
+    autoScheduleHighlightIds={new Set()} taskContextRevision={0} />, locale);
+  const snapshot = JSON.stringify(dependent);
+  for (const locale of ["en", "ja"]) {
+    const active = renderSuccessors(dependent, locale);
+    expect(active.match(/data-successor-task=/g)).toHaveLength(1);
+    expect(active).toContain('data-successor-occurrence="2026-10-13"');
+    expect(active).not.toContain('data-successor-occurrence="2026-11-01"');
+    const changed = { ...dependent, recurrence: { frequency: "weekly", interval: 1, weekdays: [1], endDate: "2026-10-14" } };
+    expect(renderSuccessors(changed, locale)).not.toContain("data-successor-task=");
+    expect(renderSuccessors({ ...dependent, recurrence: undefined }, locale)).not.toContain("data-successor-task=");
+    const ordinary = { ...dependent, recurrence: undefined, predecessors: [{ id: "owner", type: "SS", lag: 0 }] };
+    const shared = renderSuccessors(ordinary, locale);
+    expect(shared.match(/data-successor-task=/g)).toHaveLength(1);
+    expect(shared).not.toContain("data-successor-occurrence=");
+    expect(renderSuccessors(dependent, locale)).toBe(active);
+  }
+  expect(JSON.stringify(dependent)).toBe(snapshot);
 });

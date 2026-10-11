@@ -18,7 +18,7 @@ const NOW = "2026-10-08T12:00:00.000Z";
 const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
 const baselineBytes = gunzipSync(await readFile(new URL("./fixtures/tailwind-v3-e029cc66.html.gz", import.meta.url)));
 if (sha256(baselineBytes) !== BASELINE_SHA256) throw new Error("The immutable Tailwind v3 baseline checksum does not match");
-const DETAIL_SHA256 = "c7a0b476d8e4af25a5e25842bcf28e63d5197c7bccfa54a2ea18ef7f3a0a3528";
+const DETAIL_SHA256 = "36bdda084a4192aa7d7e5541626a018d4764ce1b9c45dd0a1e2d4e3f7ddcca98";
 const detailBytes = gunzipSync(await readFile(new URL("./fixtures/recurrence-detail-issue60.html.gz", import.meta.url)));
 if (sha256(detailBytes) !== DETAIL_SHA256) throw new Error("The immutable recurring-task detail reference checksum does not match");
 const references = {
@@ -272,12 +272,25 @@ async function computedEvidence(page) {
       }
       return colorCache.get(color);
     }
+    // SVG titles/descriptions are accessibility metadata, not rendered labels.
+    // Ignore only those text nodes in diagnostic element identities (including
+    // ancestor divs); keep all measured styles, rectangles and pixels unchanged.
+    function visualTextKey(element) {
+      if (element.value != null) return element.value;
+      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, {
+        acceptNode: node => node.parentElement?.closest("svg title, svg desc")
+          ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+      });
+      let text = "";
+      while (walker.nextNode()) text += walker.currentNode.nodeValue;
+      return text;
+    }
     const selectors = ".ps-app-root, .ps-app-root > div, .w-7.h-7, button, input, select, textarea, table, thead, th, td, h3, [role=menu], [data-wbs-cell], .fixed, .fixed > div, svg";
     const elements = [...document.querySelectorAll(selectors)].filter(isRendered).map((element, index) => {
       const style = getComputedStyle(element);
       const verticalSpaceChild = spacingClasses(element.parentElement).length > 0;
       return {
-        key: `${index}:${element.tagName.toLowerCase()}:${element.getAttribute("data-wbs-cell") || element.getAttribute("data-testid") || element.getAttribute("aria-label") || element.getAttribute("role") || (element.value ?? element.textContent).trim().slice(0, 70)}`,
+        key: `${index}:${element.tagName.toLowerCase()}:${element.getAttribute("data-wbs-cell") || element.getAttribute("data-testid") || element.getAttribute("aria-label") || element.getAttribute("role") || visualTextKey(element).trim().slice(0, 70)}`,
         rect: rectOf(element),
         // v3 puts space-y on the following child's top; v4 puts it on the
         // preceding child's bottom. Compare the resulting gaps below, while

@@ -59,3 +59,8 @@ and are named recurring-task detail visual regressions. The remaining 22 scenari
 still compare **live current HTML** against this unchanged v3 fixture. Every
 scenario retains the original strict gates; no visual comparison is frozen to a
 pair of historical builds or skipped when a candidate differs.
+
+Element identity labels omit only text inside SVG `title`/`desc` nodes, including
+when collecting ancestor labels. These are non-rendered accessibility metadata;
+adding keyboard-accessible dependency descriptions must not change a visual
+element's identity. All geometry, style, color and pixel assertions remain intact.
