@@ -1,0 +1,90 @@
+{
+  "issue": "https://github.com/lhideki/project-scheduler/issues/62",
+  "pullRequest": "https://github.com/lhideki/project-scheduler/pull/63",
+  "sourceHead": "69a435c9920e32fc0a22a6a92c2d76d2ec8936be",
+  "sourceTree": "e17e79db10cc9e3f193f4888488fee135a1e5af5",
+  "testedMergeCommit": "df4373c7760d128ffac338c174a542077e067ec8",
+  "workflowRun": 38126770883,
+  "workflowUrl": "https://github.com/lhideki/project-scheduler/actions/runs/38126770883",
+  "job": 114432658811,
+  "artifactId": 11697577902,
+  "artifactSha256": "2bcbe1763efdc5a4438a34fdfcc5c36dcc4ea7fa11a7fda56ef407f6133c6fcd",
+  "generatedHtmlSha256": "d10886ac197fcda9fe10443cffebe942e3b2659d6a9a49b85e8988fa1a50e280",
+  "tests": {
+    "unit": 675,
+    "browser": 103,
+    "flaky": 0,
+    "failed": 0,
+    "pngExportCases": 7,
+    "existingVisualComparisons": 24
+  },
+  "review": {
+    "codexComment": "https://github.com/lhideki/project-scheduler/pull/63#discussion_r4240920179",
+    "fixedIn": "09a02e40b0c5d045ac0d7f52190f09466f868f5a",
+    "resolved": true,
+    "copilot": "Not run: requesting user quota exhausted"
+  },
+  "data": "Synthetic fixtures only; no user plan data",
+  "images": [
+    {
+      "file": "task-list-ja.png",
+      "attachmentName": "62-compact-hierarchy-ja-export.png",
+      "artifactPath": "playwright-report/data/3ba411cb1a4babc38594635d4c4c5ea4245b4808.png",
+      "sha256": "3fbbcd034e96434d446c8f2a5ff04ed0e3cbeef65138aea46e5c606c0e2fe19f",
+      "width": 1028,
+      "height": 514,
+      "test": "compact ja task names preserve hierarchy, safe text and cropped native-SVG output",
+      "testStatus": "passed"
+    },
+    {
+      "file": "collapsed.png",
+      "attachmentName": "62-collapsed-hierarchy-export.png",
+      "artifactPath": "playwright-report/data/f741f5c653f9b25a362e1394ef9789bb17e9face.png",
+      "sha256": "454cb729d520cf6cc56ff9dc8650f4ef885f3d59b1c8cbee6797dc101ceaae44",
+      "width": 928,
+      "height": 154,
+      "test": "collapsing a group removes descendants and recomputes the compact width without changing tasks",
+      "testStatus": "passed"
+    },
+    {
+      "file": "comparison.png",
+      "attachmentName": "62-recurring-milestone-comparison-export.png",
+      "artifactPath": "playwright-report/data/dc57647a311d63b571a189f454a9701eb417b95e.png",
+      "sha256": "f8357d9f83ff91c2491ffe7a900e0d48885c5a787b1353bcecc00fd4347c2a4d",
+      "width": 928,
+      "height": 272,
+      "test": "recurrence is one name row and comparison keeps the current and baseline lanes aligned",
+      "testStatus": "passed"
+    },
+    {
+      "file": "scrolled.png",
+      "attachmentName": "62-scrolled-visible-bars-export.png",
+      "artifactPath": "playwright-report/data/5f3521dbd0c327fa99bd7c23cb7bab85b833da4e.png",
+      "sha256": "dcd705e2af48f85e41a918834f7164636d3eb8abce428a18bc21f4e01768317d",
+      "width": 928,
+      "height": 832,
+      "test": "vertical and horizontal scrolling export the visible flat rows with independent clipping",
+      "testStatus": "passed"
+    },
+    {
+      "file": "scrolled-comparison.png",
+      "attachmentName": "62-scrolled-comparison-visible-bars-export.png",
+      "artifactPath": "playwright-report/data/c9721ee36969f7c11c8ef3fb21f902c2b109ec8b.png",
+      "sha256": "c736e85fbf2a0774503870a4d92092e167cf273035f17d1c0c8be719bba174d3",
+      "width": 928,
+      "height": 751,
+      "test": "scrolled comparison clips a baseline-only first row while recurring and milestone rows stay aligned",
+      "testStatus": "passed"
+    },
+    {
+      "file": "application-ja.png",
+      "attachmentName": "62-compact-hierarchy-ja-ui.png",
+      "artifactPath": "playwright-report/data/ee7a768758ebe9f10a1e6c1286b5547d5d481c84.png",
+      "sha256": "184f6af1022d3f1ae2ca1714c8f87a48ab3d695aa96c110487ef1726ecb65a03",
+      "width": 1600,
+      "height": 1000,
+      "test": "compact ja task names preserve hierarchy, safe text and cropped native-SVG output",
+      "testStatus": "passed"
+    }
+  ]
+}
