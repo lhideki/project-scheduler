@@ -677,3 +677,31 @@ describe("workday successors of fixed calendar occurrences", () => {
     expect(result.get("A").schedFinish).toBe("2024-01-15");
   });
 });
+
+
+describe("project end follows actual recurring occurrence finishes", () => {
+  const movedSeries = (id, origin, startDate) => ({
+    id, name: id, parentId: null, order: 0, startDate: origin, duration: 1,
+    recurrence: { frequency: "daily", interval: 1, endDate: origin },
+    occurrenceOverrides: { [origin]: { startDate } },
+  });
+  it.each([true, false])("does not floor the finish at the stored origin with respectManualPins=%s", respectManualPins => {
+    const tasks = [movedSeries("R", "2024-01-10", "2024-01-01")];
+    const projectStart = deriveProjectStart(tasks);
+    const { result, projectEnd } = runCPM(tasks, cal, projectStart, [], { respectManualPins });
+    expect(projectStart).toBe("2024-01-10");
+    expect(result.get("R").schedFinish).toBe("2024-01-01");
+    expect(projectEnd).toBe("2024-01-01");
+    expect(tasks[0].startDate).toBe("2024-01-10");
+  });
+  it("uses the latest actual leaf finish when all occurrences precede their origins", () => {
+    const tasks = [movedSeries("R", "2024-01-10", "2024-01-01"), movedSeries("S", "2024-01-20", "2024-01-03")];
+    expect(runCPM(tasks, cal, deriveProjectStart(tasks), []).projectEnd).toBe("2024-01-03");
+  });
+  it("keeps projectStart as the fallback when there are no scheduled leaves", () => {
+    expect(runCPM([], cal, "2024-01-10", []).projectEnd).toBe("2024-01-10");
+    const tasks = [{ id: "empty", startDate: "2024-01-31", duration: 1,
+      recurrence: { frequency: "monthly", interval: 1, monthDay: "start", endDate: "2024-01-31" } }];
+    expect(runCPM(tasks, cal, "2024-01-31", []).projectEnd).toBe("2024-01-31");
+  });
+});

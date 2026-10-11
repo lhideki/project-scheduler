@@ -291,7 +291,9 @@ export function runCPM(tasks, cal, projectStart, sprints, opts = {}) {
   }
   const { ES, EF, order, predsOf, succsOf } = passResult;
 
-  const projectEnd = leafIds.reduce((mx, id) => (EF[id] > mx ? EF[id] : mx), projectStart);
+  // Occurrence overrides may place every actual leaf before the stored series origin.
+  // Only an empty schedule falls back to projectStart; it is not a finish-date floor.
+  const projectEnd = leafIds.reduce((mx, id) => (EF[id] && (!mx || EF[id] > mx) ? EF[id] : mx), null) ?? projectStart;
 
   const LS = {}, LF = {};
   [...order].reverse().forEach(id => {

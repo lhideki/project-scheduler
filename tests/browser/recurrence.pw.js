@@ -50,6 +50,79 @@ const errors = new WeakMap();
 test.beforeEach(async ({ page }) => { errors.set(page, []); page.on("pageerror", error => errors.get(page).push(error.message)); });
 test.afterEach(async ({ page }) => { expect(errors.get(page)).toEqual([]); });
 
+test("protected recurrence TSV and cell pastes reject every field without changes or undo entries", async ({ page }) => {
+  const data = fixture(true);
+  data.resources.push({ id: "other", name: "Other engineer", weeklyCapacity: 5, monthlyCapacity: 20 });
+  await boot(page, data);
+  await expect(page.getByTestId("save-status")).toHaveText("Saved in this browser");
+  const before = (await stored(page)).tasks;
+  const row = page.locator('[data-wbs-row-id="series"]');
+  const name = cell(page, "series", "name");
+  const cases = [
+    { target: row, text: "Changed\t2026-10-13\t8\tOther engineer\t\t100\t2FS" },
+    { target: name, text: "Changed\t\t8\tOther engineer\t\t100\t2FS" },
+    { target: name, text: "Changed\tnot-a-date\t8\tOther engineer\t\t100\t2FS" },
+    { target: cell(page, "series", "startDate"), text: "2026-10-13" },
+  ];
+  for (const { target, text } of cases) {
+    // Keyboard focus selects the protected date cell without opening its detail modal.
+    await target.focus();
+    const prevented = await target.evaluate((element, text) => {
+      const clipboardData = new DataTransfer();
+      clipboardData.setData("text/plain", text);
+      const event = new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData });
+      element.dispatchEvent(event);
+      return event.defaultPrevented;
+    }, text);
+    // A rejected application paste must not fall through to native input editing.
+    expect(prevented).toBe(true);
+    await expect(page.getByText("Edit recurring dates and type in recurrence settings. This paste was not applied.", { exact: true })).toBeVisible();
+    await expect(name).toHaveValue("Daily review");
+    await expect(cell(page, "series", "duration")).toHaveValue("1");
+    await expect(cell(page, "series", "startDate")).toHaveValue("2026-10-12");
+    await expect(page.getByRole("button", { name: "Undo", exact: true })).toBeDisabled();
+    expect((await stored(page)).tasks).toEqual(before);
+  }
+  await page.reload();
+  await expect(bars(page)).toHaveCount(3);
+  expect((await stored(page)).tasks).toEqual(before);
+});
+
+test("oversized internal row paste into a recurring name cell is consumed without native editing", async ({ page }) => {
+  const data = fixture(true);
+  data.tasks[1].duration = 3661;
+  await boot(page, data);
+  await expect(page.getByTestId("save-status")).toHaveText("Saved in this browser");
+  const before = (await stored(page)).tasks;
+  const sourceRow = page.locator('[data-wbs-row-id="delivery"]');
+  await sourceRow.click();
+  const copied = await sourceRow.evaluate(element => {
+    const clipboardData = new DataTransfer();
+    element.dispatchEvent(new ClipboardEvent("copy", { bubbles: true, cancelable: true, clipboardData }));
+    return {
+      text: clipboardData.getData("text/plain"),
+      row: clipboardData.getData("application/x-project-scheduler-wbs"),
+    };
+  });
+  expect(JSON.parse(copied.row).task.duration).toBe(3661);
+  const name = cell(page, "series", "name");
+  await name.click();
+  const prevented = await name.evaluate((element, copied) => {
+    const clipboardData = new DataTransfer();
+    clipboardData.setData("text/plain", copied.text);
+    clipboardData.setData("application/x-project-scheduler-wbs", copied.row);
+    const event = new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData });
+    element.dispatchEvent(event);
+    return event.defaultPrevented;
+  }, copied);
+  expect(prevented).toBe(true);
+  await expect(page.getByText("Each occurrence must span no more than 3,660 calendar days. Reduce its effort or date range.", { exact: true })).toBeVisible();
+  await expect(name).toHaveValue("Daily review");
+  await expect(cell(page, "series", "duration")).toHaveValue("1");
+  await expect(page.getByRole("button", { name: "Undo", exact: true })).toBeDisabled();
+  expect((await stored(page)).tasks).toEqual(before);
+});
+
 test("recurrence rule drafts cancel safely, validate, and save as one undoable edit", async ({ page }, testInfo) => {
   await boot(page);
   await openDetail(page);
@@ -405,7 +478,7 @@ test("changing one occurrence date saves the complete displayed range", async ({
   await expect(occurrence(page).getByLabel("Occurrence end", { exact: true })).toHaveValue("2026-10-14");
   await occurrence(page).getByLabel("Occurrence start", { exact: true }).fill("2026-10-12");
   await occurrence(page).getByRole("button", { name: "Save occurrence", exact: true }).click();
-  await expect.poll(async () => (await series(page)).occurrenceOverrides["2026-10-13"]).toEqual({ startDate: "2026-10-12", endDate: "2026-10-14" });
+  await expect.poll(async () => (await series(page)).occurrenceOverrides?.["2026-10-13"]).toEqual({ startDate: "2026-10-12", endDate: "2026-10-14" });
   await closeDetail(page);
   await cell(page, "series", "duration").fill("4");
   await cell(page, "series", "duration").blur();

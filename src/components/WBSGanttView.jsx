@@ -571,6 +571,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
     if (clipboardRef.current?.text === text) return clipboardRef.current;
     return { kind: "text", text };
   }
+  // Return whether the app consumed the paste, including an intentional protected rejection.
   function applyClipboardPayload(payload, selection) {
     if (!payload || !selection) return false;
     const target = tasks.find(t => t.id === selection.taskId);
@@ -578,6 +579,7 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
     const context = clipboardContextFor(target.id);
     let patch = {};
     let errors = [];
+    let error;
 
     if (payload.kind === "row" && payload.task) {
       patch = copiedTaskRowPatch(payload.task, target, context.hasChildren, payload.hasChildren);
@@ -585,24 +587,30 @@ export const WBSGanttView = React.forwardRef(function WBSGanttView({
       const parsed = taskCellPatch(target, payload.column, payload.text, context);
       if (!parsed.ok) errors.push(payload.column);
       patch = parsed.patch;
+      error = parsed.error;
     } else if (selection.kind === "row" || String(payload.text).includes("\t")) {
       const parsed = taskRowPatch(target, payload.text, context);
       patch = parsed.patch;
       errors = parsed.errors;
+      error = parsed.error;
     } else {
       const column = selection.kind === "cell" ? selection.column : payload.column;
       const parsed = taskCellPatch(target, column, payload.text, context);
       if (!parsed.ok) errors.push(column);
       patch = parsed.patch;
+      error = parsed.error;
+    }
+    if (error === "protected-recurrence") {
+      onNotify?.(tr("recurrence.cannotPaste")); return true;
     }
     if (!Object.keys(patch).length) {
       onNotify?.(tr("wbs.toast.nothingToPaste"));
       return false;
     }
     if (isRecurringTask(target) && ((Object.hasOwn(patch, "startDate") && patch.startDate !== target.startDate) || patch.milestone)) {
-      onNotify?.(tr("recurrence.cannotPaste")); return false;
+      onNotify?.(tr("recurrence.cannotPaste")); return true;
     }
-    if (!safeTaskPatch(target.id, patch)) return false;
+    if (!safeTaskPatch(target.id, patch)) return true;
     updateTask(target.id, patch);
     if (errors.length) onNotify?.(tr("wbs.toast.pastedPartially"));
     else onNotify?.(payload.kind === "row" || selection.kind === "row" ? tr("wbs.toast.rowPasted") : tr("wbs.toast.cellPasted"));

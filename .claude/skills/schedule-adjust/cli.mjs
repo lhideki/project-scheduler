@@ -720,7 +720,7 @@ function runCPM(tasks, cal, projectStart, sprints, opts = {}) {
     groupRollup = computeGroupRollup(new Map(leafIds.map((id) => [id, { start: next.ES[id], finish: next.EF[id] }])));
   }
   const { ES, EF, order, predsOf, succsOf } = passResult;
-  const projectEnd = leafIds.reduce((mx, id) => EF[id] > mx ? EF[id] : mx, projectStart);
+  const projectEnd = leafIds.reduce((mx, id) => EF[id] && (!mx || EF[id] > mx) ? EF[id] : mx, null) ?? projectStart;
   const LS = {}, LF = {};
   [...order].reverse().forEach((id) => {
     const t = byId[id];

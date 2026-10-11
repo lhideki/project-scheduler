@@ -4,6 +4,12 @@
 
 A recurring task is one WBS/Gantt row with a separate, fixed-date bar for each occurrence. Open a regular leaf task's details, choose **Add recurrence**, set the rule, and save it. A group or milestone cannot repeat. Use **Edit recurrence** to change the origin or rule; the WBS start-date cell is read-only for a series.
 
+### Converting existing tasks
+
+An existing regular leaf task can become recurring even when it has dependencies or is complete. Its ID, effort, assignee, predecessors and progress are retained; 100% progress is inherited by every occurrence, not reset. A leaf inside a group is supported. A task with children cannot repeat, and a milestone must first be changed to a regular task. A task without a start date can open the editor, but a valid start date is required before saving.
+
+To return to a regular task, clear **Repeat this task** and save. This removes the rule while retaining the current task fields and dormant occurrence overrides; it does not restore a pre-conversion schedule. Dependencies targeting a specific occurrence are also retained, so they are reported as missing until that occurrence is restored or the reference is repaired.
+
 ### Rules and calculation period
 
 - The start date is required and anchors the rule. The recurrence end date is optional and inclusive, evaluated against the original occurrence date.
@@ -45,6 +51,12 @@ The optional `recurrence`, `occurrenceOverrides`, and dependency `occurrenceDate
 ## 日本語
 
 通常の末端タスクの詳細から「繰り返しを追加」で設定します。WBS・ガントは1シリーズ1行で、各回を独立した固定日程のバーとして表示します。グループ・マイルストーンには設定できません。シリーズの開始日・規則は詳細の「繰り返しを編集」から変更します。
+
+### 既存タスクの変換・解除
+
+子タスクのない通常タスクなら、依存関係がある場合や完了済みでも変換できます。グループ配下の末端タスクも対象です。ID・工数・担当者・依存・進捗を保持し、完了100%も各回へ引き継ぎます。親グループは変換できず、マイルストーンは先に通常タスクへ変更する必要があります。開始日がなくても設定画面は開けますが、保存には有効な開始日が必要です。
+
+通常タスクへ戻すには「このタスクを繰り返す」のチェックを外して保存します。規則を解除し、現在のタスク情報と休止した個別修正を保持します。変換前の日程への自動復元ではありません。他タスクから特定回への依存も保持するため、その回を再生成するか参照を修正するまでは参照先なしの警告になります。
 
 ### 規則と計算期間
 

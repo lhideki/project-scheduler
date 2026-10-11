@@ -569,6 +569,18 @@ describe("shared UI/CLI project validation", () => {
 });
 
 describe("recurring task CLI parity", () => {
+  it.each([false, true])("reports the actual finish when the only occurrence moves before its origin, leveling=%s", leveling => {
+    const tasks = [{ id: "series", name: "Moved review", parentId: null, order: 0, startDate: "2024-01-10", duration: 1,
+      recurrence: { frequency: "daily", interval: 1, endDate: "2024-01-10" },
+      occurrenceOverrides: { "2024-01-10": { startDate: "2024-01-01" } }, predecessors: [] }];
+    const original = buildProjectExport(tasks, [], [], [], leveling);
+    const computed = computeSchedule(original, { leveling });
+    expect(computed.projectStart).toBe("2024-01-10");
+    expect(computed.cpm.projectEnd).toBe("2024-01-01");
+    expect(computed.projectEnd).toBe("2024-01-01");
+    expect(scheduleRows(original, computed.schedule)[0].schedFinish).toBe("2024-01-01");
+    expect(original.tasks[0].startDate).toBe("2024-01-10");
+  });
   const data = () => buildProjectExport([
     { id: "series", name: "Monthly review", parentId: null, order: 0, startDate: "2024-01-31", duration: 1,
       recurrence: { frequency: "monthly", interval: 1, monthDay: "end", endDate: "2024-03-31" },

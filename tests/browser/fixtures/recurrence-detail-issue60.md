@@ -31,3 +31,13 @@ pixels. This reference was deliberately corrected after that visual rejection:
 the detail overlay now follows the visual viewport instead of the overflow-expanded
 layout viewport. Its 390px dialog, scrolling, close controls and recurrence editor
 require fresh CI screenshot inspection; the initial clipped reference was not accepted.
+
+Visual acceptance was completed against CI run `38114018534`, artifact
+`11692941188`, head `c30d6453a78ba9815baa0c104d3d9b3f7ac14566`.
+The desktop detail and 390×844 mobile captures were inspected directly. The mobile
+panel fits within x=16–374 and y=16–828; the close button and recurrence actions are
+reachable. The separate mobile browser case also exercised scrolling, Cancel,
+Close and Escape. All 24 visual comparisons passed with the original gates.
+That run still failed one unrelated new test because its polling callback read an
+absent override before debounced persistence completed; this visual acceptance is
+not a claim that the entire CI run succeeded.
