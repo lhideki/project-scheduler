@@ -248,12 +248,20 @@ function assertArtifact(artifact, before, stride = ROW_H) {
 }
 function assertVisibleBarPixels(png, metrics, bars, dpr) {
   const visible = bars.filter(bar => bar.center.x > metrics.chart.x + 2 && bar.center.x < metrics.width - 2
-    && bar.center.y > HEADER_H + 2 && bar.center.y < metrics.height - 2);
+    && bar.center.y > HEADER_H + 15 && bar.center.y < metrics.height - 15);
   expect(visible.length, "At least one real task bar must be inside the exported chart viewport").toBeGreaterThan(0);
   for (const bar of visible) {
-    const offset = (Math.floor(bar.center.y * dpr) * png.width + Math.floor(bar.center.x * dpr)) * 4;
-    const rgb = [...png.data.subarray(offset, offset + 3)];
-    expect(Math.max(...rgb) - Math.min(...rgb), "The decoded PNG contains a colored task bar at its measured center").toBeGreaterThan(20);
+    const pixel = y => {
+      const offset = (Math.floor(y * dpr) * png.width + Math.floor(bar.center.x * dpr)) * 4;
+      return [...png.data.subarray(offset, offset + 3)];
+    };
+    const rgb = pixel(bar.center.y);
+    // Compare with the empty 30px current-lane margin in the same date column.
+    // A translucent blue bar over a yellow holiday can be nearly neutral, so
+    // saturation alone is not evidence that a bar is absent.
+    const background = pixel(bar.center.y - 12);
+    const difference = rgb.reduce((total, value, index) => total + Math.abs(value - background[index]), 0);
+    expect(difference, "The decoded PNG contains a task bar distinct from its actual date-column background").toBeGreaterThan(25);
   }
 }
 async function capture(page, locale = "en") {
@@ -316,6 +324,7 @@ test("vertical and horizontal scrolling export the visible flat rows with indepe
   const before = await layout(page);
   const saved = await stored(page);
   const artifact = await capture(page);
+  await evidence(page, testInfo, "62-scrolled-visible-bars", artifact);
   const png = assertArtifact(artifact, before);
   const { metrics: m } = artifact;
   expect(m.rows[0].id).toBe("task-11");
@@ -347,7 +356,6 @@ test("vertical and horizontal scrolling export the visible flat rows with indepe
   }
   expect(await layout(page)).toEqual(before);
   expect(await stored(page)).toEqual(saved);
-  await evidence(page, testInfo, "62-scrolled-visible-bars", artifact);
 
   await pane(page).evaluate(el => { el.scrollTop = el.scrollHeight; });
   await expect.poll(async () => (await layout(page)).scrollTop).toBeGreaterThan(before.scrollTop);
@@ -437,6 +445,7 @@ test("scrolled comparison clips a baseline-only first row while recurring and mi
   const before = await layout(page);
   const saved = await stored(page);
   const artifact = await capture(page);
+  await evidence(page, testInfo, "62-scrolled-comparison-visible-bars", artifact);
   const png = assertArtifact(artifact, before, COMPARE_STRIDE);
   const { metrics: m } = artifact;
   expect(m.rows[0].id).toBe("before-6");
@@ -465,7 +474,6 @@ test("scrolled comparison clips a baseline-only first row while recurring and mi
   assertVisibleBarPixels(png, m, [...m.series, ...m.milestones, ...m.ordinaryBars], before.dpr);
   expect(await layout(page)).toEqual(before);
   expect(await stored(page)).toEqual(saved);
-  await evidence(page, testInfo, "62-scrolled-comparison-visible-bars", artifact);
 });
 
 test.describe("high-DPI copy and download", () => {
