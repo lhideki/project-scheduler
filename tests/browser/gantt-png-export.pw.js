@@ -162,6 +162,10 @@ async function inspectSvg(page, markup) {
         const p = new DOMPoint(x, y).matrixTransform(el.getScreenCTM()).matrixTransform(svg.getScreenCTM().inverse());
         return { x: p.x, y: p.y };
       };
+      const shape = el => {
+        const bounds = rect(el);
+        return { ...bounds, center: point(el, bounds.x + bounds.width / 2, bounds.y + bounds.height / 2) };
+      };
       const rows = [...taskList.querySelectorAll("[data-png-task-id]")].map(row => {
         const name = row.querySelector("[data-png-task-name]");
         if (!name) throw new Error("Every compact task row needs one name");
@@ -171,6 +175,7 @@ async function inspectSvg(page, markup) {
           const y = line.y.baseVal.getItem(0).value;
           return { text: line.textContent, x, y, center: point(line, x, y), width: line.getComputedTextLength() };
         });
+        const baseline = row.querySelector(":scope > text:not([data-png-task-name])");
         return {
           id: row.getAttribute("data-png-task-id"), depth: Number(row.getAttribute("data-depth")),
           name: name.textContent, rowText: row.textContent, lines,
@@ -178,6 +183,7 @@ async function inspectSvg(page, markup) {
           textWidth: Math.max(...lines.map(line => line.width)),
           fontWeight: getComputedStyle(name).fontWeight,
           nameCount: row.querySelectorAll("[data-png-task-name]").length,
+          baselineCenter: baseline ? point(baseline, baseline.x.baseVal.getItem(0).value, baseline.y.baseVal.getItem(0).value) : null,
         };
       });
       const chartSvgs = [...chart.querySelectorAll("svg")].map(rect);
@@ -190,12 +196,14 @@ async function inspectSvg(page, markup) {
         listText: taskList.textContent,
         series: [...chart.querySelectorAll("[data-series-id][data-occurrence-date]")].map(el => ({
           id: el.getAttribute("data-series-id"), date: el.getAttribute("data-occurrence-date"),
-          y: Number(el.querySelector("rect").getAttribute("y")),
+          ...shape(el.querySelector("rect")),
         })),
         baselineOccurrences: chart.querySelectorAll("[data-baseline-occurrence]").length,
+        baselineBars: [...chart.querySelectorAll('rect[fill="#94A3B8"]')].map(shape),
         milestoneCount: chart.querySelectorAll('rect[transform^="rotate(45"][width="12"]').length,
+        milestones: [...chart.querySelectorAll('rect[transform^="rotate(45"][width="12"]')].map(shape),
         ordinaryBars: [...chart.querySelectorAll("[data-task-bar]")].map(el => ({
-          id: el.getAttribute("data-task-bar"), y: Number(el.querySelector(":scope > rect").getAttribute("y")),
+          id: el.getAttribute("data-task-bar"), ...shape(el.querySelector(":scope > rect")),
         })),
       };
     } finally { svg.remove(); }
@@ -237,6 +245,16 @@ function assertArtifact(artifact, before, stride = ROW_H) {
     }
   }
   return png;
+}
+function assertVisibleBarPixels(png, metrics, bars, dpr) {
+  const visible = bars.filter(bar => bar.center.x > metrics.chart.x + 2 && bar.center.x < metrics.width - 2
+    && bar.center.y > HEADER_H + 2 && bar.center.y < metrics.height - 2);
+  expect(visible.length, "At least one real task bar must be inside the exported chart viewport").toBeGreaterThan(0);
+  for (const bar of visible) {
+    const offset = (Math.floor(bar.center.y * dpr) * png.width + Math.floor(bar.center.x * dpr)) * 4;
+    const rgb = [...png.data.subarray(offset, offset + 3)];
+    expect(Math.max(...rgb) - Math.min(...rgb), "The decoded PNG contains a colored task bar at its measured center").toBeGreaterThan(20);
+  }
 }
 async function capture(page, locale = "en") {
   const artifact = await copyPng(page, locale);
@@ -287,7 +305,9 @@ for (const locale of ["en", "ja"]) {
 }
 
 test("vertical and horizontal scrolling export the visible flat rows with independent clipping", async ({ page }, testInfo) => {
-  const tasks = Array.from({ length: 65 }, (_, index) => leaf(`task-${index}`, index === 0 ? "Offscreen long name ".repeat(30) : `Task ${index}`, index));
+  const tasks = Array.from({ length: 65 }, (_, index) => leaf(`task-${index}`, index === 0 ? "Offscreen long name ".repeat(30) : `Task ${index}`, index, {
+    startDate: index >= 11 ? "2026-11-02" : "2026-10-12",
+  }));
   tasks.at(-1).startDate = "2027-03-01"; // Make horizontal scrolling meaningful.
   await boot(page, project(tasks));
   await pane(page).evaluate(el => { el.scrollTop = 11 * 30 + 11; el.scrollLeft = 217; });
@@ -311,6 +331,13 @@ test("vertical and horizontal scrolling export the visible flat rows with indepe
   expect(m.chartSvgs.filter(svg => svg.x === -before.scrollLeft)).toHaveLength(3);
   expect(m.chartSvgs.filter(svg => svg.y === HEADER_H - before.scrollTop)).toHaveLength(2);
   expect(m.chartSvgs.filter(svg => svg.y === 0 && svg.height === HEADER_H)).toHaveLength(1);
+  const visibleRowBars = m.rows.map(row => {
+    const bar = m.ordinaryBars.find(bar => bar.id === row.id);
+    expect(bar, `An ordinary bar exists for visible task ${row.id}`).toBeTruthy();
+    expect(bar.center.y, `Task ${row.id} is centered on its real exported bar`).toBeCloseTo(row.center.y, 5);
+    return bar;
+  });
+  assertVisibleBarPixels(png, m, visibleRowBars, before.dpr);
   // The left margin stays white even where the horizontally scrolled chart has
   // weekend shading, bars, dependency lines and its current-day marker.
   for (let y = HEADER_H + 2; y < m.height - 2; y++) {
@@ -320,7 +347,7 @@ test("vertical and horizontal scrolling export the visible flat rows with indepe
   }
   expect(await layout(page)).toEqual(before);
   expect(await stored(page)).toEqual(saved);
-  await evidence(page, testInfo, "62-scrolled-current-rows", artifact);
+  await evidence(page, testInfo, "62-scrolled-visible-bars", artifact);
 
   await pane(page).evaluate(el => { el.scrollTop = el.scrollHeight; });
   await expect.poll(async () => (await layout(page)).scrollTop).toBeGreaterThan(before.scrollTop);
@@ -379,6 +406,66 @@ test("recurrence is one name row and comparison keeps the current and baseline l
   expect(await layout(page)).toEqual(before);
   expect(await stored(page)).toEqual(saved);
   await evidence(page, testInfo, "62-recurring-milestone-comparison", artifact);
+});
+
+test("scrolled comparison clips a baseline-only first row while recurring and milestone rows stay aligned", async ({ page }, testInfo) => {
+  const data = recurringFixture();
+  data.tasks[0].order = 7;
+  data.tasks[1].startDate = "2026-11-02";
+  data.tasks[1].recurrence.endDate = "2026-11-04";
+  data.tasks[2].startDate = "2026-11-02";
+  data.tasks[3].startDate = "2026-11-02";
+  data.tasks[3].order = 8;
+  data.tasks.unshift(...Array.from({ length: 7 }, (_, index) => leaf(`before-${index}`, `Earlier task ${index}`, index, {
+    startDate: index === 0 ? "2026-10-12" : "2026-11-02",
+  })));
+  data.tasks.push(...Array.from({ length: 25 }, (_, index) => leaf(`after-${index}`, `Later task ${index}`, 9 + index, {
+    startDate: index === 24 ? "2027-03-01" : "2026-11-02",
+  })));
+  await boot(page, data);
+  await page.getByRole("button", { name: "Save version", exact: true }).click();
+  const comparison = page.getByRole("combobox", { name: "Match the selected version by WBS number and show its row under each task as a baseline", exact: true });
+  await expect(comparison.locator("option")).toHaveCount(2);
+  await comparison.selectOption({ index: 1 });
+  await expect(page.locator("[data-baseline-occurrence]")).toHaveCount(3);
+  await expect.poll(async () => (await stored(page)).versions.length).toBe(1);
+  // Current lane ends at offset 30; offset 37 leaves only 15px of its baseline
+  // visible underneath the sticky header, followed by complete 52px row pairs.
+  await pane(page).evaluate(el => { el.scrollTop = 6 * 52 + 37; el.scrollLeft = 217; });
+  await expect.poll(async () => (await layout(page)).scrollTop).toBe(349);
+  await expect.poll(async () => (await layout(page)).scrollLeft).toBe(217);
+  const before = await layout(page);
+  const saved = await stored(page);
+  const artifact = await capture(page);
+  const png = assertArtifact(artifact, before, COMPARE_STRIDE);
+  const { metrics: m } = artifact;
+  expect(m.rows[0].id).toBe("before-6");
+  expect(m.rows[0].center.y + ROW_H / 2, "The first current task lane is completely above the body clip").toBeLessThan(HEADER_H);
+  expect(m.rows[0].baselineCenter.y).toBe(HEADER_H + 4);
+  const firstBaseline = m.baselineBars.find(bar => Math.abs(bar.center.y - m.rows[0].baselineCenter.y) < 0.01);
+  expect(firstBaseline, "The first visible baseline label aligns with its baseline bar").toBeTruthy();
+  expect(firstBaseline.center.x).toBeGreaterThan(m.chart.x);
+  expect(firstBaseline.center.x).toBeLessThan(m.width);
+  for (const row of m.rows) {
+    expect(row.baselineCenter.y - row.center.y).toBe(COMPARE_STRIDE / 2);
+    const bar = m.ordinaryBars.find(bar => bar.id === row.id);
+    if (bar) expect(bar.center.y).toBeCloseTo(row.center.y, 5);
+  }
+  const recurring = m.rows.find(row => row.id === "series");
+  expect(m.rows.filter(row => row.id === "series")).toHaveLength(1);
+  expect(m.series.map(bar => bar.date)).toEqual(["2026-11-02", "2026-11-03", "2026-11-04"]);
+  for (const bar of m.series) expect(bar.center.y).toBeCloseTo(recurring.center.y, 5);
+  expect(m.baselineOccurrences).toBe(3);
+  expect(m.milestones).toHaveLength(1);
+  expect(m.milestones[0].center.y).toBeCloseTo(m.rows.find(row => row.id === "milestone").center.y, 5);
+  expect(m.listBody.y).toBe(HEADER_H);
+  expect(m.listBody.overflow).toBe("hidden");
+  expect(m.chartSvgs.filter(svg => svg.x === -before.scrollLeft)).toHaveLength(3);
+  expect(m.chartSvgs.filter(svg => svg.y === HEADER_H - before.scrollTop)).toHaveLength(2);
+  assertVisibleBarPixels(png, m, [...m.series, ...m.milestones, ...m.ordinaryBars], before.dpr);
+  expect(await layout(page)).toEqual(before);
+  expect(await stored(page)).toEqual(saved);
+  await evidence(page, testInfo, "62-scrolled-comparison-visible-bars", artifact);
 });
 
 test.describe("high-DPI copy and download", () => {
