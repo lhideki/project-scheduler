@@ -1,0 +1,82 @@
+{
+  "issue": "https://github.com/lhideki/project-scheduler/issues/64",
+  "pullRequest": "https://github.com/lhideki/project-scheduler/pull/65",
+  "sourceHead": "49d50b81dcc138c7613cd8846088329f13fde753",
+  "sourceTree": "c7055289e19f8fd1101623ce670992497a737e4e",
+  "testedMergeCommit": "19ee7ef06dc65ba3361cc8407902396d0408ba24",
+  "workflowRun": 38135511740,
+  "workflowAttempt": 2,
+  "workflowUrl": "https://github.com/lhideki/project-scheduler/actions/runs/38135511740/attempts/2",
+  "job": 114459136989,
+  "artifactId": 11700469336,
+  "artifactSha256": "3486543bec25c97251b5457e92d4fe7a3e4425a4fb4e5eb2a8c380ac81debf0a",
+  "generatedHtmlSha256": "6ce896b38fc3c26f8a4229cfd0a87074d4fb2581d7985ce5937ac361751dd410",
+  "tests": {
+    "unit": 748,
+    "browser": 118,
+    "failed": 0,
+    "browserFlaky": 0,
+    "browserSkipped": 0,
+    "newBrowserTests": 15,
+    "existingVisualComparisons": 24
+  },
+  "retryNote": "The first attempt of this source head timed out in two existing unit tests on a slow runner. The unchanged-head second attempt passed all stages. The browser suite itself passed without retries. No test timeouts, pixel thresholds, masks, or reference snapshots were relaxed.",
+  "review": {
+    "codexReviewedHead": "d06bb835ccf1825c1a3ac05799d38617488985c4",
+    "codex": "Completed with no findings",
+    "copilot": "Not run: requesting user quota exhausted"
+  },
+  "data": "Synthetic fixtures only; no user plan data",
+  "images": [
+    {
+      "file": "detail-ja.png",
+      "attachmentName": "64-desktop-occurrence-controls-ja.png",
+      "artifactPath": "playwright-report/data/c632f16048ce346fedd813a438e93efa18b369e8.png",
+      "sha256": "be238ba7b71c45ee46075d45cbed2603cb1ce02265739bfc5add814d81fdd5dd",
+      "width": 1800,
+      "height": 1000,
+      "test": "desktop ja shows selected per-occurrence controls and exports real progress/skip PNG evidence",
+      "outcome": "expected"
+    },
+    {
+      "file": "detail-en.png",
+      "attachmentName": "64-desktop-occurrence-controls-en.png",
+      "artifactPath": "playwright-report/data/a8c9316fad0a0f7f4dec1ec10a329616dcc74a03.png",
+      "sha256": "f47f17f592342c1abf82e2c9d5de4f3552064729e58a43302e6f16882d4bd405",
+      "width": 1800,
+      "height": 1000,
+      "test": "desktop en shows selected per-occurrence controls and exports real progress/skip PNG evidence",
+      "outcome": "expected"
+    },
+    {
+      "file": "mobile-ja.png",
+      "attachmentName": "64-mobile-occurrence-controls-ja.png",
+      "artifactPath": "playwright-report/data/e383b0ae41899a23c6e89fa695fb4c99b57d71ec.png",
+      "sha256": "a822815ce99dcceecec118ce47a087efb276db6f949f4b0ea3b8bc81e5fd1068",
+      "width": 390,
+      "height": 844,
+      "test": "ja controls fit, scroll, restore previous progress, and close",
+      "outcome": "expected"
+    },
+    {
+      "file": "gantt-ja.png",
+      "attachmentName": "64-occurrence-progress-ja-export.png",
+      "artifactPath": "playwright-report/data/ec597de5e71c126c6a5fb4ee5a4c8e449db893e4.png",
+      "sha256": "b6d08b0734d6d213e25836990d899c6d43e880ffc3a0ab55226fc04431a49f18",
+      "width": 1128,
+      "height": 124,
+      "test": "desktop ja shows selected per-occurrence controls and exports real progress/skip PNG evidence",
+      "outcome": "expected"
+    },
+    {
+      "file": "dependency-warning-en.png",
+      "attachmentName": "64-skipped-predecessor-warning-en.png",
+      "artifactPath": "playwright-report/data/304b9f19418aae584f341c87dfadd91b28862f3d.png",
+      "sha256": "cabfb46343530ae65ff2b5c6e1a77507e01d3ccbe990094f97c698cd47209926",
+      "width": 1600,
+      "height": 1000,
+      "test": "a skipped predecessor remains linked and warns that its dependency is unmet",
+      "outcome": "expected"
+    }
+  ]
+}
