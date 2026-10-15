@@ -14,9 +14,9 @@ Project Scheduler helps you test project plans against dependencies, milestones,
 
 ## Intro video (76 seconds)
 
-[![Play the Project Scheduler intro video](docs/images/en/intro-video.jpg)](docs/videos/project-scheduler-intro-en.mp4)
+https://github.com/user-attachments/assets/fd70a613-9e62-4203-bf5f-693c0b4662b5
 
-A narrated tour of auto-scheduling, deadline checks and the critical path, resource leveling, version comparison, shareable HTML, and the Skill for AI agents ([Japanese version](docs/videos/project-scheduler-intro-ja.mp4)).
+A narrated tour of auto-scheduling, deadline checks and the critical path, resource leveling, version comparison, shareable HTML, and the Skill for AI agents ([Japanese version](https://github.com/user-attachments/assets/58b1fbd3-8978-463e-85b8-02a540855d73) · [MP4 file](docs/videos/project-scheduler-intro-en.mp4)).
 
 ## What it is for
 

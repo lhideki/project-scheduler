@@ -12,9 +12,9 @@
 
 ## 紹介動画（76秒）
 
-[![Project Schedulerの紹介動画を再生](docs/images/intro-video.jpg)](docs/videos/project-scheduler-intro-ja.mp4)
+https://github.com/user-attachments/assets/58b1fbd3-8978-463e-85b8-02a540855d73
 
-自動スケジューリング、期日チェックとクリティカルパス、リソース平準化、バージョン比較、共有用HTML、AIエージェント向けSkillまでを、ナレーション付きで紹介します（[英語版](docs/videos/project-scheduler-intro-en.mp4)）。
+自動スケジューリング、期日チェックとクリティカルパス、リソース平準化、バージョン比較、共有用HTML、AIエージェント向けSkillまでを、ナレーション付きで紹介します（[英語版](https://github.com/user-attachments/assets/fd70a613-9e62-4203-bf5f-693c0b4662b5)・[MP4ファイル](docs/videos/project-scheduler-intro-ja.mp4)）。
 
 ## このツールの位置付け
 
