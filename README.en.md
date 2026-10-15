@@ -10,6 +10,12 @@ Project Scheduler helps you test project plans against dependencies, milestones,
 
 ![WBS and Gantt view](docs/images/en/wbs-gantt.png)
 
+## Intro video (76 seconds)
+
+[![Play the Project Scheduler intro video](docs/images/en/intro-video.jpg)](docs/videos/project-scheduler-intro-en.mp4)
+
+A narrated tour of auto-scheduling, deadline checks and the critical path, resource leveling, version comparison, shareable HTML, and the Skill for AI agents ([Japanese version](docs/videos/project-scheduler-intro-ja.mp4)).
+
 ## What it is for
 
 Project Scheduler is a planning simulator, not a replacement for collaborative tools such as Jira or Backlog. Use it before entering tasks into those systems, or when a plan changes and you need to explore the impact of dependencies, fixed dates, and resource conflicts.

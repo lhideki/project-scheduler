@@ -10,6 +10,12 @@
 
 ![WBS / ガント](docs/images/wbs-gantt.png)
 
+## 紹介動画（76秒）
+
+[![Project Schedulerの紹介動画を再生](docs/images/intro-video.jpg)](docs/videos/project-scheduler-intro-ja.mp4)
+
+自動スケジューリング、期日チェックとクリティカルパス、リソース平準化、バージョン比較、共有用HTML、AIエージェント向けSkillまでを、ナレーション付きで紹介します（[英語版](docs/videos/project-scheduler-intro-en.mp4)）。
+
 ## このツールの位置付け
 
 Project Schedulerは、JiraやBacklogなどの共同管理ツールを置き換えるものではありません。タスクを登録する前や計画を変更するときに、依存関係、固定期日、担当者の競合を踏まえた日程案を手元で試算するための計画シミュレーターです。
